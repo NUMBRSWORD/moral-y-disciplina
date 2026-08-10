@@ -1,0 +1,2 @@
+export const SUPABASE_URL = "https://tndjulaitywtoocqeeiy.supabase.co";
+export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZGp1bGFpdHl3dG9vY3FlZWl5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzMTM2OTAsImV4cCI6MjEwMTg4OTY5MH0.PS6H11vN4jd_JIhAVVg1VPw4cy8s2L4_7VuTtLUNFiw";
