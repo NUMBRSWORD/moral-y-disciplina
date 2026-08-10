@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Moral y Disciplina</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header id="topbar" class="hidden">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-badge">PNP</span>
+      <span class="brand-title">Moral y Disciplina</span>
+    </div>
+    <nav class="tabs">
+      <button class="tab-btn active" data-view="dashboard">Notas informativas</button>
+      <button class="tab-btn" data-view="efectivos">Efectivos</button>
+    </nav>
+    <div class="user-box">
+      <span id="userEmail"></span>
+      <span id="userRole" class="badge"></span>
+      <button id="btnLogout" class="btn-ghost">Salir</button>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- LOGIN -->
+  <section id="view-login" class="view center-view">
+    <form id="loginForm" class="card login-card">
+      <div class="brand center">
+        <span class="brand-badge lg">PNP</span>
+        <h1>Ingresar</h1>
+        <p class="muted">Ingrese su correo y clave.</p>
+      </div>
+      <label>Correo
+        <input type="email" id="loginEmail" required autocomplete="username" />
+      </label>
+      <label>Clave
+        <input type="password" id="loginPassword" required autocomplete="current-password" />
+      </label>
+      <p id="loginError" class="error hidden"></p>
+      <button type="submit" class="btn-primary">Ingresar</button>
+    </form>
+  </section>
+
+  <!-- DASHBOARD: NOTAS INFORMATIVAS -->
+  <section id="view-dashboard" class="view hidden">
+    <div class="view-header">
+      <h2>Notas informativas</h2>
+      <div class="view-actions">
+        <input id="searchNotas" type="search" placeholder="Buscar por nombre, apellido o N.º de nota..." />
+        <button id="btnNuevaNota" class="btn-primary admin-only hidden">+ Nueva nota</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Grado</th>
+            <th>Apellidos y nombres</th>
+            <th>Fecha falta</th>
+            <th>N.º nota</th>
+            <th>Código infracción</th>
+            <th>Reincorporado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="notasTableBody"></tbody>
+      </table>
+      <p id="notasEmpty" class="muted hidden">No hay notas informativas registradas.</p>
+    </div>
+  </section>
+
+  <!-- EFECTIVOS -->
+  <section id="view-efectivos" class="view hidden">
+    <div class="view-header">
+      <h2>Efectivos (CIP / DNI)</h2>
+      <div class="view-actions">
+        <input id="searchEfectivos" type="search" placeholder="Buscar por CIP, DNI o nombre..." />
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Grado</th>
+            <th>Apellidos y nombres</th>
+            <th>CIP</th>
+            <th>DNI</th>
+          </tr>
+        </thead>
+        <tbody id="efectivosTableBody"></tbody>
+      </table>
+      <p id="efectivosEmpty" class="muted hidden">Sin resultados.</p>
+    </div>
+  </section>
+
+  <!-- DETALLE / EDICION NOTA -->
+  <section id="view-nota-detail" class="view hidden">
+    <div class="view-header">
+      <button id="btnVolverDashboard" class="btn-ghost">&larr; Volver</button>
+    </div>
+    <div id="notaDetailContent"></div>
+  </section>
+
+</main>
+
+<!-- MODAL NUEVA NOTA -->
+<div id="modalNuevaNota" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Nueva nota informativa</h3>
+      <button id="btnCerrarModal" class="btn-ghost">✕</button>
+    </div>
+    <form id="notaForm" class="modal-body">
+      <div class="lookup-row">
+        <label class="grow">Buscar efectivo por CIP o DNI
+          <input type="text" id="lookupCipDni" placeholder="Ej. 337635 o 40482528" />
+        </label>
+        <button type="button" id="btnBuscarEfectivo" class="btn-secondary">Buscar</button>
+      </div>
+      <p id="lookupResult" class="muted small hidden"></p>
+
+      <div class="grid-2">
+        <label>Grado
+          <input type="text" id="fGrado" required />
+        </label>
+        <label>Código de infracción
+          <input type="text" id="fCodigoInfraccion" required />
+        </label>
+      </div>
+      <div class="grid-2">
+        <label>Apellidos
+          <input type="text" id="fApellidos" required />
+        </label>
+        <label>Nombres
+          <input type="text" id="fNombres" required />
+        </label>
+      </div>
+      <div class="grid-2">
+        <label>Fecha de falta
+          <input type="date" id="fFechaFalta" required />
+        </label>
+        <label>N.º de nota de falta
+          <input type="text" id="fNumeroNotaFalta" required />
+        </label>
+      </div>
+      <label>Oficial que constató
+        <input type="text" id="fOficialConstato" />
+      </label>
+      <label>Archivo de la nota (PDF/imagen)
+        <input type="file" id="fArchivoNota" />
+      </label>
+      <p id="notaFormError" class="error hidden"></p>
+      <div class="modal-actions">
+        <button type="button" id="btnCancelarNota" class="btn-ghost">Cancelar</button>
+        <button type="submit" class="btn-primary">Guardar nota</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
