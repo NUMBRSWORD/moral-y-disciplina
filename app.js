@@ -431,7 +431,10 @@ function extractPersonCandidates(norm) {
     return bullets.map((m) => ({ grado: m[1].trim(), nombreCompleto: m[2].trim() }));
   }
 
-  const prosePattern = /\bde(?:l|\s+los|\s+las)\s+([A-Z0-9./]{1,8}\s+PNP\s+[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+){0,5})[.,]/gi;
+  // Admite "del", "de la", "de los", "de las" y también "de" sin artículo.
+  // El nombre termina en coma/punto, justo antes de la siguiente mención
+  // "NOTA INFORMATIVA", o al final del texto (partes sin puntuación ahí).
+  const prosePattern = /\bde(?:l|\s+la|\s+los|\s+las)?\s+([A-Z0-9./]{1,8}\s+PNP\s+[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+){0,5})(?=[.,]|\s+NOTA\s+INFORMATIVA|\s*$)/gi;
   const matches = [...norm.matchAll(prosePattern)];
   let best = null;
   let bestWordCount = -1;
@@ -667,14 +670,21 @@ function normalizarNombre(apellidos, nombres) {
 
 // Empareja primero por el N.º de la nota de falta original (campo REF. del PDF
 // de reincorporación) porque es exacto; si no está disponible, cae al nombre.
+// Si varias notas pendientes comparten ese N.º (falta grupal con varios
+// efectivos aún no reincorporados), se desambigua por nombre entre ellas.
 function buscarNotaPendiente(numeroFaltaRef, candidate) {
+  const pendientes = state.notas.filter((n) => !n.fecha_reincorporacion);
+  const objetivo = candidate ? normalizarNombre(candidate.apellidos, candidate.nombres) : null;
+
   if (numeroFaltaRef) {
-    const porNumero = state.notas.find((n) => !n.fecha_reincorporacion && n.numero_nota_falta === numeroFaltaRef);
-    if (porNumero) return porNumero;
+    const porNumero = pendientes.filter((n) => n.numero_nota_falta === numeroFaltaRef);
+    if (porNumero.length === 1) return porNumero[0];
+    if (porNumero.length > 1) {
+      return objetivo ? porNumero.find((n) => normalizarNombre(n.apellidos, n.nombres) === objetivo) || null : null;
+    }
   }
-  if (candidate) {
-    const objetivo = normalizarNombre(candidate.apellidos, candidate.nombres);
-    return state.notas.find((n) => !n.fecha_reincorporacion && normalizarNombre(n.apellidos, n.nombres) === objetivo) || null;
+  if (objetivo) {
+    return pendientes.find((n) => normalizarNombre(n.apellidos, n.nombres) === objetivo) || null;
   }
   return null;
 }
