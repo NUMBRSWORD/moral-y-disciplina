@@ -116,6 +116,9 @@ function renderNotasTable(list) {
       <td>${escapeHtml(n.apellidos || "")} ${escapeHtml(n.nombres || "")}</td>
       <td>${formatDate(n.fecha_falta)}</td>
       <td>${escapeHtml(n.numero_nota_falta || "")}</td>
+      <td>${formatDate(n.fecha_reincorporacion)}</td>
+      <td>${escapeHtml(n.numero_nota_reincorporacion || "-")}</td>
+      <td>${formatearHorasFalto(n) || "-"}</td>
       <td>${escapeHtml(n.codigo_infraccion || "")}</td>
       <td>${n.fecha_reincorporacion ? '<span class="pill pill-yes">Sí</span>' : '<span class="pill pill-no">Pendiente</span>'}</td>
       <td>›</td>
@@ -167,6 +170,7 @@ async function renderNotaDetail(nota) {
       <h3>${escapeHtml(nota.grado || "")} ${escapeHtml(nota.apellidos || "")} ${escapeHtml(nota.nombres || "")}</h3>
       <div class="detail-grid">
         <div class="detail-field"><div class="label">Fecha de falta</div><div class="value">${formatDate(nota.fecha_falta)}</div></div>
+        <div class="detail-field"><div class="label">Hora de falta</div><div class="value">${escapeHtml(nota.hora_falta || "-")}</div></div>
         <div class="detail-field"><div class="label">N.º de nota</div><div class="value">${escapeHtml(nota.numero_nota_falta || "-")}</div></div>
         <div class="detail-field">
           <div class="label">Código de infracción</div>
@@ -191,7 +195,9 @@ async function renderNotaDetail(nota) {
       ${nota.fecha_reincorporacion ? `
         <div class="detail-grid">
           <div class="detail-field"><div class="label">Fecha de reincorporación</div><div class="value">${formatDate(nota.fecha_reincorporacion)}</div></div>
+          <div class="detail-field"><div class="label">Hora de reincorporación</div><div class="value">${escapeHtml(nota.hora_reincorporacion || "-")}</div></div>
           <div class="detail-field"><div class="label">N.º de nota de reincorporación</div><div class="value">${escapeHtml(nota.numero_nota_reincorporacion || "-")}</div></div>
+          <div class="detail-field"><div class="label">Tiempo ausente</div><div class="value">${formatearHorasFalto(nota) || "-"}</div></div>
           <div class="detail-field"><div class="label">Archivo</div><div class="value">${reincArchivo}</div></div>
         </div>
       ` : `
@@ -202,6 +208,7 @@ async function renderNotaDetail(nota) {
             <label>Fecha de reincorporación<input type="date" id="rFecha" required /></label>
             <label>N.º de nota de reincorporación<input type="text" id="rNumero" required /></label>
           </div>
+          <label>Hora de reincorporación<input type="time" id="rHora" /></label>
           <label>Archivo de reincorporación<input type="file" id="rArchivo" accept="application/pdf,image/*" /></label>
           <p id="reincAutoStatus" class="muted small hidden"></p>
           <p id="reincError" class="error hidden"></p>
@@ -269,6 +276,7 @@ async function submitReincorporacion(e, notaId) {
   errEl.classList.add("hidden");
   const fecha = $("rFecha").value;
   const numero = $("rNumero").value.trim();
+  const hora = $("rHora").value || null;
   const file = $("rArchivo").files[0];
 
   let archivo_reincorporacion_path = null;
@@ -284,6 +292,7 @@ async function submitReincorporacion(e, notaId) {
   const { error } = await supabase.from("notas_informativas").update({
     fecha_reincorporacion: fecha,
     numero_nota_reincorporacion: numero,
+    hora_reincorporacion: hora,
     ...(archivo_reincorporacion_path ? { archivo_reincorporacion_path, archivo_reincorporacion_nombre } : {}),
   }).eq("id", notaId);
 
@@ -466,6 +475,10 @@ function parseNotaInformativa(text) {
     result.fecha_falta = `${mFecha[3]}-${mm}-${dd}`;
   }
 
+  // Hora en que se pasó lista y se constató la ausencia.
+  const mHora = norm.match(/a\s+horas\s+(\d{1,2}:\d{2})\s*,?\s*constat[oó]/i);
+  if (mHora) result.hora_falta = mHora[1];
+
   result.candidates = extractPersonCandidates(norm).map((c) => ({
     grado: c.grado,
     ...splitApellidosNombres(c.nombreCompleto),
@@ -533,6 +546,7 @@ async function autocompletarReincorporacion(file) {
     const data = parseReincorporacion(text);
     if (data.fecha_reincorporacion && !$("rFecha").value) $("rFecha").value = data.fecha_reincorporacion;
     if (data.numero_nota_reincorporacion && !$("rNumero").value) $("rNumero").value = data.numero_nota_reincorporacion;
+    if (data.hora_reincorporacion && !$("rHora").value) $("rHora").value = data.hora_reincorporacion;
     if (data.fecha_reincorporacion) {
       statusEl.textContent = `Datos autocompletados desde el PDF (reincorporación: ${formatDate(data.fecha_reincorporacion)}${data.hora_reincorporacion ? " a las " + data.hora_reincorporacion + " horas" : ""}). Verifique antes de guardar.`;
     } else {
@@ -562,6 +576,7 @@ async function autocompletarDesdeArchivo(file) {
     if (data.nombres && !$("fNombres").value) $("fNombres").value = data.nombres;
     if (data.fecha_falta && !$("fFechaFalta").value) $("fFechaFalta").value = data.fecha_falta;
     if (data.numero_nota_falta && !$("fNumeroNotaFalta").value) $("fNumeroNotaFalta").value = data.numero_nota_falta;
+    if (data.hora_falta && !$("fHoraFalta").value) $("fHoraFalta").value = data.hora_falta;
     if (data.oficial_constato && !$("fOficialConstato").value) $("fOficialConstato").value = data.oficial_constato;
     pdfCandidates = data.candidates || [];
     renderCandidatesChecklist();
@@ -614,6 +629,7 @@ $("notaForm").addEventListener("submit", async (e) => {
   const compartido = {
     fecha_falta: $("fFechaFalta").value,
     numero_nota_falta: $("fNumeroNotaFalta").value.trim(),
+    hora_falta: $("fHoraFalta").value || null,
     codigo_infraccion: $("fCodigoInfraccion").value.trim(),
     oficial_constato: $("fOficialConstato").value.trim() || null,
     created_by: state.session.user.id,
@@ -704,9 +720,10 @@ function renderReincLoteList() {
         <label class="checkbox-row"><input type="checkbox" class="rlCheck" ${f.nota ? "checked" : "disabled"} /></label>
         <div class="value" style="flex:1">
           <div>${nombreLinea} <span class="muted small">(${escapeHtml(f.file.name)})</span></div>
-          <div class="grid-2" style="margin-top:6px">
-            <input type="date" class="rlFechaRow" value="${escapeHtml(f.fecha_reincorporacion)}" />
-            <input type="text" class="rlNumeroRow" value="${escapeHtml(f.numero_nota_reincorporacion)}" placeholder="N.º nota de reincorporación" />
+          <div style="display:flex; gap:8px; margin-top:6px">
+            <input type="date" class="rlFechaRow" value="${escapeHtml(f.fecha_reincorporacion)}" style="flex:1" />
+            <input type="time" class="rlHoraRow" value="${escapeHtml(f.hora_reincorporacion)}" style="flex:1" />
+            <input type="text" class="rlNumeroRow" value="${escapeHtml(f.numero_nota_reincorporacion)}" placeholder="N.º nota de reincorporación" style="flex:1" />
           </div>
           ${pill}
         </div>
@@ -750,6 +767,7 @@ $("rlArchivo").addEventListener("change", async (e) => {
         file,
         fecha_reincorporacion: doc.fecha_reincorporacion || "",
         numero_nota_reincorporacion: doc.numero_nota_reincorporacion || "",
+        hora_reincorporacion: doc.hora_reincorporacion || "",
       };
       if (candidates.length) {
         for (const candidate of candidates) {
@@ -809,10 +827,12 @@ $("btnGuardarReincLote").addEventListener("click", async () => {
   for (const { row, fila } of seleccionados) {
     const fecha = row.querySelector(".rlFechaRow").value;
     const numero = row.querySelector(".rlNumeroRow").value.trim();
+    const hora = row.querySelector(".rlHoraRow").value || null;
     const archivo = archivosSubidos.get(fila.file);
     const { error } = await supabase.from("notas_informativas").update({
       fecha_reincorporacion: fecha,
       numero_nota_reincorporacion: numero,
+      hora_reincorporacion: hora,
       ...(archivo ? { archivo_reincorporacion_path: archivo.path, archivo_reincorporacion_nombre: archivo.nombre } : {}),
     }).eq("id", fila.nota.id);
     if (error) ultimoError = error;
@@ -838,4 +858,20 @@ function formatDate(d) {
   if (!d) return "-";
   const [y, m, day] = d.split("-");
   return `${day}/${m}/${y}`;
+}
+function formatearHorasFalto(nota) {
+  if (!nota.fecha_falta || !nota.hora_falta || !nota.fecha_reincorporacion || !nota.hora_reincorporacion) return null;
+  const inicio = new Date(`${nota.fecha_falta}T${nota.hora_falta}`);
+  const fin = new Date(`${nota.fecha_reincorporacion}T${nota.hora_reincorporacion}`);
+  const ms = fin - inicio;
+  if (Number.isNaN(ms) || ms < 0) return null;
+  const totalMin = Math.round(ms / 60000);
+  const dias = Math.floor(totalMin / 1440);
+  const horas = Math.floor((totalMin % 1440) / 60);
+  const min = totalMin % 60;
+  const partes = [];
+  if (dias) partes.push(`${dias}d`);
+  partes.push(`${horas}h`);
+  partes.push(`${min}m`);
+  return partes.join(" ");
 }
