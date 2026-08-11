@@ -176,22 +176,14 @@
 <div id="modalReincorporacionLote" class="modal-overlay hidden">
   <div class="modal">
     <div class="modal-header">
-      <h3>Reincorporación desde PDF grupal</h3>
+      <h3>Reincorporación desde PDF</h3>
       <button id="btnCerrarModalReinc" class="btn-ghost">✕</button>
     </div>
     <div class="modal-body">
-      <label>Archivo de reincorporación (PDF)
-        <input type="file" id="rlArchivo" accept="application/pdf" />
+      <label>Archivo(s) de reincorporación (PDF) — puede seleccionar varios a la vez, uno por efectivo o uno grupal
+        <input type="file" id="rlArchivo" accept="application/pdf" multiple />
       </label>
       <p id="rlStatus" class="muted small hidden"></p>
-      <div class="grid-2">
-        <label>Fecha de reincorporación
-          <input type="date" id="rlFecha" required />
-        </label>
-        <label>N.º de nota de reincorporación
-          <input type="text" id="rlNumero" required />
-        </label>
-      </div>
       <div id="rlLista"></div>
       <p id="rlError" class="error hidden"></p>
       <div class="modal-actions">
