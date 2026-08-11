@@ -157,6 +157,10 @@ tbody tr:last-child td { border-bottom: none; }
 .file-link { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
 .file-link:hover { text-decoration: underline; }
 
+.inline-edit { display: flex; gap: 8px; align-items: center; }
+.inline-edit input { margin: 0; }
+.inline-edit button { padding: 8px 12px; white-space: nowrap; }
+
 @media (max-width: 640px) {
   .grid-2, .detail-grid { grid-template-columns: 1fr; }
   .topbar-inner { flex-wrap: wrap; }

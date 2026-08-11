@@ -168,7 +168,18 @@ async function renderNotaDetail(nota) {
       <div class="detail-grid">
         <div class="detail-field"><div class="label">Fecha de falta</div><div class="value">${formatDate(nota.fecha_falta)}</div></div>
         <div class="detail-field"><div class="label">N.º de nota</div><div class="value">${escapeHtml(nota.numero_nota_falta || "-")}</div></div>
-        <div class="detail-field"><div class="label">Código de infracción</div><div class="value">${escapeHtml(nota.codigo_infraccion || "-")}</div></div>
+        <div class="detail-field">
+          <div class="label">Código de infracción</div>
+          <div class="value">
+            ${isAdmin ? `
+              <form id="codigoInfraccionForm" class="inline-edit">
+                <input type="text" id="fCodigoInfraccionEdit" value="${escapeHtml(nota.codigo_infraccion || "")}" placeholder="Pendiente" />
+                <button type="submit" class="btn-secondary">Guardar</button>
+              </form>
+              <p id="codigoInfraccionMsg" class="error small hidden"></p>
+            ` : escapeHtml(nota.codigo_infraccion || "Pendiente")}
+          </div>
+        </div>
         <div class="detail-field"><div class="label">Oficial que constató</div><div class="value">${escapeHtml(nota.oficial_constato || "-")}</div></div>
         <div class="detail-field"><div class="label">Archivo de la nota</div><div class="value">${notaArchivo}</div></div>
       </div>
@@ -227,10 +238,21 @@ async function renderNotaDetail(nota) {
 
   if (isAdmin) {
     $("btnEliminarNota")?.addEventListener("click", () => eliminarNota(nota.id));
+    $("codigoInfraccionForm")?.addEventListener("submit", (e) => submitCodigoInfraccion(e, nota.id));
     $("reincForm")?.addEventListener("submit", (e) => submitReincorporacion(e, nota.id));
     $("rArchivo")?.addEventListener("change", (e) => autocompletarReincorporacion(e.target.files[0]));
     $("expForm")?.addEventListener("submit", (e) => submitExpediente(e, nota.id));
   }
+}
+
+async function submitCodigoInfraccion(e, notaId) {
+  e.preventDefault();
+  const msgEl = $("codigoInfraccionMsg");
+  msgEl.classList.add("hidden");
+  const codigo_infraccion = $("fCodigoInfraccionEdit").value.trim();
+  const { error } = await supabase.from("notas_informativas").update({ codigo_infraccion }).eq("id", notaId);
+  if (error) { msgEl.textContent = "Error: " + error.message; msgEl.classList.remove("hidden"); return; }
+  openNotaDetail(notaId);
 }
 
 async function eliminarNota(id) {
