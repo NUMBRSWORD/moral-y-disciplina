@@ -53,6 +53,7 @@
       <h2>Notas informativas</h2>
       <div class="view-actions">
         <input id="searchNotas" type="search" placeholder="Buscar por nombre, apellido o N.º de nota..." />
+        <button id="btnReincorporacionLote" class="btn-secondary admin-only hidden">Reincorporación (PDF grupal)</button>
         <button id="btnNuevaNota" class="btn-primary admin-only hidden">+ Nueva nota</button>
       </div>
     </div>
@@ -168,6 +169,36 @@
         <button type="submit" class="btn-primary">Guardar nota</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- MODAL REINCORPORACION EN LOTE -->
+<div id="modalReincorporacionLote" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Reincorporación desde PDF grupal</h3>
+      <button id="btnCerrarModalReinc" class="btn-ghost">✕</button>
+    </div>
+    <div class="modal-body">
+      <label>Archivo de reincorporación (PDF)
+        <input type="file" id="rlArchivo" accept="application/pdf" />
+      </label>
+      <p id="rlStatus" class="muted small hidden"></p>
+      <div class="grid-2">
+        <label>Fecha de reincorporación
+          <input type="date" id="rlFecha" required />
+        </label>
+        <label>N.º de nota de reincorporación
+          <input type="text" id="rlNumero" required />
+        </label>
+      </div>
+      <div id="rlLista"></div>
+      <p id="rlError" class="error hidden"></p>
+      <div class="modal-actions">
+        <button type="button" id="btnCancelarReincLote" class="btn-ghost">Cancelar</button>
+        <button type="button" id="btnGuardarReincLote" class="btn-primary">Registrar reincorporación</button>
+      </div>
+    </div>
   </div>
 </div>
 
