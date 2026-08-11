@@ -114,9 +114,10 @@ function renderNotasTable(list) {
     tr.innerHTML = `
       <td>${escapeHtml(n.grado || "")}</td>
       <td>${escapeHtml(n.apellidos || "")} ${escapeHtml(n.nombres || "")}</td>
-      <td>${formatDate(n.fecha_falta)}</td>
+      <td>${formatFechaHora(n.fecha_falta, n.hora_falta)}</td>
       <td>${escapeHtml(n.numero_nota_falta || "")}</td>
-      <td>${formatDate(n.fecha_reincorporacion)}</td>
+      <td>${escapeHtml(n.oficial_constato || "-")}</td>
+      <td>${formatFechaHora(n.fecha_reincorporacion, n.hora_reincorporacion)}</td>
       <td>${escapeHtml(n.numero_nota_reincorporacion || "-")}</td>
       <td>${formatearHorasFalto(n) || "-"}</td>
       <td>${escapeHtml(n.codigo_infraccion || "")}</td>
@@ -170,7 +171,7 @@ async function renderNotaDetail(nota) {
       <h3>${escapeHtml(nota.grado || "")} ${escapeHtml(nota.apellidos || "")} ${escapeHtml(nota.nombres || "")}</h3>
       <div class="detail-grid">
         <div class="detail-field"><div class="label">Fecha de falta</div><div class="value">${formatDate(nota.fecha_falta)}</div></div>
-        <div class="detail-field"><div class="label">Hora de falta</div><div class="value">${escapeHtml(nota.hora_falta || "-")}</div></div>
+        <div class="detail-field"><div class="label">Hora de falta</div><div class="value">${escapeHtml((nota.hora_falta || "").slice(0, 5) || "-")}</div></div>
         <div class="detail-field"><div class="label">N.º de nota</div><div class="value">${escapeHtml(nota.numero_nota_falta || "-")}</div></div>
         <div class="detail-field">
           <div class="label">Código de infracción</div>
@@ -195,7 +196,7 @@ async function renderNotaDetail(nota) {
       ${nota.fecha_reincorporacion ? `
         <div class="detail-grid">
           <div class="detail-field"><div class="label">Fecha de reincorporación</div><div class="value">${formatDate(nota.fecha_reincorporacion)}</div></div>
-          <div class="detail-field"><div class="label">Hora de reincorporación</div><div class="value">${escapeHtml(nota.hora_reincorporacion || "-")}</div></div>
+          <div class="detail-field"><div class="label">Hora de reincorporación</div><div class="value">${escapeHtml((nota.hora_reincorporacion || "").slice(0, 5) || "-")}</div></div>
           <div class="detail-field"><div class="label">N.º de nota de reincorporación</div><div class="value">${escapeHtml(nota.numero_nota_reincorporacion || "-")}</div></div>
           <div class="detail-field"><div class="label">Tiempo ausente</div><div class="value">${formatearHorasFalto(nota) || "-"}</div></div>
           <div class="detail-field"><div class="label">Archivo</div><div class="value">${reincArchivo}</div></div>
@@ -858,6 +859,11 @@ function formatDate(d) {
   if (!d) return "-";
   const [y, m, day] = d.split("-");
   return `${day}/${m}/${y}`;
+}
+function formatFechaHora(fecha, hora) {
+  const f = formatDate(fecha);
+  if (f === "-") return "-";
+  return hora ? `${f} ${hora.slice(0, 5)}` : f;
 }
 function formatearHorasFalto(nota) {
   if (!nota.fecha_falta || !nota.hora_falta || !nota.fecha_reincorporacion || !nota.hora_reincorporacion) return null;
