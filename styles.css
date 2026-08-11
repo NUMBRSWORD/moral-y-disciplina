@@ -161,6 +161,16 @@ tbody tr:last-child td { border-bottom: none; }
 .inline-edit input { margin: 0; }
 .inline-edit button { padding: 8px 12px; white-space: nowrap; }
 
+.multi-efectivo-row {
+  display: flex; gap: 10px; align-items: center;
+  padding: 10px; margin-bottom: 8px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
+}
+.multi-efectivo-row .checkbox-row { flex-direction: row; align-items: center; gap: 6px; margin: 0; width: auto; }
+.multi-efectivo-row .checkbox-row input { width: auto; }
+.grid-3 { display: grid; grid-template-columns: 1fr 2fr 2fr; gap: 0 10px; flex: 1; }
+.grid-3 input { margin: 0; }
+
 @media (max-width: 640px) {
   .grid-2, .detail-grid { grid-template-columns: 1fr; }
   .topbar-inner { flex-wrap: wrap; }

@@ -354,11 +354,15 @@ $("searchEfectivos").addEventListener("input", (e) => {
 });
 
 // ---------- Nueva nota modal ----------
+let pdfCandidates = [];
+
 $("btnNuevaNota").addEventListener("click", () => {
   $("notaForm").reset();
   $("lookupResult").classList.add("hidden");
   $("notaFormError").classList.add("hidden");
   $("pdfAutoStatus").classList.add("hidden");
+  pdfCandidates = [];
+  renderCandidatesChecklist();
   $("modalNuevaNota").classList.remove("hidden");
 });
 $("btnCerrarModal").addEventListener("click", closeModal);
@@ -374,6 +378,27 @@ function splitApellidosNombres(full) {
   const words = txt.split(/\s+/).filter(Boolean);
   if (words.length <= 2) return { apellidos: txt, nombres: "" };
   return { apellidos: words.slice(0, 2).join(" "), nombres: words.slice(2).join(" ") };
+}
+
+function renderCandidatesChecklist() {
+  const container = $("multiplesEfectivos");
+  const list = $("multiplesEfectivosList");
+  if (pdfCandidates.length <= 1) {
+    container.classList.add("hidden");
+    list.innerHTML = "";
+    return;
+  }
+  list.innerHTML = pdfCandidates.slice(1).map((c) => `
+    <div class="multi-efectivo-row">
+      <label class="checkbox-row"><input type="checkbox" class="multiCheck" checked /></label>
+      <div class="grid-3">
+        <input type="text" class="multiGrado" value="${escapeHtml(c.grado)}" placeholder="Grado" />
+        <input type="text" class="multiApellidos" value="${escapeHtml(c.apellidos)}" placeholder="Apellidos" />
+        <input type="text" class="multiNombres" value="${escapeHtml(c.nombres)}" placeholder="Nombres" />
+      </div>
+    </div>
+  `).join("");
+  container.classList.remove("hidden");
 }
 
 // ---------- Autocompletado desde PDF (Nota Informativa) ----------
@@ -394,6 +419,36 @@ async function extractPdfText(file) {
   return text;
 }
 
+// Extrae los efectivos mencionados en la nota. Prioriza la lista con viñetas
+// ("- GRADO PNP NOMBRE"), usada cuando hay varios efectivos faltos; si no hay
+// viñetas, cae a la frase "... del/de los/de las GRADO PNP NOMBRE" y entre
+// todas sus menciones toma la de más palabras (el PDF a veces pega el
+// apellido sin espacio en una mención pero lo repite bien espaciado en otra).
+function extractPersonCandidates(norm) {
+  const bulletPattern = /-\s*([A-Z0-9./]{1,8})\s+PNP\.?\s+([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}){0,4})/g;
+  const bullets = [...norm.matchAll(bulletPattern)];
+  if (bullets.length) {
+    return bullets.map((m) => ({ grado: m[1].trim(), nombreCompleto: m[2].trim() }));
+  }
+
+  const prosePattern = /\bde(?:l|\s+los|\s+las)\s+([A-Z0-9./]{1,8}\s+PNP\s+[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+){0,5})[.,]/gi;
+  const matches = [...norm.matchAll(prosePattern)];
+  let best = null;
+  let bestWordCount = -1;
+  for (const m of matches) {
+    const raw = m[1].trim();
+    const idxPnp = raw.toUpperCase().indexOf("PNP");
+    if (idxPnp === -1) continue;
+    const nombreCompleto = raw.slice(idxPnp + 3).trim();
+    const wordCount = nombreCompleto.split(/\s+/).filter(Boolean).length;
+    if (wordCount > bestWordCount) {
+      bestWordCount = wordCount;
+      best = { grado: raw.slice(0, idxPnp).trim(), nombreCompleto };
+    }
+  }
+  return best ? [best] : [];
+}
+
 function parseNotaInformativa(text) {
   const norm = text.replace(/\s+/g, " ");
   const result = {};
@@ -408,28 +463,14 @@ function parseNotaInformativa(text) {
     result.fecha_falta = `${mFecha[3]}-${mm}-${dd}`;
   }
 
-  // Busca todas las menciones "del <GRADO> PNP <NOMBRE>" y usa la que tenga
-  // más palabras: el PDF a veces pega el apellido sin espacio en una mención
-  // pero lo repite bien espaciado en otra.
-  const nameMatches = [...norm.matchAll(/\bdel\s+([A-Z0-9./]{1,8}\s+PNP\s+[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+){0,5})[.,]/g)];
-  let best = null;
-  let bestWordCount = -1;
-  for (const m of nameMatches) {
-    const raw = m[1].trim();
-    const idxPnp = raw.toUpperCase().indexOf("PNP");
-    if (idxPnp === -1) continue;
-    const nombreCompleto = raw.slice(idxPnp + 3).trim();
-    const wordCount = nombreCompleto.split(/\s+/).filter(Boolean).length;
-    if (wordCount > bestWordCount) {
-      bestWordCount = wordCount;
-      best = { grado: raw.slice(0, idxPnp).trim(), nombreCompleto };
-    }
-  }
-  if (best) {
-    result.grado = best.grado;
-    const { apellidos, nombres } = splitApellidosNombres(best.nombreCompleto);
-    result.apellidos = apellidos;
-    result.nombres = nombres;
+  result.candidates = extractPersonCandidates(norm).map((c) => ({
+    grado: c.grado,
+    ...splitApellidosNombres(c.nombreCompleto),
+  }));
+  if (result.candidates.length) {
+    result.grado = result.candidates[0].grado;
+    result.apellidos = result.candidates[0].apellidos;
+    result.nombres = result.candidates[0].nombres;
   }
 
   // El oficial que constató suele mencionarse justo antes de la palabra "constató".
@@ -505,6 +546,8 @@ async function autocompletarDesdeArchivo(file) {
   }
   statusEl.textContent = "Leyendo PDF...";
   statusEl.classList.remove("hidden");
+  pdfCandidates = [];
+  renderCandidatesChecklist();
   try {
     const text = await extractPdfText(file);
     const data = parseNotaInformativa(text);
@@ -514,9 +557,17 @@ async function autocompletarDesdeArchivo(file) {
     if (data.fecha_falta && !$("fFechaFalta").value) $("fFechaFalta").value = data.fecha_falta;
     if (data.numero_nota_falta && !$("fNumeroNotaFalta").value) $("fNumeroNotaFalta").value = data.numero_nota_falta;
     if (data.oficial_constato && !$("fOficialConstato").value) $("fOficialConstato").value = data.oficial_constato;
-    statusEl.textContent = Object.keys(data).length
-      ? "Datos autocompletados desde el PDF. Verifique antes de guardar (falta el código de infracción)."
-      : "No se pudieron extraer datos del PDF. Complete el formulario manualmente.";
+    pdfCandidates = data.candidates || [];
+    renderCandidatesChecklist();
+    if (Object.keys(data).length) {
+      let msg = "Datos autocompletados desde el PDF. Verifique antes de guardar (falta el código de infracción).";
+      if (pdfCandidates.length > 1) {
+        msg += ` Se detectaron ${pdfCandidates.length} efectivos en este PDF — revise la lista de abajo y desmarque los que no correspondan; se creará una nota para cada uno marcado.`;
+      }
+      statusEl.textContent = msg;
+    } else {
+      statusEl.textContent = "No se pudieron extraer datos del PDF. Complete el formulario manualmente.";
+    }
   } catch (err) {
     console.error(err);
     statusEl.textContent = "No se pudo leer el PDF automáticamente. Complete el formulario manualmente.";
@@ -554,10 +605,7 @@ $("notaForm").addEventListener("submit", async (e) => {
   const errEl = $("notaFormError");
   errEl.classList.add("hidden");
 
-  const payload = {
-    grado: $("fGrado").value.trim(),
-    apellidos: $("fApellidos").value.trim(),
-    nombres: $("fNombres").value.trim(),
+  const compartido = {
     fecha_falta: $("fFechaFalta").value,
     numero_nota_falta: $("fNumeroNotaFalta").value.trim(),
     codigo_infraccion: $("fCodigoInfraccion").value.trim(),
@@ -565,25 +613,44 @@ $("notaForm").addEventListener("submit", async (e) => {
     created_by: state.session.user.id,
   };
 
+  const personas = [{
+    grado: $("fGrado").value.trim(),
+    apellidos: $("fApellidos").value.trim(),
+    nombres: $("fNombres").value.trim(),
+  }];
+
+  if (pdfCandidates.length > 1) {
+    document.querySelectorAll("#multiplesEfectivosList .multi-efectivo-row").forEach((row) => {
+      if (!row.querySelector(".multiCheck").checked) return;
+      personas.push({
+        grado: row.querySelector(".multiGrado").value.trim(),
+        apellidos: row.querySelector(".multiApellidos").value.trim(),
+        nombres: row.querySelector(".multiNombres").value.trim(),
+      });
+    });
+  }
+
+  const payloads = personas.map((p) => ({ ...compartido, ...p }));
+
   const { data: inserted, error } = await supabase
     .from("notas_informativas")
-    .insert(payload)
-    .select()
-    .single();
+    .insert(payloads)
+    .select();
 
   if (error) { errEl.textContent = "Error: " + error.message; errEl.classList.remove("hidden"); return; }
 
   const file = $("fArchivoNota").files[0];
-  if (file) {
-    const path = `${inserted.id}/${Date.now()}_${file.name}`;
+  if (file && inserted?.length) {
+    const path = `${inserted[0].id}/${Date.now()}_${file.name}`;
     const { error: upErr } = await supabase.storage.from("notas").upload(path, file);
     if (!upErr) {
-      await supabase.from("notas_informativas").update({
-        archivo_nota_path: path, archivo_nota_nombre: file.name,
-      }).eq("id", inserted.id);
+      await supabase.from("notas_informativas")
+        .update({ archivo_nota_path: path, archivo_nota_nombre: file.name })
+        .in("id", inserted.map((n) => n.id));
     }
   }
 
+  pdfCandidates = [];
   closeModal();
   loadNotas();
 });
