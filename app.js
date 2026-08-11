@@ -495,8 +495,11 @@ function parseReincorporacion(text) {
   const norm = text.replace(/\s+/g, " ");
   const result = {};
 
-  const mNumero = norm.match(/NOTA\s+INFORMATIVA\s+N[°ºo]\s*([0-9]+)/i);
-  if (mNumero) result.numero_nota_reincorporacion = mNumero[1];
+  // El propio número de nota aparece primero; el número de la nota de falta
+  // original referenciada en "REF." aparece como la segunda mención.
+  const notaNumberMatches = [...norm.matchAll(/NOTA\s+INFORMATIVA\s+N[°ºo]\s*([0-9]+)/gi)];
+  if (notaNumberMatches[0]) result.numero_nota_reincorporacion = notaNumberMatches[0][1];
+  if (notaNumberMatches[1]) result.numero_nota_falta_ref = notaNumberMatches[1][1];
 
   // Ancla en "reincorpor..." y toma la fecha/hora más cercana que sigue, para no
   // confundirla con la fecha de la falta original que suele aparecer después en el mismo párrafo.
@@ -655,41 +658,58 @@ $("notaForm").addEventListener("submit", async (e) => {
   loadNotas();
 });
 
-// ---------- Reincorporación en lote (PDF grupal) ----------
-let reincLoteMatches = [];
+// ---------- Reincorporación desde PDF (uno o varios archivos) ----------
+let reincLoteFilas = [];
 
 function normalizarNombre(apellidos, nombres) {
   return `${apellidos} ${nombres}`.toUpperCase().replace(/\s+/g, " ").trim();
 }
 
-function buscarNotaPendiente(candidate) {
-  const objetivo = normalizarNombre(candidate.apellidos, candidate.nombres);
-  return state.notas.find((n) => !n.fecha_reincorporacion && normalizarNombre(n.apellidos, n.nombres) === objetivo) || null;
+// Empareja primero por el N.º de la nota de falta original (campo REF. del PDF
+// de reincorporación) porque es exacto; si no está disponible, cae al nombre.
+function buscarNotaPendiente(numeroFaltaRef, candidate) {
+  if (numeroFaltaRef) {
+    const porNumero = state.notas.find((n) => !n.fecha_reincorporacion && n.numero_nota_falta === numeroFaltaRef);
+    if (porNumero) return porNumero;
+  }
+  if (candidate) {
+    const objetivo = normalizarNombre(candidate.apellidos, candidate.nombres);
+    return state.notas.find((n) => !n.fecha_reincorporacion && normalizarNombre(n.apellidos, n.nombres) === objetivo) || null;
+  }
+  return null;
 }
 
 function renderReincLoteList() {
   const el = $("rlLista");
-  if (!reincLoteMatches.length) { el.innerHTML = ""; return; }
-  el.innerHTML = reincLoteMatches.map((m) => `
-    <div class="multi-efectivo-row">
-      <label class="checkbox-row"><input type="checkbox" class="rlCheck" ${m.nota ? "checked" : "disabled"} /></label>
-      <div class="value" style="flex:1">
-        ${escapeHtml(m.candidate.grado)} ${escapeHtml(m.candidate.apellidos)} ${escapeHtml(m.candidate.nombres)}
-        ${m.nota
-          ? `<span class="pill pill-yes">Nota encontrada — falta ${formatDate(m.nota.fecha_falta)} · N.º ${escapeHtml(m.nota.numero_nota_falta || "-")}</span>`
-          : `<span class="pill pill-no">No se encontró una nota pendiente con este nombre</span>`}
+  if (!reincLoteFilas.length) { el.innerHTML = ""; return; }
+  el.innerHTML = reincLoteFilas.map((f) => {
+    const nombreLinea = f.candidate
+      ? `${escapeHtml(f.candidate.grado)} ${escapeHtml(f.candidate.apellidos)} ${escapeHtml(f.candidate.nombres)}`
+      : "No se detectó un efectivo en este archivo";
+    const pill = f.nota
+      ? `<span class="pill pill-yes">Nota encontrada${f.matchPor === "numero" ? " (por N.º de nota)" : " (por nombre)"} — falta ${formatDate(f.nota.fecha_falta)} · N.º ${escapeHtml(f.nota.numero_nota_falta || "-")}</span>`
+      : `<span class="pill pill-no">No se encontró una nota pendiente que corresponda</span>`;
+    return `
+      <div class="multi-efectivo-row">
+        <label class="checkbox-row"><input type="checkbox" class="rlCheck" ${f.nota ? "checked" : "disabled"} /></label>
+        <div class="value" style="flex:1">
+          <div>${nombreLinea} <span class="muted small">(${escapeHtml(f.file.name)})</span></div>
+          <div class="grid-2" style="margin-top:6px">
+            <input type="date" class="rlFechaRow" value="${escapeHtml(f.fecha_reincorporacion)}" />
+            <input type="text" class="rlNumeroRow" value="${escapeHtml(f.numero_nota_reincorporacion)}" placeholder="N.º nota de reincorporación" />
+          </div>
+          ${pill}
+        </div>
       </div>
-    </div>
-  `).join("");
+    `;
+  }).join("");
 }
 
 $("btnReincorporacionLote").addEventListener("click", () => {
   $("rlArchivo").value = "";
-  $("rlFecha").value = "";
-  $("rlNumero").value = "";
   $("rlStatus").classList.add("hidden");
   $("rlError").classList.add("hidden");
-  reincLoteMatches = [];
+  reincLoteFilas = [];
   renderReincLoteList();
   $("modalReincorporacionLote").classList.remove("hidden");
 });
@@ -698,53 +718,58 @@ $("btnCancelarReincLote").addEventListener("click", closeReincLoteModal);
 function closeReincLoteModal() { $("modalReincorporacionLote").classList.add("hidden"); }
 
 $("rlArchivo").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
+  const files = [...e.target.files];
   const statusEl = $("rlStatus");
-  reincLoteMatches = [];
+  reincLoteFilas = [];
   renderReincLoteList();
-  if (!file || file.type !== "application/pdf") {
+  if (!files.length) {
     statusEl.classList.add("hidden");
     return;
   }
-  statusEl.textContent = "Leyendo PDF...";
+  statusEl.textContent = `Leyendo ${files.length} archivo(s)...`;
   statusEl.classList.remove("hidden");
   try {
-    const text = await extractPdfText(file);
-    const norm = text.replace(/\s+/g, " ");
-    const data = parseReincorporacion(text);
-    if (data.fecha_reincorporacion) $("rlFecha").value = data.fecha_reincorporacion;
-    if (data.numero_nota_reincorporacion) $("rlNumero").value = data.numero_nota_reincorporacion;
-
-    const candidates = extractPersonCandidates(norm).map((c) => ({ grado: c.grado, ...splitApellidosNombres(c.nombreCompleto) }));
-    reincLoteMatches = candidates.map((candidate) => ({ candidate, nota: buscarNotaPendiente(candidate) }));
+    const filas = [];
+    for (const file of files) {
+      if (file.type !== "application/pdf") continue;
+      const text = await extractPdfText(file);
+      const norm = text.replace(/\s+/g, " ");
+      const doc = parseReincorporacion(text);
+      const candidates = extractPersonCandidates(norm).map((c) => ({ grado: c.grado, ...splitApellidosNombres(c.nombreCompleto) }));
+      const base = {
+        file,
+        fecha_reincorporacion: doc.fecha_reincorporacion || "",
+        numero_nota_reincorporacion: doc.numero_nota_reincorporacion || "",
+      };
+      if (candidates.length) {
+        for (const candidate of candidates) {
+          const nota = buscarNotaPendiente(doc.numero_nota_falta_ref, candidate);
+          filas.push({ ...base, candidate, nota, matchPor: nota && doc.numero_nota_falta_ref && nota.numero_nota_falta === doc.numero_nota_falta_ref ? "numero" : "nombre" });
+        }
+      } else {
+        const nota = buscarNotaPendiente(doc.numero_nota_falta_ref, null);
+        filas.push({ ...base, candidate: null, nota, matchPor: "numero" });
+      }
+    }
+    reincLoteFilas = filas;
     renderReincLoteList();
 
-    if (candidates.length) {
-      const encontrados = reincLoteMatches.filter((m) => m.nota).length;
-      statusEl.textContent = `Se detectaron ${candidates.length} efectivo(s) en el PDF, ${encontrados} coinciden con notas pendientes de reincorporación${data.hora_reincorporacion ? ` (hora: ${data.hora_reincorporacion})` : ""}. Verifique antes de guardar.`;
-    } else {
-      statusEl.textContent = "No se detectaron efectivos en el PDF. Puede completar la fecha y el N.º de nota manualmente, pero no hay a quién aplicar la reincorporación.";
-    }
+    const encontrados = filas.filter((f) => f.nota).length;
+    statusEl.textContent = `Se procesaron ${files.length} archivo(s): ${encontrados} de ${filas.length} coinciden con notas pendientes de reincorporación. Verifique antes de guardar.`;
   } catch (err) {
     console.error(err);
-    statusEl.textContent = "No se pudo leer el PDF automáticamente.";
+    statusEl.textContent = "No se pudieron leer algunos archivos automáticamente.";
   }
 });
 
 $("btnGuardarReincLote").addEventListener("click", async () => {
   const errEl = $("rlError");
   errEl.classList.add("hidden");
-  const fecha = $("rlFecha").value;
-  const numero = $("rlNumero").value.trim();
-  if (!fecha || !numero) {
-    errEl.textContent = "Complete la fecha y el N.º de nota de reincorporación.";
-    errEl.classList.remove("hidden");
-    return;
-  }
 
-  const seleccionados = [...document.querySelectorAll("#rlLista .rlCheck")]
-    .map((chk, i) => ({ chk, match: reincLoteMatches[i] }))
-    .filter(({ chk, match }) => chk.checked && match?.nota);
+  const rows = [...document.querySelectorAll("#rlLista .multi-efectivo-row")];
+  const seleccionados = rows
+    .map((row, i) => ({ row, fila: reincLoteFilas[i] }))
+    .filter(({ row, fila }) => row.querySelector(".rlCheck").checked && fila?.nota);
 
   if (!seleccionados.length) {
     errEl.textContent = "No hay notas coincidentes seleccionadas para actualizar.";
@@ -752,29 +777,43 @@ $("btnGuardarReincLote").addEventListener("click", async () => {
     return;
   }
 
-  const ids = seleccionados.map(({ match }) => match.nota.id);
-
-  const file = $("rlArchivo").files[0];
-  let archivo_reincorporacion_path = null;
-  let archivo_reincorporacion_nombre = null;
-  if (file) {
-    const path = `lote/${Date.now()}_${file.name}`;
-    const { error: upErr } = await supabase.storage.from("notas").upload(path, file);
-    if (!upErr) {
-      archivo_reincorporacion_path = path;
-      archivo_reincorporacion_nombre = file.name;
+  for (const { row, fila } of seleccionados) {
+    const fecha = row.querySelector(".rlFechaRow").value;
+    const numero = row.querySelector(".rlNumeroRow").value.trim();
+    if (!fecha || !numero) {
+      errEl.textContent = `Complete fecha y N.º de nota para ${fila.nota.apellidos} ${fila.nota.nombres}.`;
+      errEl.classList.remove("hidden");
+      return;
     }
   }
 
-  const { error } = await supabase.from("notas_informativas").update({
-    fecha_reincorporacion: fecha,
-    numero_nota_reincorporacion: numero,
-    ...(archivo_reincorporacion_path ? { archivo_reincorporacion_path, archivo_reincorporacion_nombre } : {}),
-  }).in("id", ids);
+  const archivosSubidos = new Map();
+  for (const { fila } of seleccionados) {
+    if (archivosSubidos.has(fila.file)) continue;
+    const path = `lote/${Date.now()}_${fila.file.name}`;
+    const { error: upErr } = await supabase.storage.from("notas").upload(path, fila.file);
+    if (!upErr) archivosSubidos.set(fila.file, { path, nombre: fila.file.name });
+  }
 
-  if (error) { errEl.textContent = "Error: " + error.message; errEl.classList.remove("hidden"); return; }
+  let ultimoError = null;
+  for (const { row, fila } of seleccionados) {
+    const fecha = row.querySelector(".rlFechaRow").value;
+    const numero = row.querySelector(".rlNumeroRow").value.trim();
+    const archivo = archivosSubidos.get(fila.file);
+    const { error } = await supabase.from("notas_informativas").update({
+      fecha_reincorporacion: fecha,
+      numero_nota_reincorporacion: numero,
+      ...(archivo ? { archivo_reincorporacion_path: archivo.path, archivo_reincorporacion_nombre: archivo.nombre } : {}),
+    }).eq("id", fila.nota.id);
+    if (error) ultimoError = error;
+  }
 
-  reincLoteMatches = [];
+  if (ultimoError) {
+    errEl.textContent = "Algunas notas no se pudieron actualizar: " + ultimoError.message;
+    errEl.classList.remove("hidden");
+  }
+
+  reincLoteFilas = [];
   closeReincLoteModal();
   loadNotas();
 });
