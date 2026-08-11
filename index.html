@@ -153,8 +153,9 @@
         <input type="text" id="fOficialConstato" />
       </label>
       <label>Archivo de la nota (PDF/imagen)
-        <input type="file" id="fArchivoNota" />
+        <input type="file" id="fArchivoNota" accept="application/pdf,image/*" />
       </label>
+      <p id="pdfAutoStatus" class="muted small hidden"></p>
       <p id="notaFormError" class="error hidden"></p>
       <div class="modal-actions">
         <button type="button" id="btnCancelarNota" class="btn-ghost">Cancelar</button>

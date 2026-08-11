@@ -1,5 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -188,7 +191,8 @@ async function renderNotaDetail(nota) {
             <label>Fecha de reincorporación<input type="date" id="rFecha" required /></label>
             <label>N.º de nota de reincorporación<input type="text" id="rNumero" required /></label>
           </div>
-          <label>Archivo de reincorporación<input type="file" id="rArchivo" /></label>
+          <label>Archivo de reincorporación<input type="file" id="rArchivo" accept="application/pdf,image/*" /></label>
+          <p id="reincAutoStatus" class="muted small hidden"></p>
           <p id="reincError" class="error hidden"></p>
           <button type="submit" class="btn-primary">Registrar reincorporación</button>
         </form>` : ""}
@@ -224,6 +228,7 @@ async function renderNotaDetail(nota) {
   if (isAdmin) {
     $("btnEliminarNota")?.addEventListener("click", () => eliminarNota(nota.id));
     $("reincForm")?.addEventListener("submit", (e) => submitReincorporacion(e, nota.id));
+    $("rArchivo")?.addEventListener("change", (e) => autocompletarReincorporacion(e.target.files[0]));
     $("expForm")?.addEventListener("submit", (e) => submitExpediente(e, nota.id));
   }
 }
@@ -331,6 +336,7 @@ $("btnNuevaNota").addEventListener("click", () => {
   $("notaForm").reset();
   $("lookupResult").classList.add("hidden");
   $("notaFormError").classList.add("hidden");
+  $("pdfAutoStatus").classList.add("hidden");
   $("modalNuevaNota").classList.remove("hidden");
 });
 $("btnCerrarModal").addEventListener("click", closeModal);
@@ -346,6 +352,153 @@ function splitApellidosNombres(full) {
   const words = txt.split(/\s+/).filter(Boolean);
   if (words.length <= 2) return { apellidos: txt, nombres: "" };
   return { apellidos: words.slice(0, 2).join(" "), nombres: words.slice(2).join(" ") };
+}
+
+// ---------- Autocompletado desde PDF (Nota Informativa) ----------
+const MESES_ABREV = {
+  ENE: "01", FEB: "02", MAR: "03", ABR: "04", MAY: "05", JUN: "06",
+  JUL: "07", AGO: "08", SET: "09", SEP: "09", OCT: "10", NOV: "11", DIC: "12",
+};
+
+async function extractPdfText(file) {
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map((it) => it.str).join(" ") + "\n";
+  }
+  return text;
+}
+
+function parseNotaInformativa(text) {
+  const norm = text.replace(/\s+/g, " ");
+  const result = {};
+
+  const mNumero = norm.match(/NOTA\s+INFORMATIVA\s+N[°ºo]\s*([0-9]+)/i);
+  if (mNumero) result.numero_nota_falta = mNumero[1];
+
+  const mFecha = norm.match(/d[ií]a\s+(\d{1,2})\s*(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SET|SEP|OCT|NOV|DIC)\s*(\d{4})/i);
+  if (mFecha) {
+    const dd = mFecha[1].padStart(2, "0");
+    const mm = MESES_ABREV[mFecha[2].toUpperCase()];
+    result.fecha_falta = `${mFecha[3]}-${mm}-${dd}`;
+  }
+
+  // Busca todas las menciones "del <GRADO> PNP <NOMBRE>" y usa la que tenga
+  // más palabras: el PDF a veces pega el apellido sin espacio en una mención
+  // pero lo repite bien espaciado en otra.
+  const nameMatches = [...norm.matchAll(/\bdel\s+([A-Z0-9./]{1,8}\s+PNP\s+[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+){0,5})[.,]/g)];
+  let best = null;
+  let bestWordCount = -1;
+  for (const m of nameMatches) {
+    const raw = m[1].trim();
+    const idxPnp = raw.toUpperCase().indexOf("PNP");
+    if (idxPnp === -1) continue;
+    const nombreCompleto = raw.slice(idxPnp + 3).trim();
+    const wordCount = nombreCompleto.split(/\s+/).filter(Boolean).length;
+    if (wordCount > bestWordCount) {
+      bestWordCount = wordCount;
+      best = { grado: raw.slice(0, idxPnp).trim(), nombreCompleto };
+    }
+  }
+  if (best) {
+    result.grado = best.grado;
+    const { apellidos, nombres } = splitApellidosNombres(best.nombreCompleto);
+    result.apellidos = apellidos;
+    result.nombres = nombres;
+  }
+
+  // El oficial que constató suele mencionarse justo antes de la palabra "constató".
+  const namePattern = /((?:[A-ZÁÉÍÓÚÑ.]{2,}\.?\s+){1,3}PNP\s+[A-Z][A-Za-zÁÉÍÓÚÑáéíóúñ]*(?:\s+[A-Z][A-Za-zÁÉÍÓÚÑáéíóúñ]*){0,3})/g;
+  const idxConstato = norm.search(/constat[oó]/i);
+  if (idxConstato !== -1) {
+    let bestOficial = null;
+    let m;
+    while ((m = namePattern.exec(norm))) {
+      if (m.index < idxConstato) bestOficial = m[1];
+      else break;
+    }
+    if (bestOficial) {
+      result.oficial_constato = bestOficial.replace(/\s*\bPNP\b\s*/i, " ").replace(/\s+/g, " ").trim();
+    }
+  }
+
+  return result;
+}
+
+function parseReincorporacion(text) {
+  const norm = text.replace(/\s+/g, " ");
+  const result = {};
+
+  const mNumero = norm.match(/NOTA\s+INFORMATIVA\s+N[°ºo]\s*([0-9]+)/i);
+  if (mNumero) result.numero_nota_reincorporacion = mNumero[1];
+
+  // Ancla en "reincorpor..." y toma la fecha/hora más cercana que sigue, para no
+  // confundirla con la fecha de la falta original que suele aparecer después en el mismo párrafo.
+  const mFecha = norm.match(/reincorpor\w*(?:(?!reincorpor).)*?(\d{1,2})\s*(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SET|SEP|OCT|NOV|DIC)\s*(\d{4})/i);
+  if (mFecha) {
+    const dd = mFecha[1].padStart(2, "0");
+    const mm = MESES_ABREV[mFecha[2].toUpperCase()];
+    result.fecha_reincorporacion = `${mFecha[3]}-${mm}-${dd}`;
+  }
+
+  const mHora = norm.match(/reincorpor\w*(?:(?!reincorpor).)*?a\s+las\s+(\d{1,2}:\d{2})\s*horas/i);
+  if (mHora) result.hora_reincorporacion = mHora[1];
+
+  return result;
+}
+
+async function autocompletarReincorporacion(file) {
+  const statusEl = $("reincAutoStatus");
+  if (!statusEl) return;
+  if (!file || file.type !== "application/pdf") {
+    statusEl.classList.add("hidden");
+    return;
+  }
+  statusEl.textContent = "Leyendo PDF...";
+  statusEl.classList.remove("hidden");
+  try {
+    const text = await extractPdfText(file);
+    const data = parseReincorporacion(text);
+    if (data.fecha_reincorporacion && !$("rFecha").value) $("rFecha").value = data.fecha_reincorporacion;
+    if (data.numero_nota_reincorporacion && !$("rNumero").value) $("rNumero").value = data.numero_nota_reincorporacion;
+    if (data.fecha_reincorporacion) {
+      statusEl.textContent = `Datos autocompletados desde el PDF (reincorporación: ${formatDate(data.fecha_reincorporacion)}${data.hora_reincorporacion ? " a las " + data.hora_reincorporacion + " horas" : ""}). Verifique antes de guardar.`;
+    } else {
+      statusEl.textContent = "No se pudo detectar la fecha de reincorporación en el PDF. Complete el formulario manualmente.";
+    }
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "No se pudo leer el PDF automáticamente. Complete el formulario manualmente.";
+  }
+}
+
+async function autocompletarDesdeArchivo(file) {
+  const statusEl = $("pdfAutoStatus");
+  if (!file || file.type !== "application/pdf") {
+    statusEl.classList.add("hidden");
+    return;
+  }
+  statusEl.textContent = "Leyendo PDF...";
+  statusEl.classList.remove("hidden");
+  try {
+    const text = await extractPdfText(file);
+    const data = parseNotaInformativa(text);
+    if (data.grado && !$("fGrado").value) $("fGrado").value = data.grado;
+    if (data.apellidos && !$("fApellidos").value) $("fApellidos").value = data.apellidos;
+    if (data.nombres && !$("fNombres").value) $("fNombres").value = data.nombres;
+    if (data.fecha_falta && !$("fFechaFalta").value) $("fFechaFalta").value = data.fecha_falta;
+    if (data.numero_nota_falta && !$("fNumeroNotaFalta").value) $("fNumeroNotaFalta").value = data.numero_nota_falta;
+    if (data.oficial_constato && !$("fOficialConstato").value) $("fOficialConstato").value = data.oficial_constato;
+    statusEl.textContent = Object.keys(data).length
+      ? "Datos autocompletados desde el PDF. Verifique antes de guardar (falta el código de infracción)."
+      : "No se pudieron extraer datos del PDF. Complete el formulario manualmente.";
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "No se pudo leer el PDF automáticamente. Complete el formulario manualmente.";
+  }
 }
 
 $("btnBuscarEfectivo").addEventListener("click", async () => {
@@ -368,6 +521,10 @@ $("btnBuscarEfectivo").addEventListener("click", async () => {
   $("fNombres").value = nombres;
   resultEl.textContent = `Encontrado: ${data.grado || ""} ${data.apellidos_nombres || ""}`;
   resultEl.classList.remove("hidden");
+});
+
+$("fArchivoNota").addEventListener("change", (e) => {
+  autocompletarDesdeArchivo(e.target.files[0]);
 });
 
 $("notaForm").addEventListener("submit", async (e) => {
