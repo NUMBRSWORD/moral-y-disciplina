@@ -934,15 +934,16 @@ function horasAusente(nota) {
   return ms / 3600000;
 }
 
-// L21: la falta se resuelve el mismo día (hasta las 23:59 horas, es decir,
-// menos de 24 horas ausente). L24: pasa de las 24:00 horas (cruza a otro día)
-// pero se resuelve antes de cumplir dos días (48 horas). Fuera de ese rango no
-// se sugiere código: el usuario debe completarlo manualmente.
+// L21: se resuelve el mismo día (hasta las 23:59 horas, menos de 24h ausente).
+// L24: pasa de las 24:00 horas (cruza a otro día) pero antes de cumplir dos días (24-48h).
+// G39: a partir de dos días, antes de cumplir el tercero (48-72h).
+// MG32: a partir del tercer día (72h o más).
 function sugerirCodigoInfraccion(horas) {
   if (horas == null) return null;
   if (horas < 24) return "L21";
   if (horas < 48) return "L24";
-  return null;
+  if (horas < 72) return "G39";
+  return "MG32";
 }
 
 function formatearHorasFalto(nota) {
