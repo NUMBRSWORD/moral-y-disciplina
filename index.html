@@ -53,6 +53,9 @@
       <h2>Notas informativas</h2>
       <div class="view-actions">
         <input id="searchNotas" type="search" placeholder="Buscar por nombre, apellido o N.º de nota..." />
+        <label class="inline-filter">Desde <input id="filtroDesde" type="date" /></label>
+        <label class="inline-filter">Hasta <input id="filtroHasta" type="date" /></label>
+        <button id="btnLimpiarFiltroFecha" class="btn-ghost">Limpiar fechas</button>
         <button id="btnExportarExcel" class="btn-secondary">Exportar a Excel</button>
         <button id="btnReincorporacionLote" class="btn-secondary admin-only hidden">Reincorporación (PDF grupal)</button>
         <button id="btnNuevaNota" class="btn-primary admin-only hidden">+ Nueva nota</button>
