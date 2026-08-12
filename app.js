@@ -504,7 +504,8 @@ function parseNotaInformativa(text) {
   }
 
   // El oficial que constató suele mencionarse justo antes de la palabra "constató".
-  const namePattern = /((?:[A-ZÁÉÍÓÚÑ.]{2,}\.?\s+){1,3}PNP\s+[A-Z][A-Za-zÁÉÍÓÚÑáéíóúñ]*(?:\s+[A-Z][A-Za-zÁÉÍÓÚÑáéíóúñ]*){0,3})/g;
+  // "PNP" puede venir con punto ("TNTE PNP. ZEGOBIA...") o sin él ("CMDTE. PNP SOLIS...").
+  const namePattern = /((?:[A-ZÁÉÍÓÚÑ.]{2,}\.?\s+){1,3}PNP\.?\s+[A-Z][A-Za-zÁÉÍÓÚÑáéíóúñ]*(?:\s+[A-Z][A-Za-zÁÉÍÓÚÑáéíóúñ]*){0,3})/g;
   const idxConstato = norm.search(/constat[oó]/i);
   if (idxConstato !== -1) {
     let bestOficial = null;
@@ -514,7 +515,7 @@ function parseNotaInformativa(text) {
       else break;
     }
     if (bestOficial) {
-      result.oficial_constato = bestOficial.replace(/\s*\bPNP\b\s*/i, " ").replace(/\s+/g, " ").trim();
+      result.oficial_constato = bestOficial.replace(/\s*\bPNP\b\.?\s*/i, " ").replace(/\s+/g, " ").trim();
     }
   }
 
