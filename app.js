@@ -441,13 +441,16 @@ function extractPersonCandidates(norm) {
     return bullets.map((m) => ({ grado: m[1].trim(), nombreCompleto: m[2].trim() }));
   }
 
-  // "el Comisario ... da cuenta que el/la/los/las GRADO PNP NOMBRE [y el/la GRADO PNP NOMBRE]... se <verbo>"
-  // Formato más estable entre notas de falta y de reincorporación: a diferencia
-  // del ASUNTO (que a veces omite "PNP" o separa personas con "y el" en lugar
-  // de "de"), este párrafo siempre antepone "PNP" a cada nombre.
+  // "el Comisario ... da cuenta que el/la GRADO PNP NOMBRE, GRADO PNP NOMBRE, ...
+  // y GRADO PNP NOMBRE se <verbo>". Formato más estable entre notas de falta y
+  // de reincorporación: a diferencia del ASUNTO (que a veces omite "PNP"), este
+  // párrafo siempre antepone "PNP" a cada nombre. El artículo (el/la/los/las)
+  // solo suele preceder al primer efectivo de la lista; los demás (separados
+  // por comas, y el último por "y") normalmente no lo llevan, así que aquí es
+  // opcional en vez de obligatorio.
   const mBloque = norm.match(/da\s+cuenta\s+que\s+([\s\S]*?)\s+se\s+\w+/i);
   if (mBloque) {
-    const personPattern = /(?:el|la|los|las)\s+([A-Z0-9./]{1,8})\s+PNP\s+([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+){0,4}?)(?=\s*,|\s+y\s+(?:el|la|los|las)\b|\s*$)/g;
+    const personPattern = /(?:(?:el|la|los|las)\s+)?([A-Z0-9./]{1,8})\s+PNP\s+([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+){0,4}?)(?=\s*,|\s+y\s+|\s*$)/g;
     const personas = [...mBloque[1].matchAll(personPattern)];
     if (personas.length) {
       return personas.map((m) => ({ grado: m[1].trim(), nombreCompleto: m[2].trim() }));
