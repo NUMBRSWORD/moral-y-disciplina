@@ -1,3 +1,4 @@
 .devserver.ps1
+devserver.js
 node_modules/
 .DS_Store

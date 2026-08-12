@@ -441,6 +441,19 @@ function extractPersonCandidates(norm) {
     return bullets.map((m) => ({ grado: m[1].trim(), nombreCompleto: m[2].trim() }));
   }
 
+  // "el Comisario ... da cuenta que el/la/los/las GRADO PNP NOMBRE [y el/la GRADO PNP NOMBRE]... se <verbo>"
+  // Formato más estable entre notas de falta y de reincorporación: a diferencia
+  // del ASUNTO (que a veces omite "PNP" o separa personas con "y el" en lugar
+  // de "de"), este párrafo siempre antepone "PNP" a cada nombre.
+  const mBloque = norm.match(/da\s+cuenta\s+que\s+([\s\S]*?)\s+se\s+\w+/i);
+  if (mBloque) {
+    const personPattern = /(?:el|la|los|las)\s+([A-Z0-9./]{1,8})\s+PNP\s+([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+){0,4}?)(?=\s*,|\s+y\s+(?:el|la|los|las)\b|\s*$)/g;
+    const personas = [...mBloque[1].matchAll(personPattern)];
+    if (personas.length) {
+      return personas.map((m) => ({ grado: m[1].trim(), nombreCompleto: m[2].trim() }));
+    }
+  }
+
   // Admite "del", "de la", "de los", "de las" y también "de" sin artículo.
   // El nombre termina en coma/punto, justo antes de la siguiente mención
   // "NOTA INFORMATIVA", o al final del texto (partes sin puntuación ahí).
@@ -518,16 +531,23 @@ function parseReincorporacion(text) {
   if (notaNumberMatches[0]) result.numero_nota_reincorporacion = notaNumberMatches[0][1];
   if (notaNumberMatches[1]) result.numero_nota_falta_ref = notaNumberMatches[1][1];
 
-  // Ancla en "reincorpor..." y toma la fecha/hora más cercana que sigue, para no
-  // confundirla con la fecha de la falta original que suele aparecer después en el mismo párrafo.
-  const mFecha = norm.match(/reincorpor\w*(?:(?!reincorpor).)*?(\d{1,2})\s*(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SET|SEP|OCT|NOV|DIC)\s*(\d{4})/i);
+  // Ancla en "se incorporó/incorporaron/reincorporó/reincorporaron" y acota el
+  // tramo hasta "quien(es) se encontraba(n)", que es donde arranca la mención
+  // de la falta ORIGINAL (con su propia fecha, que no debe confundirse con esta).
+  const mActo = norm.match(/se\s+(?:re)?incorpor\w*([\s\S]*?)(?:quien(?:es)?\s+se\s+encontrab|$)/i);
+  const tramo = mActo ? mActo[1] : norm;
+
+  // El año puede venir abreviado a 2 dígitos (p. ej. "11AGO26").
+  const mFecha = tramo.match(/(\d{1,2})\s*(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SET|SEP|OCT|NOV|DIC)\s*(\d{2,4})/i);
   if (mFecha) {
     const dd = mFecha[1].padStart(2, "0");
     const mm = MESES_ABREV[mFecha[2].toUpperCase()];
-    result.fecha_reincorporacion = `${mFecha[3]}-${mm}-${dd}`;
+    let yyyy = mFecha[3];
+    if (yyyy.length === 2) yyyy = (Number(yyyy) >= 70 ? "19" : "20") + yyyy;
+    result.fecha_reincorporacion = `${yyyy}-${mm}-${dd}`;
   }
 
-  const mHora = norm.match(/reincorpor\w*(?:(?!reincorpor).)*?a\s+las\s+(\d{1,2}:\d{2})\s*horas/i);
+  const mHora = tramo.match(/(?:a\s+las|las)\s+(\d{1,2}:\d{2})/i);
   if (mHora) result.hora_reincorporacion = mHora[1];
 
   return result;
@@ -681,28 +701,45 @@ $("notaForm").addEventListener("submit", async (e) => {
 // ---------- Reincorporación desde PDF (uno o varios archivos) ----------
 let reincLoteFilas = [];
 
+function normalizarTexto(s) {
+  return (s || "")
+    .toUpperCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 function normalizarNombre(apellidos, nombres) {
-  return `${apellidos} ${nombres}`.toUpperCase().replace(/\s+/g, " ").trim();
+  return `${normalizarTexto(apellidos)} ${normalizarTexto(nombres)}`.replace(/\s+/g, " ").trim();
 }
 
 // Empareja primero por el N.º de la nota de falta original (campo REF. del PDF
 // de reincorporación) porque es exacto; si no está disponible, cae al nombre.
 // Si varias notas pendientes comparten ese N.º (falta grupal con varios
-// efectivos aún no reincorporados), se desambigua por nombre entre ellas.
+// efectivos aún no reincorporados), se desambigua por nombre entre ellas:
+// primero por nombre completo exacto, y si no coincide (el PDF de
+// reincorporación a veces abrevia u omite el segundo nombre, o lo escribe con
+// una variante como "Patrick" vs "Patrik") por apellidos exactos únicamente,
+// que rara vez varían entre ambos documentos.
 function buscarNotaPendiente(numeroFaltaRef, candidate) {
   const pendientes = state.notas.filter((n) => !n.fecha_reincorporacion);
-  const objetivo = candidate ? normalizarNombre(candidate.apellidos, candidate.nombres) : null;
+  let pool = pendientes;
 
   if (numeroFaltaRef) {
     const porNumero = pendientes.filter((n) => n.numero_nota_falta === numeroFaltaRef);
     if (porNumero.length === 1) return porNumero[0];
-    if (porNumero.length > 1) {
-      return objetivo ? porNumero.find((n) => normalizarNombre(n.apellidos, n.nombres) === objetivo) || null : null;
-    }
+    pool = porNumero.length > 1 ? porNumero : (candidate ? pendientes : []);
   }
-  if (objetivo) {
-    return pendientes.find((n) => normalizarNombre(n.apellidos, n.nombres) === objetivo) || null;
-  }
+
+  if (!candidate) return pool.length === 1 ? pool[0] : null;
+
+  const objetivo = normalizarNombre(candidate.apellidos, candidate.nombres);
+  const exactos = pool.filter((n) => normalizarNombre(n.apellidos, n.nombres) === objetivo);
+  if (exactos.length === 1) return exactos[0];
+
+  const apellidosCand = normalizarTexto(candidate.apellidos);
+  const porApellidos = pool.filter((n) => normalizarTexto(n.apellidos) === apellidosCand);
+  if (porApellidos.length === 1) return porApellidos[0];
+
   return null;
 }
 
