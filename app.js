@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs";
+import * as XLSX from "https://esm.sh/xlsx@0.18.5";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
@@ -105,7 +106,10 @@ async function loadNotas() {
   renderNotasTable(state.notas);
 }
 
+let notasVisibles = [];
+
 function renderNotasTable(list) {
+  notasVisibles = list;
   const tbody = $("notasTableBody");
   tbody.innerHTML = "";
   $("notasEmpty").classList.toggle("hidden", list.length > 0);
@@ -136,6 +140,28 @@ $("searchNotas").addEventListener("input", (e) => {
       .filter(Boolean).join(" ").toLowerCase().includes(q)
   );
   renderNotasTable(filtered);
+});
+
+$("btnExportarExcel").addEventListener("click", () => {
+  if (!notasVisibles.length) { alert("No hay notas para exportar (revise el buscador)."); return; }
+  const filas = notasVisibles.map((n) => ({
+    "Grado": n.grado || "",
+    "Apellidos y nombres": `${n.apellidos || ""} ${n.nombres || ""}`.trim(),
+    "Fecha/hora falta": formatFechaHora(n.fecha_falta, n.hora_falta),
+    "N.º nota": n.numero_nota_falta || "",
+    "Oficial": n.oficial_constato || "-",
+    "Fecha/hora reinc.": formatFechaHora(n.fecha_reincorporacion, n.hora_reincorporacion),
+    "N.º nota reinc.": n.numero_nota_reincorporacion || "-",
+    "Tiempo ausente": formatearHorasFalto(n) || "-",
+    "Código infracción": n.codigo_infraccion || "",
+    "Reincorporado": n.fecha_reincorporacion ? "Sí" : "Pendiente",
+  }));
+  const hoja = XLSX.utils.json_to_sheet(filas);
+  hoja["!cols"] = Object.keys(filas[0]).map((k) => ({ wch: Math.max(k.length, 14) }));
+  const libro = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(libro, hoja, "Notas informativas");
+  const fecha = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(libro, `notas_informativas_${fecha}.xlsx`);
 });
 
 // ---------- Nota detail ----------
