@@ -157,6 +157,13 @@ tbody tr:last-child td { border-bottom: none; }
 /* Detail view */
 .detail-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; }
 .detail-card h3 { margin-top: 0; }
+.detail-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.detail-card-header h3 { margin: 0; }
+
+/* Botón "Descargar Imputación" dentro de la tabla de notas */
+.row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; white-space: nowrap; }
+.row-actions .btn-secondary { padding: 6px 10px; font-size: 0.8rem; }
+.row-chevron { color: var(--text-muted); }
 .detail-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 24px; margin-bottom: 8px; }
 .detail-field .label { font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.03em; }
 .detail-field .value { font-size: 0.95rem; }

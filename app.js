@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+import { generarImputacionDocx, puedeGenerarImputacion } from "./lib/imputacion.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
 
@@ -62,6 +63,10 @@ async function onAuthed(session) {
   await loadProfile(session.user.id);
   showView("view-dashboard");
   loadNotas();
+  // Se precarga en segundo plano (sin cambiar de vista) para que el botón
+  // "Descargar Imputación" pueda ubicar al oficial que constató la falta
+  // sin que el usuario tenga que entrar antes a la pestaña Efectivos.
+  loadEfectivos();
 }
 
 function onSignedOut() {
@@ -115,6 +120,7 @@ function renderNotasTable(list) {
   $("notasEmpty").classList.toggle("hidden", list.length > 0);
   for (const n of list) {
     const tr = document.createElement("tr");
+    const puedeDescargar = puedeGenerarImputacion(n, state.efectivos);
     tr.innerHTML = `
       <td>${escapeHtml(n.grado || "")}</td>
       <td>${escapeHtml(n.apellidos || "")} ${escapeHtml(n.nombres || "")}</td>
@@ -126,10 +132,27 @@ function renderNotasTable(list) {
       <td>${formatearHorasFalto(n) || "-"}</td>
       <td>${escapeHtml(n.codigo_infraccion || "")}</td>
       <td>${n.fecha_reincorporacion ? '<span class="pill pill-yes">Sí</span>' : '<span class="pill pill-no">Pendiente</span>'}</td>
-      <td>›</td>
+      <td class="row-actions">${puedeDescargar ? `<button type="button" class="btn-secondary btn-descargar-imputacion" title="Descargar Inicio de Imputación de Infracción Leve">⬇ Imputación</button>` : ""} <span class="row-chevron">›</span></td>
     `;
     tr.addEventListener("click", () => openNotaDetail(n.id));
+    tr.querySelector(".btn-descargar-imputacion")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleDescargarImputacion(n, e.currentTarget);
+    });
     tbody.appendChild(tr);
+  }
+}
+
+async function handleDescargarImputacion(nota, btnEl) {
+  const textoOriginal = btnEl ? btnEl.textContent : null;
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Generando..."; }
+  try {
+    await generarImputacionDocx(nota, state.efectivos);
+  } catch (err) {
+    console.error(err);
+    alert(err.message || "No se pudo generar el documento de imputación.");
+  } finally {
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = textoOriginal; }
   }
 }
 
@@ -209,9 +232,18 @@ async function renderNotaDetail(nota) {
   const reincArchivo = await fileLinkHtml("notas", nota.archivo_reincorporacion_path, nota.archivo_reincorporacion_nombre);
   const expArchivo = exp ? await fileLinkHtml("expedientes", exp.archivo_expediente_path, exp.archivo_expediente_nombre) : "";
 
+  const puedeDescargar = puedeGenerarImputacion(nota, state.efectivos);
+  const codigoEsLeve = /^L/i.test((nota.codigo_infraccion || "").trim());
+
   $("notaDetailContent").innerHTML = `
     <div class="detail-card">
-      <h3>${escapeHtml(nota.grado || "")} ${escapeHtml(nota.apellidos || "")} ${escapeHtml(nota.nombres || "")}</h3>
+      <div class="detail-card-header">
+        <h3>${escapeHtml(nota.grado || "")} ${escapeHtml(nota.apellidos || "")} ${escapeHtml(nota.nombres || "")}</h3>
+        ${codigoEsLeve ? `
+          <button type="button" class="btn-secondary" id="btnDescargarImputacion" ${puedeDescargar ? "" : "disabled"}>⬇ Descargar Imputación</button>
+        ` : ""}
+      </div>
+      ${codigoEsLeve && !puedeDescargar ? `<p class="muted small">Para poder generar el documento, complete la reincorporación (fecha, hora y N.º de nota) y verifique que el oficial que constató la falta ("${escapeHtml(nota.oficial_constato || "")}") esté registrado en Efectivos.</p>` : ""}
       <div class="detail-grid">
         <div class="detail-field"><div class="label">Fecha de falta</div><div class="value">${formatDate(nota.fecha_falta)}</div></div>
         <div class="detail-field"><div class="label">Hora de falta</div><div class="value">${escapeHtml((nota.hora_falta || "").slice(0, 5) || "-")}</div></div>
@@ -286,6 +318,8 @@ async function renderNotaDetail(nota) {
       `}
     </div>
   `;
+
+  $("btnDescargarImputacion")?.addEventListener("click", (e) => handleDescargarImputacion(nota, e.currentTarget));
 
   if (isAdmin) {
     $("btnEliminarNota")?.addEventListener("click", () => eliminarNota(nota.id));
