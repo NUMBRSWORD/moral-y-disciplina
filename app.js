@@ -290,10 +290,23 @@ async function submitReincorporacion(e, notaId) {
     archivo_reincorporacion_nombre = file.name;
   }
 
+  const { data: notaActual } = await supabase
+    .from("notas_informativas")
+    .select("fecha_falta, hora_falta, codigo_infraccion")
+    .eq("id", notaId)
+    .single();
+
+  let codigo_infraccion;
+  if (notaActual && !notaActual.codigo_infraccion) {
+    const sugerido = sugerirCodigoInfraccion(horasAusente({ ...notaActual, fecha_reincorporacion: fecha, hora_reincorporacion: hora }));
+    if (sugerido) codigo_infraccion = sugerido;
+  }
+
   const { error } = await supabase.from("notas_informativas").update({
     fecha_reincorporacion: fecha,
     numero_nota_reincorporacion: numero,
     hora_reincorporacion: hora,
+    ...(codigo_infraccion ? { codigo_infraccion } : {}),
     ...(archivo_reincorporacion_path ? { archivo_reincorporacion_path, archivo_reincorporacion_nombre } : {}),
   }).eq("id", notaId);
 
@@ -871,10 +884,16 @@ $("btnGuardarReincLote").addEventListener("click", async () => {
     const numero = row.querySelector(".rlNumeroRow").value.trim();
     const hora = row.querySelector(".rlHoraRow").value || null;
     const archivo = archivosSubidos.get(fila.file);
+    let codigo_infraccion;
+    if (!fila.nota.codigo_infraccion) {
+      const sugerido = sugerirCodigoInfraccion(horasAusente({ ...fila.nota, fecha_reincorporacion: fecha, hora_reincorporacion: hora }));
+      if (sugerido) codigo_infraccion = sugerido;
+    }
     const { error } = await supabase.from("notas_informativas").update({
       fecha_reincorporacion: fecha,
       numero_nota_reincorporacion: numero,
       hora_reincorporacion: hora,
+      ...(codigo_infraccion ? { codigo_infraccion } : {}),
       ...(archivo ? { archivo_reincorporacion_path: archivo.path, archivo_reincorporacion_nombre: archivo.nombre } : {}),
     }).eq("id", fila.nota.id);
     if (error) ultimoError = error;
@@ -906,13 +925,30 @@ function formatFechaHora(fecha, hora) {
   if (f === "-") return "-";
   return hora ? `${f} ${hora.slice(0, 5)}` : f;
 }
-function formatearHorasFalto(nota) {
+function horasAusente(nota) {
   if (!nota.fecha_falta || !nota.hora_falta || !nota.fecha_reincorporacion || !nota.hora_reincorporacion) return null;
   const inicio = new Date(`${nota.fecha_falta}T${nota.hora_falta}`);
   const fin = new Date(`${nota.fecha_reincorporacion}T${nota.hora_reincorporacion}`);
   const ms = fin - inicio;
   if (Number.isNaN(ms) || ms < 0) return null;
-  const totalMin = Math.round(ms / 60000);
+  return ms / 3600000;
+}
+
+// L21: la falta se resuelve el mismo día (hasta las 23:59 horas, es decir,
+// menos de 24 horas ausente). L24: pasa de las 24:00 horas (cruza a otro día)
+// pero se resuelve antes de cumplir dos días (48 horas). Fuera de ese rango no
+// se sugiere código: el usuario debe completarlo manualmente.
+function sugerirCodigoInfraccion(horas) {
+  if (horas == null) return null;
+  if (horas < 24) return "L21";
+  if (horas < 48) return "L24";
+  return null;
+}
+
+function formatearHorasFalto(nota) {
+  const totalHoras = horasAusente(nota);
+  if (totalHoras == null) return null;
+  const totalMin = Math.round(totalHoras * 60);
   const dias = Math.floor(totalMin / 1440);
   const horas = Math.floor((totalMin % 1440) / 60);
   const min = totalMin % 60;
