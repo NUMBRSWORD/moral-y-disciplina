@@ -133,13 +133,30 @@ function renderNotasTable(list) {
   }
 }
 
-$("searchNotas").addEventListener("input", (e) => {
-  const q = e.target.value.toLowerCase();
-  const filtered = state.notas.filter((n) =>
-    [n.nombres, n.apellidos, n.numero_nota_falta, n.codigo_infraccion, n.grado]
-      .filter(Boolean).join(" ").toLowerCase().includes(q)
-  );
+function aplicarFiltrosNotas() {
+  const q = $("searchNotas").value.toLowerCase();
+  const desde = $("filtroDesde").value;
+  const hasta = $("filtroHasta").value;
+  const filtered = state.notas.filter((n) => {
+    const coincideTexto = !q || [n.nombres, n.apellidos, n.numero_nota_falta, n.codigo_infraccion, n.grado]
+      .filter(Boolean).join(" ").toLowerCase().includes(q);
+    // Filtra por fecha de la falta. Los campos de tipo date de Supabase vienen
+    // como "YYYY-MM-DD", igual que los inputs de fecha, así que se comparan
+    // directamente como texto sin necesidad de convertir a Date.
+    const coincideDesde = !desde || (n.fecha_falta && n.fecha_falta >= desde);
+    const coincideHasta = !hasta || (n.fecha_falta && n.fecha_falta <= hasta);
+    return coincideTexto && coincideDesde && coincideHasta;
+  });
   renderNotasTable(filtered);
+}
+
+$("searchNotas").addEventListener("input", aplicarFiltrosNotas);
+$("filtroDesde").addEventListener("change", aplicarFiltrosNotas);
+$("filtroHasta").addEventListener("change", aplicarFiltrosNotas);
+$("btnLimpiarFiltroFecha").addEventListener("click", () => {
+  $("filtroDesde").value = "";
+  $("filtroHasta").value = "";
+  aplicarFiltrosNotas();
 });
 
 $("btnExportarExcel").addEventListener("click", () => {
