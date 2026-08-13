@@ -331,13 +331,11 @@ async function renderNotaDetail(nota) {
       <div class="detail-field" style="margin-bottom:14px">
         <div class="label">Fecha de notificación de la Imputación</div>
         <div class="value">
-          ${isAdmin ? `
-            <form id="notificacionForm" class="inline-edit">
-              <input type="date" id="fNotificacion" value="${nota.imputacion_generada_at ? nota.imputacion_generada_at.slice(0, 10) : ""}" required />
-              <button type="submit" class="btn-secondary">Guardar</button>
-            </form>
-            <p id="notificacionMsg" class="error small hidden"></p>
-          ` : (nota.imputacion_generada_at ? formatDate(nota.imputacion_generada_at.slice(0, 10)) : "-")}
+          <form id="notificacionForm" class="inline-edit">
+            <input type="date" id="fNotificacion" value="${nota.imputacion_generada_at ? nota.imputacion_generada_at.slice(0, 10) : ""}" required />
+            <button type="submit" class="btn-secondary">Guardar</button>
+          </form>
+          <p id="notificacionMsg" class="error small hidden"></p>
         </div>
       </div>
       ${!nota.imputacion_generada_at ? `
@@ -354,7 +352,6 @@ async function renderNotaDetail(nota) {
         ${plazoVencido ? `
           ${puedeActa ? `<button type="button" class="btn-secondary" id="btnDescargarActaDetalle">⬇ Descargar Acta de No Descargo</button>` : `<p class="muted small">Venció el plazo, pero no se pudo ubicar en Efectivos al oficial o al investigado para generar el acta.</p>`}
         ` : `<p class="muted small">El plazo aún está vigente, todavía no corresponde generar el acta.</p>`}
-        ${isAdmin ? `
         <form id="descargoForm">
           <p class="muted small">Si el investigado sí presenta su descargo, regístrelo aquí para que ya no se genere el acta:</p>
           <div class="grid-2">
@@ -364,7 +361,7 @@ async function renderNotaDetail(nota) {
           <label>Archivo del descargo<input type="file" id="dArchivo" /></label>
           <p id="descargoError" class="error hidden"></p>
           <button type="submit" class="btn-secondary">Registrar descargo recibido</button>
-        </form>` : ""}
+        </form>
       `}
     </div>
     ` : ""}
@@ -397,14 +394,17 @@ async function renderNotaDetail(nota) {
 
   $("btnDescargarImputacion")?.addEventListener("click", (e) => handleDescargarImputacion(nota, e.currentTarget));
   $("btnDescargarActaDetalle")?.addEventListener("click", (e) => handleDescargarActaNoDescargo(nota, e.currentTarget));
+  // Registrar la notificación y el descargo lo puede hacer cualquier usuario
+  // autenticado (cada oficial notifica en persona y marca su propio caso),
+  // no solo admin como el resto de la edición de la nota.
+  $("notificacionForm")?.addEventListener("submit", (e) => submitNotificacion(e, nota.id));
+  $("descargoForm")?.addEventListener("submit", (e) => submitDescargo(e, nota.id));
 
   if (isAdmin) {
     $("btnEliminarNota")?.addEventListener("click", () => eliminarNota(nota.id));
     $("codigoInfraccionForm")?.addEventListener("submit", (e) => submitCodigoInfraccion(e, nota.id));
     $("reincForm")?.addEventListener("submit", (e) => submitReincorporacion(e, nota.id));
     $("rArchivo")?.addEventListener("change", (e) => autocompletarReincorporacion(e.target.files[0]));
-    $("notificacionForm")?.addEventListener("submit", (e) => submitNotificacion(e, nota.id));
-    $("descargoForm")?.addEventListener("submit", (e) => submitDescargo(e, nota.id));
     $("expForm")?.addEventListener("submit", (e) => submitExpediente(e, nota.id));
   }
 }
@@ -415,11 +415,7 @@ async function submitNotificacion(e, notaId) {
   msgEl.classList.add("hidden");
   const fecha = $("fNotificacion").value;
   if (!fecha) return;
-  // Se guarda a mediodía UTC para que la fecha no cambie por husos horarios
-  // al convertir de vuelta a texto; solo el día importa para contar el plazo.
-  const { error } = await supabase.from("notas_informativas")
-    .update({ imputacion_generada_at: `${fecha}T12:00:00.000Z` })
-    .eq("id", notaId);
+  const { error } = await supabase.rpc("registrar_notificacion_imputacion", { p_nota_id: notaId, p_fecha: fecha });
   if (error) { msgEl.textContent = "Error: " + error.message; msgEl.classList.remove("hidden"); return; }
   openNotaDetail(notaId);
 }
@@ -442,11 +438,13 @@ async function submitDescargo(e, notaId) {
     archivo_descargo_nombre = file.name;
   }
 
-  const { error } = await supabase.from("notas_informativas").update({
-    fecha_descargo: fecha,
-    numero_descargo: numero || null,
-    ...(archivo_descargo_path ? { archivo_descargo_path, archivo_descargo_nombre } : {}),
-  }).eq("id", notaId);
+  const { error } = await supabase.rpc("registrar_descargo", {
+    p_nota_id: notaId,
+    p_fecha: fecha,
+    p_numero: numero,
+    p_archivo_path: archivo_descargo_path,
+    p_archivo_nombre: archivo_descargo_nombre,
+  });
 
   if (error) { errEl.textContent = "Error: " + error.message; errEl.classList.remove("hidden"); return; }
   openNotaDetail(notaId);
