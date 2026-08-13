@@ -724,13 +724,17 @@ function parseNotaInformativa(text) {
   const norm = text.replace(/\s+/g, " ");
   const result = {};
 
-  const mNumero = norm.match(/NOTA\s+INFORMATIVA\s+N[°ºo]\s*([0-9]+)/i);
+  // El símbolo "N°" varía mucho al venir de OCR (N°, Nº, No, N*, o directo "N
+  // 123..." sin símbolo), así que se acepta cualquiera de esas variantes.
+  const mNumero = norm.match(/NOTA\s+INFORMATIVA\s+N[°ºo*]?\.?\s*([0-9]+)/i);
   if (mNumero) result.numero_nota_falta = mNumero[1];
 
-  const mFecha = norm.match(/d[ií]a\s+(\d{1,2})\s*(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SET|SEP|OCT|NOV|DIC)\s*(\d{4})/i);
+  // El OCR a veces confunde la "O" de un mes con el dígito "0" (p. ej. "AGO"
+  // sale como "AG0"), así que el patrón admite ambos y luego se normaliza.
+  const mFecha = norm.match(/d[ií]a\s+(\d{1,2})\s*(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AG[O0]|SET|SEP|[O0]CT|N[O0]V|DIC)\s*(\d{4})/i);
   if (mFecha) {
     const dd = mFecha[1].padStart(2, "0");
-    const mm = MESES_ABREV[mFecha[2].toUpperCase()];
+    const mm = MESES_ABREV[mFecha[2].toUpperCase().replace(/0/g, "O")];
     result.fecha_falta = `${mFecha[3]}-${mm}-${dd}`;
   }
 
@@ -773,7 +777,7 @@ function parseReincorporacion(text) {
 
   // El propio número de nota aparece primero; el número de la nota de falta
   // original referenciada en "REF." aparece como la segunda mención.
-  const notaNumberMatches = [...norm.matchAll(/NOTA\s+INFORMATIVA\s+N[°ºo]\s*([0-9]+)/gi)];
+  const notaNumberMatches = [...norm.matchAll(/NOTA\s+INFORMATIVA\s+N[°ºo*]?\.?\s*([0-9]+)/gi)];
   if (notaNumberMatches[0]) result.numero_nota_reincorporacion = notaNumberMatches[0][1];
   if (notaNumberMatches[1]) result.numero_nota_falta_ref = notaNumberMatches[1][1];
 
@@ -783,11 +787,13 @@ function parseReincorporacion(text) {
   const mActo = norm.match(/se\s+(?:re)?incorpor\w*([\s\S]*?)(?:quien(?:es)?\s+se\s+encontrab|$)/i);
   const tramo = mActo ? mActo[1] : norm;
 
-  // El año puede venir abreviado a 2 dígitos (p. ej. "11AGO26").
-  const mFecha = tramo.match(/(\d{1,2})\s*(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SET|SEP|OCT|NOV|DIC)\s*(\d{2,4})/i);
+  // El año puede venir abreviado a 2 dígitos (p. ej. "11AGO26"). El OCR a
+  // veces confunde la "O" de un mes con el dígito "0" (p. ej. "AG0"), así que
+  // el patrón admite ambos y luego se normaliza antes de buscar en el mapa.
+  const mFecha = tramo.match(/(\d{1,2})\s*(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AG[O0]|SET|SEP|[O0]CT|N[O0]V|DIC)\s*(\d{2,4})/i);
   if (mFecha) {
     const dd = mFecha[1].padStart(2, "0");
-    const mm = MESES_ABREV[mFecha[2].toUpperCase()];
+    const mm = MESES_ABREV[mFecha[2].toUpperCase().replace(/0/g, "O")];
     let yyyy = mFecha[3];
     if (yyyy.length === 2) yyyy = (Number(yyyy) >= 70 ? "19" : "20") + yyyy;
     result.fecha_reincorporacion = `${yyyy}-${mm}-${dd}`;
