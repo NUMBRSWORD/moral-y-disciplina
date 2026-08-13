@@ -328,45 +328,43 @@ async function renderNotaDetail(nota) {
     ${codigoEsLeve ? `
     <div class="detail-card">
       <h3>Acta de No Descargo</h3>
-      ${!nota.imputacion_generada_at ? `
-        <p class="muted small">Aún no se generó la Imputación; el plazo de descargo empieza a correr desde el día en que se notifique.</p>
-      ` : `
-        <div class="detail-field" style="margin-bottom:14px">
-          <div class="label">Fecha de notificación de la Imputación</div>
-          <div class="value">
-            ${isAdmin ? `
-              <form id="notificacionForm" class="inline-edit">
-                <input type="date" id="fNotificacion" value="${nota.imputacion_generada_at.slice(0, 10)}" required />
-                <button type="submit" class="btn-secondary">Guardar</button>
-              </form>
-              <p id="notificacionMsg" class="error small hidden"></p>
-            ` : formatDate(nota.imputacion_generada_at.slice(0, 10))}
-          </div>
-        </div>
-        ${nota.fecha_descargo ? `
-          <p class="muted small">El investigado sí presentó descargo — no corresponde generar el acta.</p>
-          <div class="detail-grid">
-            <div class="detail-field"><div class="label">Fecha de descargo</div><div class="value">${formatDate(nota.fecha_descargo)}</div></div>
-            <div class="detail-field"><div class="label">N.º de documento</div><div class="value">${escapeHtml(nota.numero_descargo || "-")}</div></div>
-            <div class="detail-field"><div class="label">Archivo</div><div class="value">${descargoArchivo}</div></div>
-          </div>
-        ` : `
-          <p class="muted small">Plazo de descargo vence el ${formatDate(fechaLimite)}.</p>
-          ${plazoVencido ? `
-            ${puedeActa ? `<button type="button" class="btn-secondary" id="btnDescargarActaDetalle">⬇ Descargar Acta de No Descargo</button>` : `<p class="muted small">Venció el plazo, pero no se pudo ubicar en Efectivos al oficial o al investigado para generar el acta.</p>`}
-          ` : `<p class="muted small">El plazo aún está vigente, todavía no corresponde generar el acta.</p>`}
+      <div class="detail-field" style="margin-bottom:14px">
+        <div class="label">Fecha de notificación de la Imputación</div>
+        <div class="value">
           ${isAdmin ? `
-          <form id="descargoForm">
-            <p class="muted small">Si el investigado sí presenta su descargo, regístrelo aquí para que ya no se genere el acta:</p>
-            <div class="grid-2">
-              <label>Fecha de descargo<input type="date" id="dFecha" required /></label>
-              <label>N.º de documento<input type="text" id="dNumero" /></label>
-            </div>
-            <label>Archivo del descargo<input type="file" id="dArchivo" /></label>
-            <p id="descargoError" class="error hidden"></p>
-            <button type="submit" class="btn-secondary">Registrar descargo recibido</button>
-          </form>` : ""}
-        `}
+            <form id="notificacionForm" class="inline-edit">
+              <input type="date" id="fNotificacion" value="${nota.imputacion_generada_at ? nota.imputacion_generada_at.slice(0, 10) : ""}" required />
+              <button type="submit" class="btn-secondary">Guardar</button>
+            </form>
+            <p id="notificacionMsg" class="error small hidden"></p>
+          ` : (nota.imputacion_generada_at ? formatDate(nota.imputacion_generada_at.slice(0, 10)) : "-")}
+        </div>
+      </div>
+      ${!nota.imputacion_generada_at ? `
+        <p class="muted small">Registre la fecha en que notificó la Imputación para calcular el plazo de descargo.</p>
+      ` : nota.fecha_descargo ? `
+        <p class="muted small">El investigado sí presentó descargo — no corresponde generar el acta.</p>
+        <div class="detail-grid">
+          <div class="detail-field"><div class="label">Fecha de descargo</div><div class="value">${formatDate(nota.fecha_descargo)}</div></div>
+          <div class="detail-field"><div class="label">N.º de documento</div><div class="value">${escapeHtml(nota.numero_descargo || "-")}</div></div>
+          <div class="detail-field"><div class="label">Archivo</div><div class="value">${descargoArchivo}</div></div>
+        </div>
+      ` : `
+        <p class="muted small">Plazo de descargo vence el ${formatDate(fechaLimite)}.</p>
+        ${plazoVencido ? `
+          ${puedeActa ? `<button type="button" class="btn-secondary" id="btnDescargarActaDetalle">⬇ Descargar Acta de No Descargo</button>` : `<p class="muted small">Venció el plazo, pero no se pudo ubicar en Efectivos al oficial o al investigado para generar el acta.</p>`}
+        ` : `<p class="muted small">El plazo aún está vigente, todavía no corresponde generar el acta.</p>`}
+        ${isAdmin ? `
+        <form id="descargoForm">
+          <p class="muted small">Si el investigado sí presenta su descargo, regístrelo aquí para que ya no se genere el acta:</p>
+          <div class="grid-2">
+            <label>Fecha de descargo<input type="date" id="dFecha" required /></label>
+            <label>N.º de documento<input type="text" id="dNumero" /></label>
+          </div>
+          <label>Archivo del descargo<input type="file" id="dArchivo" /></label>
+          <p id="descargoError" class="error hidden"></p>
+          <button type="submit" class="btn-secondary">Registrar descargo recibido</button>
+        </form>` : ""}
       `}
     </div>
     ` : ""}
