@@ -136,7 +136,7 @@ function renderNotasTable(list) {
       <td>${formatearHorasFalto(n) || "-"}</td>
       <td>${escapeHtml(n.codigo_infraccion || "")}</td>
       <td>${n.fecha_reincorporacion ? '<span class="pill pill-yes">Sí</span>' : '<span class="pill pill-no">Pendiente</span>'}</td>
-      <td class="row-actions">${puedeDescargar ? `<button type="button" class="btn-secondary btn-descargar-imputacion" title="Descargar Inicio de Imputación de Infracción Leve">⬇ Imputación</button>` : ""}${puedeActa ? `<button type="button" class="btn-secondary btn-descargar-acta" title="Descargar Acta de No Recepción de Descargos">⬇ Acta</button>` : ""} <span class="row-chevron">›</span></td>
+      <td class="row-actions">${puedeDescargar ? `<button type="button" class="btn-secondary btn-descargar-imputacion" title="Descargar Inicio de Imputación de Infracción Leve">⬇ Imputación</button>` : ""}${puedeActa ? `<button type="button" class="btn-secondary btn-descargar-acta" title="Descargar Acta de No Recepción de Descargos">⬇ Acta No Descargo</button>` : ""} <span class="row-chevron">›</span></td>
     `;
     tr.addEventListener("click", () => openNotaDetail(n.id));
     tr.querySelector(".btn-descargar-imputacion")?.addEventListener("click", (e) => {
@@ -327,30 +327,46 @@ async function renderNotaDetail(nota) {
 
     ${codigoEsLeve ? `
     <div class="detail-card">
-      <h3>Descargo</h3>
+      <h3>Acta de No Descargo</h3>
       ${!nota.imputacion_generada_at ? `
-        <p class="muted small">Aún no se generó la Imputación; el plazo de descargo empieza a correr desde ese momento.</p>
-      ` : nota.fecha_descargo ? `
-        <div class="detail-grid">
-          <div class="detail-field"><div class="label">Fecha de descargo</div><div class="value">${formatDate(nota.fecha_descargo)}</div></div>
-          <div class="detail-field"><div class="label">N.º de documento</div><div class="value">${escapeHtml(nota.numero_descargo || "-")}</div></div>
-          <div class="detail-field"><div class="label">Archivo</div><div class="value">${descargoArchivo}</div></div>
-        </div>
+        <p class="muted small">Aún no se generó la Imputación; el plazo de descargo empieza a correr desde el día en que se notifique.</p>
       ` : `
-        <p class="muted small">Imputación notificada el ${formatDate(nota.imputacion_generada_at.slice(0, 10))}. Plazo de descargo vence el ${formatDate(fechaLimite)}.</p>
-        ${plazoVencido ? `
-          ${puedeActa ? `<button type="button" class="btn-secondary" id="btnDescargarActaDetalle">⬇ Descargar Acta de No Recepción de Descargos</button>` : `<p class="muted small">Venció el plazo, pero no se pudo ubicar en Efectivos al oficial o al investigado para generar el acta.</p>`}
-        ` : `<p class="muted small">El plazo aún está vigente.</p>`}
-        ${isAdmin ? `
-        <form id="descargoForm">
-          <div class="grid-2">
-            <label>Fecha de descargo<input type="date" id="dFecha" required /></label>
-            <label>N.º de documento<input type="text" id="dNumero" /></label>
+        <div class="detail-field" style="margin-bottom:14px">
+          <div class="label">Fecha de notificación de la Imputación</div>
+          <div class="value">
+            ${isAdmin ? `
+              <form id="notificacionForm" class="inline-edit">
+                <input type="date" id="fNotificacion" value="${nota.imputacion_generada_at.slice(0, 10)}" required />
+                <button type="submit" class="btn-secondary">Guardar</button>
+              </form>
+              <p id="notificacionMsg" class="error small hidden"></p>
+            ` : formatDate(nota.imputacion_generada_at.slice(0, 10))}
           </div>
-          <label>Archivo del descargo<input type="file" id="dArchivo" /></label>
-          <p id="descargoError" class="error hidden"></p>
-          <button type="submit" class="btn-secondary">Registrar descargo recibido</button>
-        </form>` : ""}
+        </div>
+        ${nota.fecha_descargo ? `
+          <p class="muted small">El investigado sí presentó descargo — no corresponde generar el acta.</p>
+          <div class="detail-grid">
+            <div class="detail-field"><div class="label">Fecha de descargo</div><div class="value">${formatDate(nota.fecha_descargo)}</div></div>
+            <div class="detail-field"><div class="label">N.º de documento</div><div class="value">${escapeHtml(nota.numero_descargo || "-")}</div></div>
+            <div class="detail-field"><div class="label">Archivo</div><div class="value">${descargoArchivo}</div></div>
+          </div>
+        ` : `
+          <p class="muted small">Plazo de descargo vence el ${formatDate(fechaLimite)}.</p>
+          ${plazoVencido ? `
+            ${puedeActa ? `<button type="button" class="btn-secondary" id="btnDescargarActaDetalle">⬇ Descargar Acta de No Descargo</button>` : `<p class="muted small">Venció el plazo, pero no se pudo ubicar en Efectivos al oficial o al investigado para generar el acta.</p>`}
+          ` : `<p class="muted small">El plazo aún está vigente, todavía no corresponde generar el acta.</p>`}
+          ${isAdmin ? `
+          <form id="descargoForm">
+            <p class="muted small">Si el investigado sí presenta su descargo, regístrelo aquí para que ya no se genere el acta:</p>
+            <div class="grid-2">
+              <label>Fecha de descargo<input type="date" id="dFecha" required /></label>
+              <label>N.º de documento<input type="text" id="dNumero" /></label>
+            </div>
+            <label>Archivo del descargo<input type="file" id="dArchivo" /></label>
+            <p id="descargoError" class="error hidden"></p>
+            <button type="submit" class="btn-secondary">Registrar descargo recibido</button>
+          </form>` : ""}
+        `}
       `}
     </div>
     ` : ""}
@@ -389,9 +405,25 @@ async function renderNotaDetail(nota) {
     $("codigoInfraccionForm")?.addEventListener("submit", (e) => submitCodigoInfraccion(e, nota.id));
     $("reincForm")?.addEventListener("submit", (e) => submitReincorporacion(e, nota.id));
     $("rArchivo")?.addEventListener("change", (e) => autocompletarReincorporacion(e.target.files[0]));
+    $("notificacionForm")?.addEventListener("submit", (e) => submitNotificacion(e, nota.id));
     $("descargoForm")?.addEventListener("submit", (e) => submitDescargo(e, nota.id));
     $("expForm")?.addEventListener("submit", (e) => submitExpediente(e, nota.id));
   }
+}
+
+async function submitNotificacion(e, notaId) {
+  e.preventDefault();
+  const msgEl = $("notificacionMsg");
+  msgEl.classList.add("hidden");
+  const fecha = $("fNotificacion").value;
+  if (!fecha) return;
+  // Se guarda a mediodía UTC para que la fecha no cambie por husos horarios
+  // al convertir de vuelta a texto; solo el día importa para contar el plazo.
+  const { error } = await supabase.from("notas_informativas")
+    .update({ imputacion_generada_at: `${fecha}T12:00:00.000Z` })
+    .eq("id", notaId);
+  if (error) { msgEl.textContent = "Error: " + error.message; msgEl.classList.remove("hidden"); return; }
+  openNotaDetail(notaId);
 }
 
 async function submitDescargo(e, notaId) {
