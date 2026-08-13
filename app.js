@@ -3,6 +3,7 @@ import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 import { generarImputacionDocx, puedeGenerarImputacion } from "./lib/imputacion.js";
+import { generarActaNoDescargoDocx, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
 
@@ -123,6 +124,7 @@ function renderNotasTable(list) {
   for (const n of list) {
     const tr = document.createElement("tr");
     const puedeDescargar = puedeGenerarImputacion(n, state.efectivos);
+    const puedeActa = puedeGenerarActaNoDescargo(n, state.efectivos);
     tr.innerHTML = `
       <td>${escapeHtml(n.grado || "")}</td>
       <td>${escapeHtml(n.apellidos || "")} ${escapeHtml(n.nombres || "")}</td>
@@ -134,12 +136,16 @@ function renderNotasTable(list) {
       <td>${formatearHorasFalto(n) || "-"}</td>
       <td>${escapeHtml(n.codigo_infraccion || "")}</td>
       <td>${n.fecha_reincorporacion ? '<span class="pill pill-yes">Sí</span>' : '<span class="pill pill-no">Pendiente</span>'}</td>
-      <td class="row-actions">${puedeDescargar ? `<button type="button" class="btn-secondary btn-descargar-imputacion" title="Descargar Inicio de Imputación de Infracción Leve">⬇ Imputación</button>` : ""} <span class="row-chevron">›</span></td>
+      <td class="row-actions">${puedeDescargar ? `<button type="button" class="btn-secondary btn-descargar-imputacion" title="Descargar Inicio de Imputación de Infracción Leve">⬇ Imputación</button>` : ""}${puedeActa ? `<button type="button" class="btn-secondary btn-descargar-acta" title="Descargar Acta de No Recepción de Descargos">⬇ Acta</button>` : ""} <span class="row-chevron">›</span></td>
     `;
     tr.addEventListener("click", () => openNotaDetail(n.id));
     tr.querySelector(".btn-descargar-imputacion")?.addEventListener("click", (e) => {
       e.stopPropagation();
       handleDescargarImputacion(n, e.currentTarget);
+    });
+    tr.querySelector(".btn-descargar-acta")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleDescargarActaNoDescargo(n, e.currentTarget);
     });
     tbody.appendChild(tr);
   }
@@ -150,9 +156,29 @@ async function handleDescargarImputacion(nota, btnEl) {
   if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Generando..."; }
   try {
     await generarImputacionDocx(nota, state.efectivos);
+    // Se registra la primera vez que se genera/descarga: es la fecha que se usa
+    // como notificación al investigado para contar el plazo de descargo.
+    if (!nota.imputacion_generada_at) {
+      const ahora = new Date().toISOString();
+      const { error } = await supabase.from("notas_informativas").update({ imputacion_generada_at: ahora }).eq("id", nota.id);
+      if (!error) nota.imputacion_generada_at = ahora;
+    }
   } catch (err) {
     console.error(err);
     alert(err.message || "No se pudo generar el documento de imputación.");
+  } finally {
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = textoOriginal; }
+  }
+}
+
+async function handleDescargarActaNoDescargo(nota, btnEl) {
+  const textoOriginal = btnEl ? btnEl.textContent : null;
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Generando..."; }
+  try {
+    await generarActaNoDescargoDocx(nota, state.efectivos);
+  } catch (err) {
+    console.error(err);
+    alert(err.message || "No se pudo generar el acta de no descargo.");
   } finally {
     if (btnEl) { btnEl.disabled = false; btnEl.textContent = textoOriginal; }
   }
@@ -233,9 +259,13 @@ async function renderNotaDetail(nota) {
   const notaArchivo = await fileLinkHtml("notas", nota.archivo_nota_path, nota.archivo_nota_nombre);
   const reincArchivo = await fileLinkHtml("notas", nota.archivo_reincorporacion_path, nota.archivo_reincorporacion_nombre);
   const expArchivo = exp ? await fileLinkHtml("expedientes", exp.archivo_expediente_path, exp.archivo_expediente_nombre) : "";
+  const descargoArchivo = await fileLinkHtml("notas", nota.archivo_descargo_path, nota.archivo_descargo_nombre);
 
   const puedeDescargar = puedeGenerarImputacion(nota, state.efectivos);
   const codigoEsLeve = /^L/i.test((nota.codigo_infraccion || "").trim());
+  const puedeActa = puedeGenerarActaNoDescargo(nota, state.efectivos);
+  const plazoVencido = plazoDescargoVencido(nota);
+  const fechaLimite = fechaLimiteDescargo(nota);
 
   $("notaDetailContent").innerHTML = `
     <div class="detail-card">
@@ -295,6 +325,36 @@ async function renderNotaDetail(nota) {
       `}
     </div>
 
+    ${codigoEsLeve ? `
+    <div class="detail-card">
+      <h3>Descargo</h3>
+      ${!nota.imputacion_generada_at ? `
+        <p class="muted small">Aún no se generó la Imputación; el plazo de descargo empieza a correr desde ese momento.</p>
+      ` : nota.fecha_descargo ? `
+        <div class="detail-grid">
+          <div class="detail-field"><div class="label">Fecha de descargo</div><div class="value">${formatDate(nota.fecha_descargo)}</div></div>
+          <div class="detail-field"><div class="label">N.º de documento</div><div class="value">${escapeHtml(nota.numero_descargo || "-")}</div></div>
+          <div class="detail-field"><div class="label">Archivo</div><div class="value">${descargoArchivo}</div></div>
+        </div>
+      ` : `
+        <p class="muted small">Imputación notificada el ${formatDate(nota.imputacion_generada_at.slice(0, 10))}. Plazo de descargo vence el ${formatDate(fechaLimite)}.</p>
+        ${plazoVencido ? `
+          ${puedeActa ? `<button type="button" class="btn-secondary" id="btnDescargarActaDetalle">⬇ Descargar Acta de No Recepción de Descargos</button>` : `<p class="muted small">Venció el plazo, pero no se pudo ubicar en Efectivos al oficial o al investigado para generar el acta.</p>`}
+        ` : `<p class="muted small">El plazo aún está vigente.</p>`}
+        ${isAdmin ? `
+        <form id="descargoForm">
+          <div class="grid-2">
+            <label>Fecha de descargo<input type="date" id="dFecha" required /></label>
+            <label>N.º de documento<input type="text" id="dNumero" /></label>
+          </div>
+          <label>Archivo del descargo<input type="file" id="dArchivo" /></label>
+          <p id="descargoError" class="error hidden"></p>
+          <button type="submit" class="btn-secondary">Registrar descargo recibido</button>
+        </form>` : ""}
+      `}
+    </div>
+    ` : ""}
+
     <div class="detail-card">
       <h3>Expediente</h3>
       ${exp ? `
@@ -322,14 +382,44 @@ async function renderNotaDetail(nota) {
   `;
 
   $("btnDescargarImputacion")?.addEventListener("click", (e) => handleDescargarImputacion(nota, e.currentTarget));
+  $("btnDescargarActaDetalle")?.addEventListener("click", (e) => handleDescargarActaNoDescargo(nota, e.currentTarget));
 
   if (isAdmin) {
     $("btnEliminarNota")?.addEventListener("click", () => eliminarNota(nota.id));
     $("codigoInfraccionForm")?.addEventListener("submit", (e) => submitCodigoInfraccion(e, nota.id));
     $("reincForm")?.addEventListener("submit", (e) => submitReincorporacion(e, nota.id));
     $("rArchivo")?.addEventListener("change", (e) => autocompletarReincorporacion(e.target.files[0]));
+    $("descargoForm")?.addEventListener("submit", (e) => submitDescargo(e, nota.id));
     $("expForm")?.addEventListener("submit", (e) => submitExpediente(e, nota.id));
   }
+}
+
+async function submitDescargo(e, notaId) {
+  e.preventDefault();
+  const errEl = $("descargoError");
+  errEl.classList.add("hidden");
+  const fecha = $("dFecha").value;
+  const numero = $("dNumero").value.trim();
+  const file = $("dArchivo").files[0];
+
+  let archivo_descargo_path = null;
+  let archivo_descargo_nombre = null;
+  if (file) {
+    const path = `${notaId}/descargo_${Date.now()}_${file.name}`;
+    const { error: upErr } = await supabase.storage.from("notas").upload(path, file);
+    if (upErr) { errEl.textContent = "Error al subir archivo: " + upErr.message; errEl.classList.remove("hidden"); return; }
+    archivo_descargo_path = path;
+    archivo_descargo_nombre = file.name;
+  }
+
+  const { error } = await supabase.from("notas_informativas").update({
+    fecha_descargo: fecha,
+    numero_descargo: numero || null,
+    ...(archivo_descargo_path ? { archivo_descargo_path, archivo_descargo_nombre } : {}),
+  }).eq("id", notaId);
+
+  if (error) { errEl.textContent = "Error: " + error.message; errEl.classList.remove("hidden"); return; }
+  openNotaDetail(notaId);
 }
 
 async function submitCodigoInfraccion(e, notaId) {
