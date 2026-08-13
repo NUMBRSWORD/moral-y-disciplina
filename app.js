@@ -90,7 +90,11 @@ supabase.auth.getSession().then(({ data }) => {
 $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("loginError").classList.add("hidden");
-  const email = $("loginEmail").value.trim();
+  let email = $("loginEmail").value.trim();
+  // Los oficiales inician sesión solo con su CIP (Supabase exige un correo
+  // internamente, así que si lo escrito es puro número se le agrega el
+  // dominio interno sin que el usuario tenga que verlo ni escribirlo).
+  if (/^\d+$/.test(email)) email = `${email}@moralydisciplina.local`;
   const password = $("loginPassword").value;
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
