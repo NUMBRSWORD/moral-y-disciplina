@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
+import { createWorker } from "https://esm.sh/tesseract.js@5.1.1";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 import { generarImputacionDocx, puedeGenerarImputacion } from "./lib/imputacion.js";
 import { generarActaNoDescargoDocx, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
@@ -631,7 +632,7 @@ const MESES_ABREV = {
   JUL: "07", AGO: "08", SET: "09", SEP: "09", OCT: "10", NOV: "11", DIC: "12",
 };
 
-async function extractPdfText(file) {
+async function extractPdfText(file, onEstado) {
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
   let text = "";
@@ -639,6 +640,33 @@ async function extractPdfText(file) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
     text += content.items.map((it) => it.str).join(" ") + "\n";
+  }
+  // Algunas notas se generan como una foto/escaneo de la página (sin texto
+  // seleccionable): pdf.js no extrae nada de ellas. En ese caso se recurre a
+  // reconocimiento óptico de caracteres (OCR) sobre la página renderizada.
+  if (text.trim().length < 30) {
+    onEstado?.("Esta nota es una imagen escaneada: leyendo con reconocimiento de texto (OCR), puede tardar unos segundos...");
+    text = await extractPdfTextConOcr(pdf);
+  }
+  return text;
+}
+
+async function extractPdfTextConOcr(pdf) {
+  const worker = await createWorker("spa");
+  let text = "";
+  try {
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 3 });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+      const { data } = await worker.recognize(canvas);
+      text += data.text + "\n";
+    }
+  } finally {
+    await worker.terminate();
   }
   return text;
 }
@@ -781,7 +809,7 @@ async function autocompletarReincorporacion(file) {
   statusEl.textContent = "Leyendo PDF...";
   statusEl.classList.remove("hidden");
   try {
-    const text = await extractPdfText(file);
+    const text = await extractPdfText(file, (msg) => { statusEl.textContent = msg; });
     const data = parseReincorporacion(text);
     if (data.fecha_reincorporacion && !$("rFecha").value) $("rFecha").value = data.fecha_reincorporacion;
     if (data.numero_nota_reincorporacion && !$("rNumero").value) $("rNumero").value = data.numero_nota_reincorporacion;
@@ -808,7 +836,7 @@ async function autocompletarDesdeArchivo(file) {
   pdfCandidates = [];
   renderCandidatesChecklist();
   try {
-    const text = await extractPdfText(file);
+    const text = await extractPdfText(file, (msg) => { statusEl.textContent = msg; });
     const data = parseNotaInformativa(text);
     if (data.grado && !$("fGrado").value) $("fGrado").value = data.grado;
     if (data.apellidos && !$("fApellidos").value) $("fApellidos").value = data.apellidos;
@@ -1015,7 +1043,7 @@ $("rlArchivo").addEventListener("change", async (e) => {
     const filas = [];
     for (const file of files) {
       if (file.type !== "application/pdf") continue;
-      const text = await extractPdfText(file);
+      const text = await extractPdfText(file, (msg) => { statusEl.textContent = `${file.name}: ${msg}`; });
       const norm = text.replace(/\s+/g, " ");
       const doc = parseReincorporacion(text);
       const candidates = extractPersonCandidates(norm).map((c) => ({ grado: c.grado, ...splitApellidosNombres(c.nombreCompleto) }));
