@@ -62,11 +62,13 @@ async function onAuthed(session) {
   $("topbar").classList.remove("hidden");
   await loadProfile(session.user.id);
   showView("view-dashboard");
+  // Efectivos se carga ANTES que las notas (y se espera) porque
+  // renderNotasTable decide si mostrar el botón "Descargar Imputación" según
+  // state.efectivos; si las notas se pintaran primero, ese arreglo estaría
+  // vacío en el primer render y el botón no aparecería en ninguna fila hasta
+  // que algo más (como una búsqueda) forzara un segundo render.
+  await loadEfectivos();
   loadNotas();
-  // Se precarga en segundo plano (sin cambiar de vista) para que el botón
-  // "Descargar Imputación" pueda ubicar al oficial que constató la falta
-  // sin que el usuario tenga que entrar antes a la pestaña Efectivos.
-  loadEfectivos();
 }
 
 function onSignedOut() {
