@@ -446,7 +446,10 @@ async function renderNotaDetail(nota) {
     ` : ""}
   `;
 
-  $("btnDescargarImputacion")?.addEventListener("click", (e) => handleDescargarImputacion(nota, e.currentTarget));
+  $("btnDescargarImputacion")?.addEventListener("click", async (e) => {
+    await handleDescargarImputacion(nota, e.currentTarget);
+    openNotaDetail(nota.id);
+  });
   $("btnDescargarActaDetalle")?.addEventListener("click", (e) => handleDescargarActaNoDescargo(nota, e.currentTarget));
   // Registrar la notificación y el descargo lo puede hacer cualquier usuario
   // autenticado (cada oficial notifica en persona y marca su propio caso),
