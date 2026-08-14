@@ -5,7 +5,7 @@ import { createWorker } from "https://esm.sh/tesseract.js@5.1.1";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 import { generarImputacionDocx, puedeGenerarImputacion } from "./lib/imputacion.js";
 import { generarActaNoDescargoDocx, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
-import { generarOrdenSancionDocx, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto } from "./lib/ordenSancion.js";
+import { generarOrdenSancionDocx, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
@@ -440,6 +440,30 @@ async function renderNotaDetail(nota) {
   $("descargoForm")?.addEventListener("submit", (e) => submitDescargo(e, nota.id));
   $("sancionForm")?.addEventListener("submit", (e) => submitSancion(e, nota));
   $("btnRedactarIA")?.addEventListener("click", () => redactarConIA(nota));
+
+  // Si no hubo descargo, al elegir el tercio se rellena el "Análisis y
+  // Evaluación" con el párrafo estándar (venció el plazo...) cerrando según
+  // el extremo (mínimo/medio/máximo) elegido. Solo se pisa el campo si sigue
+  // vacío o si su contenido fue puesto por este mismo autocompletado (no si
+  // el oficial ya escribió algo a mano).
+  const analisisEl = $("sSancionAnalisis");
+  if (analisisEl && !nota.fecha_descargo) {
+    document.querySelectorAll('input[name="sancionTercio"]').forEach((radio) => {
+      radio.addEventListener("change", () => {
+        const esVacioOAutocompletado = !analisisEl.value.trim() || analisisEl.dataset.autofilled === "true";
+        if (esVacioOAutocompletado) {
+          analisisEl.value = analisisSinDescargoDefault(nota.codigo_infraccion, radio.value);
+          analisisEl.dataset.autofilled = "true";
+        }
+      });
+    });
+    // Un input real del usuario (no un .value asignado por JS) sí dispara este
+    // evento, así que basta para distinguir "lo escribió el oficial" de
+    // "lo puso el autocompletado".
+    analisisEl.addEventListener("input", () => {
+      analisisEl.dataset.autofilled = "false";
+    });
+  }
 
   if (isAdmin) {
     $("btnEliminarNota")?.addEventListener("click", () => eliminarNota(nota.id));
