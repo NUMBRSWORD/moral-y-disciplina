@@ -3,7 +3,7 @@ import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
 import { createWorker } from "https://esm.sh/tesseract.js@5.1.1";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
-import { generarImputacionDocx, puedeGenerarImputacion } from "./lib/imputacion.js";
+import { generarImputacionDocx, puedeGenerarImputacion, buscarOficialConstato } from "./lib/imputacion.js";
 import { generarActaNoDescargoDocx, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
 import { generarOrdenSancionDocx, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
@@ -16,6 +16,7 @@ const state = {
   session: null,
   role: null,
   email: null,
+  cip: null,
   notas: [],
   efectivos: [],
   currentNotaId: null,
@@ -54,6 +55,10 @@ async function loadProfile(userId) {
   if (error) { console.error(error); return; }
   state.role = data.role;
   state.email = data.email;
+  // Los oficiales inician sesión con "{cip}@moralydisciplina.local"; de ahí se
+  // saca el CIP para saber, más adelante, cuáles notas le corresponden (en las
+  // que él figura como oficial que constató).
+  state.cip = (state.email || "").split("@")[0];
   $("userEmail").textContent = state.email;
   $("userRole").textContent = state.role;
   document.querySelectorAll(".admin-only").forEach((el) => {
@@ -117,7 +122,15 @@ async function loadNotas() {
     .select("*, expedientes(*)")
     .order("fecha_falta", { ascending: false });
   if (error) { console.error(error); return; }
-  state.notas = data || [];
+  const todas = data || [];
+  // Los no-administradores solo ven las notas donde ELLOS figuran como
+  // oficial que constató la falta (comparando su CIP de inicio de sesión
+  // contra Efectivos, igual que se hace para firmar los documentos); el
+  // admin sigue viendo todo.
+  state.notas = state.role === "admin" ? todas : todas.filter((n) => {
+    const oficial = buscarOficialConstato(n.oficial_constato, state.efectivos);
+    return oficial?.cip === state.cip;
+  });
   renderNotasTable(state.notas);
 }
 
