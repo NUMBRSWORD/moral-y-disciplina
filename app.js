@@ -5,7 +5,8 @@ import { createWorker } from "https://esm.sh/tesseract.js@5.1.1";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 import { generarImputacionDocx, puedeGenerarImputacion } from "./lib/imputacion.js";
 import { generarActaNoDescargoDocx, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
-import { generarOrdenSancionDocx, puedeGenerarOrdenSancion, opcionesTercio } from "./lib/ordenSancion.js";
+import { generarOrdenSancionDocx, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto } from "./lib/ordenSancion.js";
+import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
 
@@ -385,12 +386,16 @@ async function renderNotaDetail(nota) {
               (nota.sancion_tipo === "dias" && String(nota.sancion_dias) === o.value);
             return `<label class="checkbox-row"><input type="radio" name="sancionTercio" value="${o.value}" ${marcado ? "checked" : ""} required /> ${escapeHtml(o.label)}</label>`;
           }).join("")}
-          <label>Descargo del investigado (resumen para el documento)
-            <textarea id="sSancionDescargo" rows="3" placeholder="${nota.fecha_descargo ? "Resuma lo que argumentó el investigado en su descargo..." : ""}">${escapeHtml(nota.sancion_descargo_resumen || (nota.fecha_descargo ? "" : "El investigado no presentó su descargo por escrito dentro del plazo de un (01) día hábil establecido por ley, conforme acta respectiva, precluyendo su derecho a la defensa en la presente etapa procedimental."))}</textarea>
+          <label>Descargo del investigado (resumen, o notas sueltas — la IA lo puede redactar)
+            <textarea id="sSancionDescargo" rows="3" placeholder="${nota.fecha_descargo ? "Resuma o anote en sus palabras lo que argumentó el investigado en su descargo..." : ""}">${escapeHtml(nota.sancion_descargo_resumen || (nota.fecha_descargo ? "" : "El investigado no presentó su descargo por escrito dentro del plazo de un (01) día hábil establecido por ley, conforme acta respectiva, precluyendo su derecho a la defensa en la presente etapa procedimental."))}</textarea>
           </label>
-          <label>Análisis y evaluación
-            <textarea id="sSancionAnalisis" rows="6" required placeholder="Escriba el razonamiento: qué se acredita, qué alega el investigado, y por qué corresponde el tercio elegido...">${escapeHtml(nota.sancion_analisis || "")}</textarea>
+          <label>Análisis y evaluación (notas sueltas o texto final)
+            <textarea id="sSancionAnalisis" rows="6" required placeholder="Anote en sus palabras: qué se acredita, qué alega el investigado, y por qué corresponde el tercio elegido... o escriba el texto final directamente.">${escapeHtml(nota.sancion_analisis || "")}</textarea>
           </label>
+          <div class="modal-actions" style="justify-content:flex-start; margin-bottom:10px">
+            <button type="button" class="btn-secondary" id="btnRedactarIA">✨ Redactar con IA</button>
+          </div>
+          <p id="sancionIAStatus" class="muted small hidden"></p>
           <p id="sancionError" class="error hidden"></p>
           <button type="submit" class="btn-primary">Guardar y descargar Orden de Sanción</button>
         </form>
@@ -434,6 +439,7 @@ async function renderNotaDetail(nota) {
   $("notificacionForm")?.addEventListener("submit", (e) => submitNotificacion(e, nota.id));
   $("descargoForm")?.addEventListener("submit", (e) => submitDescargo(e, nota.id));
   $("sancionForm")?.addEventListener("submit", (e) => submitSancion(e, nota));
+  $("btnRedactarIA")?.addEventListener("click", () => redactarConIA(nota));
 
   if (isAdmin) {
     $("btnEliminarNota")?.addEventListener("click", () => eliminarNota(nota.id));
@@ -453,6 +459,52 @@ async function submitNotificacion(e, notaId) {
   const { error } = await supabase.rpc("registrar_notificacion_imputacion", { p_nota_id: notaId, p_fecha: fecha });
   if (error) { msgEl.textContent = "Error: " + error.message; msgEl.classList.remove("hidden"); return; }
   openNotaDetail(notaId);
+}
+
+async function redactarConIA(nota) {
+  const btn = $("btnRedactarIA");
+  const statusEl = $("sancionIAStatus");
+  const errEl = $("sancionError");
+  errEl.classList.add("hidden");
+
+  const tercioValue = document.querySelector('input[name="sancionTercio"]:checked')?.value;
+  if (!tercioValue) {
+    errEl.textContent = "Seleccione primero la sanción a imponer, para que la IA sepa qué justificar.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  const opciones = opcionesTercio(nota.codigo_infraccion) || [];
+  const opcion = opciones.find((o) => o.value === tercioValue);
+  const infraccion = getInfraccion(nota.codigo_infraccion);
+
+  btn.disabled = true;
+  statusEl.textContent = "Redactando con IA...";
+  statusEl.classList.remove("hidden");
+  try {
+    const { data, error } = await supabase.functions.invoke("redactar-analisis", {
+      body: {
+        investigadoCompleto: `${nota.grado || ""} ${nota.apellidos || ""} ${nota.nombres || ""}`.replace(/\s+/g, " ").trim(),
+        codigoInfraccion: normalizarCodigoInfraccion(nota.codigo_infraccion),
+        infraccionTexto: infraccion?.infraccion || "",
+        hechoResumen: buildCasoConcreto(nota),
+        tercioLabel: opcion?.label || "",
+        descargoNotas: $("sSancionDescargo").value.trim(),
+        analisisNotas: $("sSancionAnalisis").value.trim(),
+      },
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    if (data?.descargo_texto) $("sSancionDescargo").value = data.descargo_texto;
+    if (data?.analisis_texto) $("sSancionAnalisis").value = data.analisis_texto;
+    statusEl.textContent = "Listo — revise el texto antes de guardar y descargar.";
+  } catch (err) {
+    console.error(err);
+    statusEl.classList.add("hidden");
+    errEl.textContent = "No se pudo redactar con IA: " + (err.message || err);
+    errEl.classList.remove("hidden");
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function submitSancion(e, nota) {
