@@ -399,6 +399,7 @@ async function renderNotaDetail(nota) {
     </div>
     ` : ""}
 
+    ${isAdmin ? `
     <div class="detail-card">
       <h3>Expediente</h3>
       ${exp ? `
@@ -410,7 +411,6 @@ async function renderNotaDetail(nota) {
         </div>
       ` : `
         <p class="muted small">Sin expediente registrado.</p>
-        ${isAdmin ? `
         <form id="expForm">
           <div class="grid-2">
             <label>N.º de oficio<input type="text" id="eOficio" required /></label>
@@ -420,9 +420,10 @@ async function renderNotaDetail(nota) {
           <label>Archivo del expediente<input type="file" id="eArchivo" /></label>
           <p id="expError" class="error hidden"></p>
           <button type="submit" class="btn-primary">Registrar expediente</button>
-        </form>` : ""}
+        </form>
       `}
     </div>
+    ` : ""}
   `;
 
   $("btnDescargarImputacion")?.addEventListener("click", (e) => handleDescargarImputacion(nota, e.currentTarget));
