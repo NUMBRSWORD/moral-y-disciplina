@@ -386,8 +386,8 @@ async function renderNotaDetail(nota) {
               (nota.sancion_tipo === "dias" && String(nota.sancion_dias) === o.value);
             return `<label class="checkbox-row"><input type="radio" name="sancionTercio" value="${o.value}" ${marcado ? "checked" : ""} required /> ${escapeHtml(o.label)}</label>`;
           }).join("")}
-          <label>Descargo del investigado (resumen, o notas sueltas — la IA lo puede redactar)
-            <textarea id="sSancionDescargo" rows="3" placeholder="${nota.fecha_descargo ? "Resuma o anote en sus palabras lo que argumentó el investigado en su descargo..." : ""}">${escapeHtml(nota.sancion_descargo_resumen || (nota.fecha_descargo ? "" : "El investigado no presentó su descargo por escrito dentro del plazo de un (01) día hábil establecido por ley, conforme acta respectiva, precluyendo su derecho a la defensa en la presente etapa procedimental."))}</textarea>
+          <label>Descargo del investigado (resumen — deje en blanco y presione "Redactar con IA" para que se lea solo del archivo subido)
+            <textarea id="sSancionDescargo" rows="3" placeholder="${nota.fecha_descargo ? "Déjelo en blanco: 'Redactar con IA' lee el archivo del descargo ya subido. O escriba usted mismo un resumen." : ""}">${escapeHtml(nota.sancion_descargo_resumen || (nota.fecha_descargo ? "" : "El investigado no presentó su descargo por escrito dentro del plazo de un (01) día hábil establecido por ley, conforme acta respectiva, precluyendo su derecho a la defensa en la presente etapa procedimental."))}</textarea>
           </label>
           <label>Análisis y evaluación (notas sueltas o texto final)
             <textarea id="sSancionAnalisis" rows="6" required placeholder="Anote en sus palabras: qué se acredita, qué alega el investigado, y por qué corresponde el tercio elegido... o escriba el texto final directamente.">${escapeHtml(nota.sancion_analisis || "")}</textarea>
@@ -502,9 +502,15 @@ async function redactarConIA(nota) {
   const infraccion = getInfraccion(nota.codigo_infraccion);
 
   btn.disabled = true;
-  statusEl.textContent = "Redactando con IA...";
   statusEl.classList.remove("hidden");
   try {
+    let descargoNotas = $("sSancionDescargo").value.trim();
+    if (!descargoNotas && nota.archivo_descargo_path) {
+      statusEl.textContent = "Leyendo el archivo del descargo ya subido...";
+      descargoNotas = (await extraerTextoDescargo(nota, (msg) => { statusEl.textContent = msg; })).trim();
+    }
+
+    statusEl.textContent = "Redactando con IA...";
     const { data, error } = await supabase.functions.invoke("redactar-analisis", {
       body: {
         investigadoCompleto: `${nota.grado || ""} ${nota.apellidos || ""} ${nota.nombres || ""}`.replace(/\s+/g, " ").trim(),
@@ -512,7 +518,7 @@ async function redactarConIA(nota) {
         infraccionTexto: infraccion?.infraccion || "",
         hechoResumen: buildCasoConcreto(nota),
         tercioLabel: opcion?.label || "",
-        descargoNotas: $("sSancionDescargo").value.trim(),
+        descargoNotas,
         analisisNotas: $("sSancionAnalisis").value.trim(),
       },
     });
@@ -813,6 +819,39 @@ async function extractPdfTextConOcr(pdf) {
     await worker.terminate();
   }
   return text;
+}
+
+async function extractImagenTextoConOcr(blob) {
+  const worker = await createWorker("spa");
+  try {
+    const { data } = await worker.recognize(blob);
+    return data.text || "";
+  } finally {
+    await worker.terminate();
+  }
+}
+
+// Lee automáticamente el archivo de descargo ya subido (PDF o foto), para
+// que el oficial no tenga que volver a escribir lo que ya alegó el
+// investigado por escrito. Si no se puede leer, devuelve "" y el oficial
+// puede escribir sus notas a mano como respaldo.
+async function extraerTextoDescargo(nota, onEstado) {
+  if (!nota.archivo_descargo_path) return "";
+  const { data: blob, error } = await supabase.storage.from("notas").download(nota.archivo_descargo_path);
+  if (error || !blob) return "";
+  const nombre = nota.archivo_descargo_nombre || "";
+  const esPdf = /\.pdf$/i.test(nombre) || blob.type === "application/pdf";
+  const esImagen = /\.(jpe?g|png|webp|bmp)$/i.test(nombre) || blob.type.startsWith("image/");
+  try {
+    if (esPdf) return await extractPdfText(blob, onEstado);
+    if (esImagen) {
+      onEstado?.("Leyendo el archivo del descargo con reconocimiento de texto (OCR)...");
+      return await extractImagenTextoConOcr(blob);
+    }
+  } catch (err) {
+    console.error("No se pudo leer el archivo de descargo:", err);
+  }
+  return "";
 }
 
 // Extrae los efectivos mencionados en la nota. Prioriza la lista con viñetas
