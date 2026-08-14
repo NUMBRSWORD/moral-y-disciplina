@@ -386,7 +386,7 @@ async function renderNotaDetail(nota) {
             return `<label class="checkbox-row"><input type="radio" name="sancionTercio" value="${o.value}" ${marcado ? "checked" : ""} required /> ${escapeHtml(o.label)}</label>`;
           }).join("")}
           <label>Descargo del investigado (resumen para el documento)
-            <textarea id="sSancionDescargo" rows="3" placeholder="${nota.fecha_descargo ? "Resuma lo que argumentó el investigado en su descargo..." : ""}">${escapeHtml(nota.sancion_descargo_resumen || (nota.fecha_descargo ? "" : "El investigado no presentó descargo dentro del plazo establecido."))}</textarea>
+            <textarea id="sSancionDescargo" rows="3" placeholder="${nota.fecha_descargo ? "Resuma lo que argumentó el investigado en su descargo..." : ""}">${escapeHtml(nota.sancion_descargo_resumen || (nota.fecha_descargo ? "" : "El investigado no presentó su descargo por escrito dentro del plazo de un (01) día hábil establecido por ley, conforme acta respectiva, precluyendo su derecho a la defensa en la presente etapa procedimental."))}</textarea>
           </label>
           <label>Análisis y evaluación
             <textarea id="sSancionAnalisis" rows="6" required placeholder="Escriba el razonamiento: qué se acredita, qué alega el investigado, y por qué corresponde el tercio elegido...">${escapeHtml(nota.sancion_analisis || "")}</textarea>
