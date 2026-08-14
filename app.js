@@ -5,6 +5,7 @@ import { createWorker } from "https://esm.sh/tesseract.js@5.1.1";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 import { generarImputacionDocx, puedeGenerarImputacion } from "./lib/imputacion.js";
 import { generarActaNoDescargoDocx, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
+import { generarOrdenSancionDocx, puedeGenerarOrdenSancion, opcionesTercio } from "./lib/ordenSancion.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
 
@@ -271,6 +272,8 @@ async function renderNotaDetail(nota) {
   const puedeActa = puedeGenerarActaNoDescargo(nota, state.efectivos);
   const plazoVencido = plazoDescargoVencido(nota);
   const fechaLimite = fechaLimiteDescargo(nota);
+  const puedeSancion = puedeGenerarOrdenSancion(nota, state.efectivos);
+  const opcionesSancion = opcionesTercio(nota.codigo_infraccion) || [];
 
   $("notaDetailContent").innerHTML = `
     <div class="detail-card">
@@ -371,6 +374,31 @@ async function renderNotaDetail(nota) {
     </div>
     ` : ""}
 
+    ${codigoEsLeve && (nota.fecha_descargo || plazoVencido) ? `
+    <div class="detail-card">
+      <h3>Orden de Sanción</h3>
+      ${puedeSancion ? `
+        <form id="sancionForm">
+          <div class="label" style="margin-bottom:8px">Sanción a imponer (evaluando el descargo)</div>
+          ${opcionesSancion.map((o) => {
+            const marcado = (o.value === "amonestacion" && nota.sancion_tipo === "amonestacion") ||
+              (nota.sancion_tipo === "dias" && String(nota.sancion_dias) === o.value);
+            return `<label class="checkbox-row"><input type="radio" name="sancionTercio" value="${o.value}" ${marcado ? "checked" : ""} required /> ${escapeHtml(o.label)}</label>`;
+          }).join("")}
+          <label>Descargo del investigado (resumen para el documento)
+            <textarea id="sSancionDescargo" rows="3" placeholder="${nota.fecha_descargo ? "Resuma lo que argumentó el investigado en su descargo..." : ""}">${escapeHtml(nota.sancion_descargo_resumen || (nota.fecha_descargo ? "" : "El investigado no presentó descargo dentro del plazo establecido."))}</textarea>
+          </label>
+          <label>Análisis y evaluación
+            <textarea id="sSancionAnalisis" rows="6" required placeholder="Escriba el razonamiento: qué se acredita, qué alega el investigado, y por qué corresponde el tercio elegido...">${escapeHtml(nota.sancion_analisis || "")}</textarea>
+          </label>
+          <p id="sancionError" class="error hidden"></p>
+          <button type="submit" class="btn-primary">Guardar y descargar Orden de Sanción</button>
+        </form>
+        ${nota.orden_sancion_generada_at ? `<p class="muted small">Generada por última vez el ${formatDate(nota.orden_sancion_generada_at.slice(0, 10))}.</p>` : ""}
+      ` : `<p class="muted small">Para generar la Orden de Sanción, verifique que el oficial que constató la falta y el investigado estén registrados en Efectivos.</p>`}
+    </div>
+    ` : ""}
+
     <div class="detail-card">
       <h3>Expediente</h3>
       ${exp ? `
@@ -404,6 +432,7 @@ async function renderNotaDetail(nota) {
   // no solo admin como el resto de la edición de la nota.
   $("notificacionForm")?.addEventListener("submit", (e) => submitNotificacion(e, nota.id));
   $("descargoForm")?.addEventListener("submit", (e) => submitDescargo(e, nota.id));
+  $("sancionForm")?.addEventListener("submit", (e) => submitSancion(e, nota));
 
   if (isAdmin) {
     $("btnEliminarNota")?.addEventListener("click", () => eliminarNota(nota.id));
@@ -423,6 +452,44 @@ async function submitNotificacion(e, notaId) {
   const { error } = await supabase.rpc("registrar_notificacion_imputacion", { p_nota_id: notaId, p_fecha: fecha });
   if (error) { msgEl.textContent = "Error: " + error.message; msgEl.classList.remove("hidden"); return; }
   openNotaDetail(notaId);
+}
+
+async function submitSancion(e, nota) {
+  e.preventDefault();
+  const errEl = $("sancionError");
+  errEl.classList.add("hidden");
+  const tercioValue = document.querySelector('input[name="sancionTercio"]:checked')?.value;
+  const analisisTexto = $("sSancionAnalisis").value.trim();
+  const descargoTexto = $("sSancionDescargo").value.trim();
+
+  if (!tercioValue) { errEl.textContent = "Seleccione la sanción a imponer."; errEl.classList.remove("hidden"); return; }
+  if (!analisisTexto) { errEl.textContent = "Escriba el Análisis y Evaluación."; errEl.classList.remove("hidden"); return; }
+
+  const submitBtn = e.target.querySelector("button[type=submit]");
+  const textoOriginal = submitBtn.textContent;
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Generando...";
+  try {
+    await generarOrdenSancionDocx(nota, state.efectivos, { tercioValue, analisisTexto, descargoTexto });
+    const tipo = tercioValue === "amonestacion" ? "amonestacion" : "dias";
+    const dias = tercioValue === "amonestacion" ? null : Number(tercioValue);
+    const { error } = await supabase.rpc("registrar_sancion", {
+      p_nota_id: nota.id,
+      p_tipo: tipo,
+      p_dias: dias,
+      p_analisis: analisisTexto,
+      p_descargo_resumen: descargoTexto,
+    });
+    if (error) { errEl.textContent = "Se generó el documento, pero no se pudo guardar la decisión: " + error.message; errEl.classList.remove("hidden"); return; }
+    openNotaDetail(nota.id);
+  } catch (err) {
+    console.error(err);
+    errEl.textContent = err.message || "No se pudo generar la Orden de Sanción.";
+    errEl.classList.remove("hidden");
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = textoOriginal;
+  }
 }
 
 async function submitDescargo(e, notaId) {
