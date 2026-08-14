@@ -386,16 +386,18 @@ async function renderNotaDetail(nota) {
               (nota.sancion_tipo === "dias" && String(nota.sancion_dias) === o.value);
             return `<label class="checkbox-row"><input type="radio" name="sancionTercio" value="${o.value}" ${marcado ? "checked" : ""} required /> ${escapeHtml(o.label)}</label>`;
           }).join("")}
-          <label>Descargo del investigado (resumen — deje en blanco y presione "Redactar con IA" para que se lea solo del archivo subido)
+          <label>Descargo del investigado (resumen${nota.fecha_descargo ? " — deje en blanco y presione \"Redactar con IA\" para que se lea solo del archivo subido" : ""})
             <textarea id="sSancionDescargo" rows="3" placeholder="${nota.fecha_descargo ? "Déjelo en blanco: 'Redactar con IA' lee el archivo del descargo ya subido. O escriba usted mismo un resumen." : ""}">${escapeHtml(nota.sancion_descargo_resumen || (nota.fecha_descargo ? "" : "El investigado no presentó su descargo por escrito dentro del plazo de un (01) día hábil establecido por ley, conforme acta respectiva, precluyendo su derecho a la defensa en la presente etapa procedimental."))}</textarea>
           </label>
-          <label>Análisis y evaluación (notas sueltas o texto final)
+          <label>Análisis y evaluación ${nota.fecha_descargo ? "(notas sueltas o texto final)" : "(se completa solo al elegir el tercio; puede editarlo si lo desea)"}
             <textarea id="sSancionAnalisis" rows="6" required placeholder="Anote en sus palabras: qué se acredita, qué alega el investigado, y por qué corresponde el tercio elegido... o escriba el texto final directamente.">${escapeHtml(nota.sancion_analisis || "")}</textarea>
           </label>
+          ${nota.fecha_descargo ? `
           <div class="modal-actions" style="justify-content:flex-start; margin-bottom:10px">
             <button type="button" class="btn-secondary" id="btnRedactarIA">✨ Redactar con IA</button>
           </div>
           <p id="sancionIAStatus" class="muted small hidden"></p>
+          ` : `<p class="muted small">Sin descargo: el texto se genera automáticamente según el tercio que elija arriba — no necesita IA ni escribir nada, solo revisar.</p>`}
           <p id="sancionError" class="error hidden"></p>
           <button type="submit" class="btn-primary">Guardar y descargar Orden de Sanción</button>
         </form>
