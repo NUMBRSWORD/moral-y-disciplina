@@ -244,6 +244,59 @@ $("btnLimpiarFiltroFecha").addEventListener("click", () => {
   aplicarFiltrosNotas();
 });
 
+// ---------- Resumen ejecutivo (IA) ----------
+// Arma, a partir de lo que YA se ve en el dashboard (respetando el filtro de
+// visibilidad por oficial de loadNotas), el estado de cada caso con los datos
+// que sí se registran en notas_informativas — se envían tal cual a la IA, sin
+// inventar campos que la app no trackea (p.ej. "Acta notificada" no existe
+// como estado persistido, así que no se manda).
+function construirResumenEstadoCasos() {
+  return state.notas.map((n) => ({
+    investigado: `${n.grado || ""} ${n.apellidos || ""} ${n.nombres || ""}`.replace(/\s+/g, " ").trim(),
+    codigo_infraccion: n.codigo_infraccion || null,
+    fecha_hecho: n.fecha_falta || null,
+    reincorporado: !!n.fecha_reincorporacion,
+    imputacion_notificada: !!n.imputacion_generada_at,
+    fecha_notificacion_imputacion: n.imputacion_generada_at ? n.imputacion_generada_at.slice(0, 10) : null,
+    plazo_descargo_vencido: plazoDescargoVencido(n),
+    descargo_recibido: !!n.fecha_descargo,
+    orden_sancion_generada: !!n.orden_sancion_generada_at,
+    sancion_impuesta: n.sancion_tipo === "amonestacion" ? "amonestación" : (n.sancion_dias ? `${n.sancion_dias} días de sanción simple` : null),
+  }));
+}
+
+async function generarResumenEjecutivo() {
+  const btn = $("btnResumenEjecutivo");
+  const panel = $("resumenEjecutivoPanel");
+  const statusEl = $("resumenEjecutivoStatus");
+  const contenidoEl = $("resumenEjecutivoContenido");
+  panel.classList.remove("hidden");
+  contenidoEl.textContent = "";
+  statusEl.textContent = "Generando resumen ejecutivo con IA...";
+  statusEl.classList.remove("hidden");
+  btn.disabled = true;
+  try {
+    const casos = construirResumenEstadoCasos();
+    const { data, error } = await supabase.functions.invoke("generar-resumen-casos", {
+      body: { fechaHoy: new Date().toISOString().slice(0, 10), casos },
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    contenidoEl.textContent = data?.resumen || "No se pudo generar el resumen.";
+    statusEl.classList.add("hidden");
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "No se pudo generar el resumen: " + (err.message || err);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$("btnResumenEjecutivo").addEventListener("click", generarResumenEjecutivo);
+$("btnCerrarResumenEjecutivo").addEventListener("click", () => {
+  $("resumenEjecutivoPanel").classList.add("hidden");
+});
+
 $("btnExportarExcel").addEventListener("click", () => {
   if (!notasVisibles.length) { alert("No hay notas para exportar (revise el buscador)."); return; }
   const filas = notasVisibles.map((n) => ({
@@ -302,6 +355,7 @@ async function renderNotaDetail(nota) {
   const fechaLimite = fechaLimiteDescargo(nota);
   const puedeSancion = puedeGenerarOrdenSancion(nota, state.efectivos);
   const opcionesSancion = opcionesTercio(nota.codigo_infraccion) || [];
+  const avisoConsistencia = verificarConsistenciaCodigo(nota);
 
   $("notaDetailContent").innerHTML = `
     <div class="detail-card">
@@ -311,6 +365,7 @@ async function renderNotaDetail(nota) {
           <button type="button" class="btn-secondary" id="btnDescargarImputacion" ${puedeDescargar ? "" : "disabled"}>⬇ Descargar Imputación</button>
         ` : ""}
       </div>
+      ${avisoConsistencia ? `<p class="error small">⚠ Según las horas transcurridas entre la falta y la reincorporación (${formatearHorasFalto(nota)}), el código esperado sería <strong>${avisoConsistencia.sugerido}</strong>, pero el registrado es <strong>${escapeHtml(avisoConsistencia.actual)}</strong>. Verifique la fecha/hora de falta y de reincorporación (pueden venir mal leídas de un PDF/OCR) antes de generar los documentos.</p>` : ""}
       ${codigoEsLeve && !puedeDescargar ? `<p class="muted small">Para poder generar el documento, complete la reincorporación (fecha, hora y N.º de nota) y verifique que el oficial que constató la falta ("${escapeHtml(nota.oficial_constato || "")}") esté registrado en Efectivos.</p>` : ""}
       <div class="detail-grid">
         <div class="detail-field"><div class="label">Fecha de falta</div><div class="value">${formatDate(nota.fecha_falta)}</div></div>
@@ -967,6 +1022,60 @@ function extractPersonCandidates(norm) {
   return best ? [best] : [];
 }
 
+// Extracción estructurada por IA (reemplaza al parser por expresiones
+// regulares como método principal): manda el texto crudo del PDF/OCR a la
+// Edge Function "extraer-nota-informativa" y devuelve el resultado ya
+// normalizado a la misma forma que devolvía parseNotaInformativa/
+// parseReincorporacion, para no tener que tocar el resto de los llamadores.
+// Si la llamada falla (red caída, IA sin configurar, etc.) el llamador cae
+// de vuelta al parser por patrones como respaldo — nunca deja al oficial sin
+// autocompletado por un error transitorio.
+async function extraerDatosNotaIA(texto, tipo) {
+  const { data, error } = await supabase.functions.invoke("extraer-nota-informativa", {
+    body: { tipo, texto },
+  });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+function normalizarResultadoFaltaIA(ia) {
+  const candidates = (ia.candidatos || []).map((c) => ({
+    grado: (c.grado || "").trim(),
+    apellidos: (c.apellidos || "").trim(),
+    nombres: (c.nombres || "").trim(),
+  }));
+  const result = {
+    numero_nota_falta: ia.numero_nota || undefined,
+    fecha_falta: ia.fecha || undefined,
+    hora_falta: ia.hora || undefined,
+    oficial_constato: ia.oficial_constato || undefined,
+    candidates,
+  };
+  if (candidates.length) {
+    result.grado = candidates[0].grado;
+    result.apellidos = candidates[0].apellidos;
+    result.nombres = candidates[0].nombres;
+  }
+  return result;
+}
+
+function normalizarResultadoReincorporacionIA(ia) {
+  const candidates = (ia.candidatos || []).map((c) => ({
+    grado: (c.grado || "").trim(),
+    apellidos: (c.apellidos || "").trim(),
+    nombres: (c.nombres || "").trim(),
+  }));
+  return {
+    numero_nota_reincorporacion: ia.numero_nota || undefined,
+    numero_nota_falta_ref: ia.numero_nota_referencia || undefined,
+    fecha_reincorporacion: ia.fecha || undefined,
+    hora_reincorporacion: ia.hora || undefined,
+    candidates,
+  };
+}
+
+// ---------- Parser por patrones (respaldo si la extracción por IA falla) ----------
 function parseNotaInformativa(text) {
   const norm = text.replace(/\s+/g, " ");
   const result = {};
@@ -1063,7 +1172,14 @@ async function autocompletarReincorporacion(file) {
   statusEl.classList.remove("hidden");
   try {
     const text = await extractPdfText(file, (msg) => { statusEl.textContent = msg; });
-    const data = parseReincorporacion(text);
+    let data;
+    try {
+      statusEl.textContent = "Interpretando el contenido con IA...";
+      data = normalizarResultadoReincorporacionIA(await extraerDatosNotaIA(text, "reincorporacion"));
+    } catch (iaErr) {
+      console.error("Extracción por IA falló, se usa el reconocimiento por patrones como respaldo:", iaErr);
+      data = parseReincorporacion(text);
+    }
     if (data.fecha_reincorporacion && !$("rFecha").value) $("rFecha").value = data.fecha_reincorporacion;
     if (data.numero_nota_reincorporacion && !$("rNumero").value) $("rNumero").value = data.numero_nota_reincorporacion;
     if (data.hora_reincorporacion && !$("rHora").value) $("rHora").value = data.hora_reincorporacion;
@@ -1090,7 +1206,14 @@ async function autocompletarDesdeArchivo(file) {
   renderCandidatesChecklist();
   try {
     const text = await extractPdfText(file, (msg) => { statusEl.textContent = msg; });
-    const data = parseNotaInformativa(text);
+    let data;
+    try {
+      statusEl.textContent = "Interpretando el contenido con IA...";
+      data = normalizarResultadoFaltaIA(await extraerDatosNotaIA(text, "falta"));
+    } catch (iaErr) {
+      console.error("Extracción por IA falló, se usa el reconocimiento por patrones como respaldo:", iaErr);
+      data = parseNotaInformativa(text);
+    }
     if (data.grado && !$("fGrado").value) $("fGrado").value = data.grado;
     if (data.apellidos && !$("fApellidos").value) $("fApellidos").value = data.apellidos;
     if (data.nombres && !$("fNombres").value) $("fNombres").value = data.nombres;
@@ -1298,8 +1421,17 @@ $("rlArchivo").addEventListener("change", async (e) => {
       if (file.type !== "application/pdf") continue;
       const text = await extractPdfText(file, (msg) => { statusEl.textContent = `${file.name}: ${msg}`; });
       const norm = text.replace(/\s+/g, " ");
-      const doc = parseReincorporacion(text);
-      const candidates = extractPersonCandidates(norm).map((c) => ({ grado: c.grado, ...splitApellidosNombres(c.nombreCompleto) }));
+      let doc, candidates;
+      try {
+        statusEl.textContent = `${file.name}: interpretando el contenido con IA...`;
+        const ia = normalizarResultadoReincorporacionIA(await extraerDatosNotaIA(text, "reincorporacion"));
+        doc = ia;
+        candidates = ia.candidates;
+      } catch (iaErr) {
+        console.error("Extracción por IA falló, se usa el reconocimiento por patrones como respaldo:", iaErr);
+        doc = parseReincorporacion(text);
+        candidates = extractPersonCandidates(norm).map((c) => ({ grado: c.grado, ...splitApellidosNombres(c.nombreCompleto) }));
+      }
       const base = {
         file,
         fecha_reincorporacion: doc.fecha_reincorporacion || "",
@@ -1595,6 +1727,22 @@ function horasAusente(nota) {
   const ms = fin - inicio;
   if (Number.isNaN(ms) || ms < 0) return null;
   return ms / 3600000;
+}
+
+// Revisor de consistencia L21/L24 (determinístico, no por IA: es una simple
+// comparación aritmética entre las horas ausente ya calculadas y el código
+// guardado — más confiable pidiéndole a un LLM que verifique una resta).
+// Devuelve null si no hay nada que advertir (falta algún dato, o el código
+// coincide con lo esperado), o { sugerido, actual, horas } si no coinciden —
+// típicamente porque el código se completó a mano o vino de un PDF/OCR con
+// una fecha/hora mal leída.
+function verificarConsistenciaCodigo(nota) {
+  const horas = horasAusente(nota);
+  if (horas == null || !nota.codigo_infraccion) return null;
+  const sugerido = sugerirCodigoInfraccion(horas);
+  const actual = nota.codigo_infraccion.trim().toUpperCase();
+  if (!sugerido || sugerido === actual) return null;
+  return { sugerido, actual, horas };
 }
 
 // L21: se resuelve el mismo día (hasta las 23:59 horas, menos de 24h ausente).
