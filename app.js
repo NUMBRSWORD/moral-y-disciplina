@@ -3,11 +3,14 @@ import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
 import { createWorker } from "https://esm.sh/tesseract.js@5.1.1";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
-import { generarImputacionDocx, puedeGenerarImputacion, buscarOficialConstato, tokens } from "./lib/imputacion.js";
-import { generarActaNoDescargoDocx, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
-import { generarOrdenSancionDocx, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
+import saveAs from "https://esm.sh/file-saver@2.0.5";
+import { renderizarImputacionDocx, puedeGenerarImputacion, buscarOficialConstato, tokens } from "./lib/imputacion.js";
+import { renderizarActaNoDescargoDocx, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
+import { renderizarOrdenSancionDocx, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva, subirArchivoDirectiva } from "./lib/directivas.js";
+import { horasAusente, sugerirCodigoInfraccion } from "./lib/utils.js";
+import { Chart } from "https://esm.sh/chart.js@4.4.4/auto";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
 
@@ -33,12 +36,35 @@ const CATALOGO_ASISTENTE = ["L21", "L24"]
 
 const $ = (id) => document.getElementById(id);
 
+// ---------- Tema claro/oscuro ----------
+// El oscuro sigue siendo el predeterminado (nadie ve un cambio de
+// apariencia sin pedirlo); el script inline en <head> ya aplicó
+// data-theme="light" antes de este punto si esa era la preferencia
+// guardada, así que aquí solo hace falta sincronizar el ícono y el clic.
+function actualizarIconoTema() {
+  const claro = document.documentElement.getAttribute("data-theme") === "light";
+  $("btnTemaToggle").textContent = claro ? "☀️" : "🌙";
+  $("btnTemaToggle").title = claro ? "Cambiar a tema oscuro" : "Cambiar a tema claro";
+}
+actualizarIconoTema();
+$("btnTemaToggle").addEventListener("click", () => {
+  const claroAhora = document.documentElement.getAttribute("data-theme") === "light";
+  if (claroAhora) {
+    document.documentElement.removeAttribute("data-theme");
+    localStorage.setItem("tema", "dark");
+  } else {
+    document.documentElement.setAttribute("data-theme", "light");
+    localStorage.setItem("tema", "light");
+  }
+  actualizarIconoTema();
+});
+
 // ---------- View switching ----------
 function showView(id) {
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $(id).classList.remove("hidden");
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-  const map = { "view-dashboard": "dashboard", "view-efectivos": "efectivos", "view-directivas": "directivas" };
+  const map = { "view-dashboard": "dashboard", "view-efectivos": "efectivos", "view-directivas": "directivas", "view-panel": "panel", "view-historial": "historial" };
   if (map[id]) {
     document.querySelector(`.tab-btn[data-view="${map[id]}"]`)?.classList.add("active");
   }
@@ -50,6 +76,8 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (target === "dashboard") { showView("view-dashboard"); loadNotas(); }
     if (target === "efectivos") { showView("view-efectivos"); loadEfectivos(); }
     if (target === "directivas") { showView("view-directivas"); loadDirectivasView(); }
+    if (target === "panel") { showView("view-panel"); renderPanel(); }
+    if (target === "historial") { showView("view-historial"); loadHistorial(); }
   });
 });
 
@@ -136,15 +164,11 @@ async function loadNotas() {
     .select("*, expedientes(*)")
     .order("fecha_falta", { ascending: false });
   if (error) { console.error(error); return; }
-  const todas = data || [];
-  // Los no-administradores solo ven las notas donde ELLOS figuran como
-  // oficial que constató la falta (comparando su CIP de inicio de sesión
-  // contra Efectivos, igual que se hace para firmar los documentos); el
-  // admin sigue viendo todo.
-  state.notas = state.role === "admin" ? todas : todas.filter((n) => {
-    const oficial = buscarOficialConstato(n.oficial_constato, state.efectivos);
-    return oficial?.cip === state.cip;
-  });
+  // La política de RLS "ve notas propias o es admin" ya filtra en el
+  // servidor qué filas puede ver este usuario (por oficial_constato_cip);
+  // el navegador nunca recibe las que no le corresponden, así que aquí ya
+  // no hace falta (ni conviene) repetir el filtro en JavaScript.
+  state.notas = data || [];
   renderNotasTable(state.notas);
 }
 
@@ -185,11 +209,41 @@ function renderNotasTable(list) {
   }
 }
 
+// Archiva en Storage y registra en documentos_generados cada versión de un
+// documento generado -- "mejor esfuerzo": si falla (red, permisos), se deja
+// constancia en consola pero NUNCA bloquea la descarga real del oficial,
+// que ya ocurrió antes de llamar a esta función.
+async function registrarVersionDocumento(notaId, tipo, blob, nombreArchivo) {
+  try {
+    const path = `${notaId}/generados/${tipo}_${Date.now()}_${nombreArchivo}`;
+    const { error: upErr } = await supabase.storage.from("notas").upload(path, blob);
+    if (upErr) { console.error("No se pudo archivar la versión del documento:", upErr); return; }
+    const { error } = await supabase.from("documentos_generados").insert({
+      nota_id: notaId,
+      tipo,
+      archivo_path: path,
+      archivo_nombre: nombreArchivo,
+      generado_por: state.session.user.id,
+      generado_por_email: state.email,
+    });
+    if (error) console.error("No se pudo registrar la versión del documento:", error);
+  } catch (err) {
+    console.error("No se pudo archivar la versión del documento:", err);
+  }
+}
+
+function nombreArchivoDocumento(prefijo, nota) {
+  return `${prefijo} - ${(nota.grado || "").trim()} ${(nota.apellidos || "").trim()} ${(nota.nombres || "").trim()}.docx`.replace(/\s+/g, " ").trim();
+}
+
 async function handleDescargarImputacion(nota, btnEl) {
   const textoOriginal = btnEl ? btnEl.textContent : null;
   if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Generando..."; }
   try {
-    await generarImputacionDocx(nota, state.efectivos);
+    const blob = await renderizarImputacionDocx(nota, state.efectivos);
+    const nombreArchivo = nombreArchivoDocumento("IMPUTACION LEVE", nota);
+    saveAs(blob, nombreArchivo);
+    registrarVersionDocumento(nota.id, "imputacion", blob, nombreArchivo);
     // Se registra la primera vez que se genera/descarga: es la fecha que se usa
     // como notificación al investigado para contar el plazo de descargo.
     if (!nota.imputacion_generada_at) {
@@ -209,7 +263,10 @@ async function handleDescargarActaNoDescargo(nota, btnEl) {
   const textoOriginal = btnEl ? btnEl.textContent : null;
   if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Generando..."; }
   try {
-    await generarActaNoDescargoDocx(nota, state.efectivos);
+    const blob = await renderizarActaNoDescargoDocx(nota, state.efectivos);
+    const nombreArchivo = nombreArchivoDocumento("ACTA NO DESCARGO", nota);
+    saveAs(blob, nombreArchivo);
+    registrarVersionDocumento(nota.id, "acta_no_descargo", blob, nombreArchivo);
   } catch (err) {
     console.error(err);
     alert(err.message || "No se pudo generar el acta de no descargo.");
@@ -347,6 +404,19 @@ async function renderNotaDetail(nota) {
   const reincArchivo = await fileLinkHtml("notas", nota.archivo_reincorporacion_path, nota.archivo_reincorporacion_nombre);
   const expArchivo = exp ? await fileLinkHtml("expedientes", exp.archivo_expediente_path, exp.archivo_expediente_nombre) : "";
   const descargoArchivo = await fileLinkHtml("notas", nota.archivo_descargo_path, nota.archivo_descargo_nombre);
+
+  const { data: versionesDocs } = await supabase
+    .from("documentos_generados")
+    .select("*")
+    .eq("nota_id", nota.id)
+    .order("generado_at", { ascending: false });
+  const TIPO_DOCUMENTO_LABEL = { imputacion: "Imputación", acta_no_descargo: "Acta de No Descargo", orden_sancion: "Orden de Sanción" };
+  const versionesHtml = versionesDocs?.length
+    ? (await Promise.all(versionesDocs.map(async (v) => {
+        const link = await fileLinkHtml("notas", v.archivo_path, v.archivo_nombre);
+        return `<div class="detail-field"><div class="label">${escapeHtml(TIPO_DOCUMENTO_LABEL[v.tipo] || v.tipo)} — ${formatFechaHora(v.generado_at.slice(0, 10), v.generado_at.slice(11, 16))}</div><div class="value">${link} <span class="muted small">(${escapeHtml(v.generado_por_email || "-")})</span></div></div>`;
+      }))).join("")
+    : "";
 
   const puedeDescargar = puedeGenerarImputacion(nota, state.efectivos);
   const codigoEsLeve = /^L/i.test((nota.codigo_infraccion || "").trim());
@@ -514,6 +584,14 @@ async function renderNotaDetail(nota) {
       `}
     </div>
     ` : ""}
+
+    ${versionesDocs?.length ? `
+    <div class="detail-card">
+      <h3>Versiones generadas</h3>
+      <p class="muted small">Cada vez que se genera un documento queda archivada esta copia exacta, aunque después se regenere con datos distintos.</p>
+      <div class="detail-grid">${versionesHtml}</div>
+    </div>
+    ` : ""}
   `;
 
   $("btnDescargarImputacion")?.addEventListener("click", async (e) => {
@@ -672,7 +750,10 @@ async function submitSancion(e, nota) {
   submitBtn.disabled = true;
   submitBtn.textContent = "Generando...";
   try {
-    await generarOrdenSancionDocx(nota, state.efectivos, { tercioValue, analisisTexto, descargoTexto });
+    const blob = await renderizarOrdenSancionDocx(nota, state.efectivos, { tercioValue, analisisTexto, descargoTexto });
+    const nombreArchivo = nombreArchivoDocumento("ORDEN DE SANCION", nota);
+    saveAs(blob, nombreArchivo);
+    registrarVersionDocumento(nota.id, "orden_sancion", blob, nombreArchivo);
     const tipo = tercioValue === "amonestacion" ? "amonestacion" : "dias";
     const dias = tercioValue === "amonestacion" ? null : Number(tercioValue);
     const { error } = await supabase.rpc("registrar_sancion", {
@@ -1269,12 +1350,18 @@ $("notaForm").addEventListener("submit", async (e) => {
   const errEl = $("notaFormError");
   errEl.classList.add("hidden");
 
+  const oficialConstatoTexto = $("fOficialConstato").value.trim() || null;
   const compartido = {
     fecha_falta: $("fFechaFalta").value,
     numero_nota_falta: $("fNumeroNotaFalta").value.trim(),
     hora_falta: $("fHoraFalta").value || null,
     codigo_infraccion: $("fCodigoInfraccion").value.trim(),
-    oficial_constato: $("fOficialConstato").value.trim() || null,
+    oficial_constato: oficialConstatoTexto,
+    // Se resuelve y guarda ya en la creación (mismo emparejamiento que usa
+    // el resto de la app): es lo que la política de RLS usa para decidir
+    // qué notas puede ver cada oficial, así que sin esto la nota quedaría
+    // invisible para el propio oficial que constató la falta.
+    oficial_constato_cip: buscarOficialConstato(oficialConstatoTexto, state.efectivos)?.cip || null,
     created_by: state.session.user.id,
   };
 
@@ -1704,6 +1791,173 @@ $("asistenteForm")?.addEventListener("submit", async (e) => {
   }
 });
 
+// ---------- Panel de métricas ----------
+let chartsPanel = {};
+
+// Mismas etapas que ya se muestran en el detalle de cada nota (Acta de No
+// Descargo / Orden de Sanción), resumidas en una sola categoría por caso
+// para el gráfico de estado.
+function estadoDeNota(n) {
+  if (!n.fecha_reincorporacion) return "Reincorporación pendiente";
+  if (!n.imputacion_generada_at) return "Notificación pendiente";
+  if (n.orden_sancion_generada_at) return "Sanción generada";
+  if (n.fecha_descargo) return "Con descargo, evaluando";
+  if (plazoDescargoVencido(n)) return "Plazo vencido, pendiente";
+  return "Plazo de descargo vigente";
+}
+
+function colorTema(varName) {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+const MESES_CORTO_PANEL = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+function renderPanel() {
+  const notas = state.notas;
+  $("panelEmpty").classList.toggle("hidden", notas.length > 0);
+  $("panelContenido").classList.toggle("hidden", notas.length === 0);
+  Object.values(chartsPanel).forEach((c) => c.destroy());
+  chartsPanel = {};
+  if (!notas.length) return;
+
+  const text = colorTema("--text");
+  const textMuted = colorTema("--text-muted");
+  const border = colorTema("--border");
+  const accent = colorTema("--accent");
+  const accentSoft = colorTema("--accent-soft");
+
+  const pendientesVencidos = notas.filter((n) =>
+    n.fecha_reincorporacion && n.imputacion_generada_at && !n.fecha_descargo && !n.orden_sancion_generada_at && plazoDescargoVencido(n)
+  ).length;
+  const sancionados = notas.filter((n) => n.orden_sancion_generada_at).length;
+  $("panelStats").innerHTML = `
+    <div class="stat-tile"><div class="stat-value">${notas.length}</div><div class="stat-label">Casos totales</div></div>
+    <div class="stat-tile"><div class="stat-value">${pendientesVencidos}</div><div class="stat-label">Plazo vencido sin resolver</div></div>
+    <div class="stat-tile"><div class="stat-value">${sancionados}</div><div class="stat-label">Con sanción generada</div></div>
+  `;
+
+  const estadoCounts = {};
+  notas.forEach((n) => { const e = estadoDeNota(n); estadoCounts[e] = (estadoCounts[e] || 0) + 1; });
+  const paletaEstado = ["#1f9d55", "#d99a2b", "#4a90d9", "#8a6fd6", "#e5484d", "#5b6b78"];
+
+  const codigoCounts = {};
+  notas.forEach((n) => { const c = (n.codigo_infraccion || "").trim() || "Sin código"; codigoCounts[c] = (codigoCounts[c] || 0) + 1; });
+  const codigosOrdenados = Object.entries(codigoCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+  const mesesCounts = {};
+  notas.forEach((n) => {
+    if (!n.fecha_falta) return;
+    const mes = n.fecha_falta.slice(0, 7);
+    mesesCounts[mes] = (mesesCounts[mes] || 0) + 1;
+  });
+  const mesesOrdenados = Object.keys(mesesCounts).sort();
+  const mesesLabels = mesesOrdenados.map((m) => {
+    const [y, mm] = m.split("-");
+    return `${MESES_CORTO_PANEL[Number(mm) - 1]} ${y}`;
+  });
+
+  chartsPanel.estado = new Chart($("chartEstado"), {
+    type: "doughnut",
+    data: {
+      labels: Object.keys(estadoCounts),
+      datasets: [{ data: Object.values(estadoCounts), backgroundColor: paletaEstado, borderColor: border, borderWidth: 2 }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: "bottom", labels: { color: text, boxWidth: 12, padding: 10, font: { size: 11 } } } },
+    },
+  });
+
+  chartsPanel.codigo = new Chart($("chartCodigo"), {
+    type: "bar",
+    data: {
+      labels: codigosOrdenados.map((e) => e[0]),
+      datasets: [{ data: codigosOrdenados.map((e) => e[1]), backgroundColor: accent, borderRadius: 4 }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      indexAxis: "y",
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: textMuted, precision: 0 }, grid: { color: border } },
+        y: { ticks: { color: text }, grid: { display: false } },
+      },
+    },
+  });
+
+  chartsPanel.tendencia = new Chart($("chartTendencia"), {
+    type: "line",
+    data: {
+      labels: mesesLabels,
+      datasets: [{
+        data: mesesOrdenados.map((m) => mesesCounts[m]),
+        borderColor: accent, backgroundColor: accentSoft,
+        fill: true, tension: 0.3, pointRadius: 3, pointBackgroundColor: accent,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: textMuted }, grid: { display: false } },
+        y: { ticks: { color: textMuted, precision: 0 }, grid: { color: border }, beginAtZero: true },
+      },
+    },
+  });
+}
+
+// ---------- Historial de actividad ----------
+async function loadHistorial() {
+  const { data, error } = await supabase
+    .from("audit_log")
+    .select("*")
+    .order("changed_at", { ascending: false })
+    .limit(200);
+  if (error) { console.error(error); return; }
+  renderHistorialTable(data || []);
+}
+
+// Para UPDATE, arma una lista legible de "campo: antes → después" comparando
+// el jsonb guardado por el trigger; para INSERT/DELETE no hay comparación
+// posible (solo existe un lado), así que se muestra un texto fijo.
+function diffResumenHistorial(entry) {
+  if (entry.action === "INSERT") return "Registro creado.";
+  if (entry.action === "DELETE") return "Registro eliminado.";
+  const anterior = entry.old_data || {};
+  const nuevo = entry.new_data || {};
+  const campos = new Set([...Object.keys(anterior), ...Object.keys(nuevo)]);
+  const cambios = [];
+  campos.forEach((c) => {
+    if (c === "updated_at" || c === "created_at") return;
+    const a = anterior[c];
+    const b = nuevo[c];
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      cambios.push(`${escapeHtml(c)}: ${escapeHtml(String(a ?? "-"))} → ${escapeHtml(String(b ?? "-"))}`);
+    }
+  });
+  return cambios.length ? cambios.join(" · ") : "Sin cambios en los campos.";
+}
+
+function renderHistorialTable(entries) {
+  const tbody = $("historialTableBody");
+  tbody.innerHTML = "";
+  $("historialEmpty").classList.toggle("hidden", entries.length > 0);
+  for (const e of entries) {
+    const tr = document.createElement("tr");
+    const pillClase = e.action === "INSERT" ? "pill-yes" : e.action === "DELETE" ? "pill-no" : "pill-inactive";
+    const fecha = e.changed_at.slice(0, 10);
+    const hora = e.changed_at.slice(11, 16);
+    tr.innerHTML = `
+      <td>${formatFechaHora(fecha, hora)}</td>
+      <td>${escapeHtml(e.changed_by_email || "-")}</td>
+      <td>${escapeHtml(e.table_name)}</td>
+      <td><span class="pill ${pillClase}">${escapeHtml(e.action)}</span></td>
+      <td class="small">${diffResumenHistorial(e)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
 // ---------- Utils ----------
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
@@ -1720,15 +1974,6 @@ function formatFechaHora(fecha, hora) {
   if (f === "-") return "-";
   return hora ? `${f} ${hora.slice(0, 5)}` : f;
 }
-function horasAusente(nota) {
-  if (!nota.fecha_falta || !nota.hora_falta || !nota.fecha_reincorporacion || !nota.hora_reincorporacion) return null;
-  const inicio = new Date(`${nota.fecha_falta}T${nota.hora_falta}`);
-  const fin = new Date(`${nota.fecha_reincorporacion}T${nota.hora_reincorporacion}`);
-  const ms = fin - inicio;
-  if (Number.isNaN(ms) || ms < 0) return null;
-  return ms / 3600000;
-}
-
 // Revisor de consistencia L21/L24 (determinístico, no por IA: es una simple
 // comparación aritmética entre las horas ausente ya calculadas y el código
 // guardado — más confiable pidiéndole a un LLM que verifique una resta).
@@ -1743,18 +1988,6 @@ function verificarConsistenciaCodigo(nota) {
   const actual = nota.codigo_infraccion.trim().toUpperCase();
   if (!sugerido || sugerido === actual) return null;
   return { sugerido, actual, horas };
-}
-
-// L21: se resuelve el mismo día (hasta las 23:59 horas, menos de 24h ausente).
-// L24: pasa de las 24:00 horas (cruza a otro día) pero antes de cumplir dos días (24-48h).
-// G39: a partir de dos días, antes de cumplir el tercero (48-72h).
-// MG32: a partir del tercer día (72h o más).
-function sugerirCodigoInfraccion(horas) {
-  if (horas == null) return null;
-  if (horas < 24) return "L21";
-  if (horas < 48) return "L24";
-  if (horas < 72) return "G39";
-  return "MG32";
 }
 
 function formatearHorasFalto(nota) {

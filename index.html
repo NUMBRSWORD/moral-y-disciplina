@@ -3,10 +3,22 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="description" content="Gestión del procedimiento disciplinario de infracciones Leves (Ley N.° 30714) para la PNP: notas informativas, imputación, descargos y órdenes de sanción, con asistencia de IA supervisada." />
 <title>Moral y Disciplina</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <link rel="stylesheet" href="styles.css" />
+<script>
+  // Aplica el tema guardado ANTES de pintar la página, para que no se vea
+  // un parpadeo del tema oscuro por defecto al cargar con "claro" elegido.
+  (function () {
+    var t = localStorage.getItem("tema");
+    if (t === "light") document.documentElement.setAttribute("data-theme", "light");
+  })();
+</script>
 </head>
 <body>
+
+<button id="btnTemaToggle" class="tema-toggle" type="button" title="Cambiar tema claro/oscuro">🌙</button>
 
 <header id="topbar" class="hidden">
   <div class="topbar-inner">
@@ -18,6 +30,8 @@
       <button class="tab-btn active" data-view="dashboard">Notas informativas</button>
       <button class="tab-btn" data-view="efectivos">Efectivos</button>
       <button class="tab-btn" data-view="directivas">Directivas</button>
+      <button class="tab-btn" data-view="panel">Panel</button>
+      <button class="tab-btn admin-only hidden" data-view="historial">Historial</button>
     </nav>
     <div class="user-box">
       <span id="userEmail"></span>
@@ -137,6 +151,54 @@
     <p class="muted small">Aquí se registra el texto real de las directivas internas vigentes de la PNP (por ejemplo, los requisitos para que un descanso médico particular sea exonerante). La IA de esta aplicación (redacción de la Orden de Sanción y el asistente de consulta) solo aplica lo que esté escrito aquí literalmente — si no hay una directiva cargada sobre algo, la IA lo dice en vez de inventarlo.</p>
     <div id="directivasList"></div>
     <p id="directivasEmpty" class="muted hidden">No hay directivas registradas todavía.</p>
+  </section>
+
+  <!-- PANEL DE METRICAS -->
+  <section id="view-panel" class="view hidden">
+    <div class="view-header">
+      <h2>Panel</h2>
+    </div>
+    <p id="panelEmpty" class="muted hidden">Todavía no hay notas informativas para mostrar métricas.</p>
+    <div id="panelContenido">
+      <div class="panel-stats" id="panelStats"></div>
+      <div class="panel-charts">
+        <div class="detail-card panel-chart-card">
+          <h3>Casos por estado del trámite</h3>
+          <div class="panel-chart-wrap"><canvas id="chartEstado"></canvas></div>
+        </div>
+        <div class="detail-card panel-chart-card">
+          <h3>Casos por código de infracción</h3>
+          <div class="panel-chart-wrap"><canvas id="chartCodigo"></canvas></div>
+        </div>
+        <div class="detail-card panel-chart-card panel-chart-wide">
+          <h3>Tendencia mensual de faltas</h3>
+          <div class="panel-chart-wrap"><canvas id="chartTendencia"></canvas></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HISTORIAL DE ACTIVIDAD -->
+  <section id="view-historial" class="view hidden">
+    <div class="view-header">
+      <h2>Historial de actividad</h2>
+    </div>
+    <p class="muted small">Registro automático e inalterable de cambios en notas informativas, expedientes, efectivos y directivas — quién, qué y cuándo. Se genera solo, no depende de que nadie lo marque.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha/hora</th>
+            <th>Quién</th>
+            <th>Tabla</th>
+            <th>Acción</th>
+            <th>Cambios</th>
+          </tr>
+        </thead>
+        <tbody id="historialTableBody"></tbody>
+      </table>
+      <p id="historialEmpty" class="muted hidden">Sin actividad registrada todavía.</p>
+    </div>
   </section>
 
 </main>
