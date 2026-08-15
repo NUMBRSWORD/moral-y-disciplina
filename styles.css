@@ -180,7 +180,13 @@ tbody tr:last-child td { border-bottom: none; }
 .detail-card-header h3 { margin: 0; }
 
 /* Botón "Descargar Imputación" dentro de la tabla de notas */
-.row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; white-space: nowrap; min-height: 32px; }
+/* Deja que <td class="row-actions"> siga siendo una celda de tabla normal
+   (display: table-cell) para que se estire a la altura real de la fila,
+   igual que sus vecinas -- ponerle display:flex directo a la celda (como
+   estaba antes) la sacaba de ese estiramiento automático y su borde inferior
+   quedaba más arriba que el resto de la fila. El flex va en un <div> interno. */
+.row-actions { vertical-align: middle; }
+.row-actions-inner { display: flex; align-items: center; justify-content: flex-end; gap: 10px; white-space: nowrap; }
 .row-actions .btn-secondary { padding: 6px 10px; font-size: 0.8rem; }
 .row-chevron { color: var(--text-muted); }
 .detail-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 24px; margin-bottom: 8px; }
