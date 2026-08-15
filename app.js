@@ -3,10 +3,11 @@ import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
 import { createWorker } from "https://esm.sh/tesseract.js@5.1.1";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
-import { generarImputacionDocx, puedeGenerarImputacion, buscarOficialConstato } from "./lib/imputacion.js";
+import { generarImputacionDocx, puedeGenerarImputacion, buscarOficialConstato, tokens } from "./lib/imputacion.js";
 import { generarActaNoDescargoDocx, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
 import { generarOrdenSancionDocx, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
+import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva, subirArchivoDirectiva } from "./lib/directivas.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
 
@@ -20,7 +21,15 @@ const state = {
   notas: [],
   efectivos: [],
   currentNotaId: null,
+  directivas: [],
+  asistenteHistorial: [],
 };
+
+// Infracciones que este sistema tramita con Orden de Sanción (por ahora,
+// solo L21 y L24): catálogo compacto que se le pasa al asistente flotante
+// como contexto, junto con las directivas internas cargadas.
+const CATALOGO_ASISTENTE = ["L21", "L24"]
+  .map((codigo) => ({ codigo, ...(getInfraccion(codigo) || {}) }));
 
 const $ = (id) => document.getElementById(id);
 
@@ -29,7 +38,7 @@ function showView(id) {
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $(id).classList.remove("hidden");
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-  const map = { "view-dashboard": "dashboard", "view-efectivos": "efectivos" };
+  const map = { "view-dashboard": "dashboard", "view-efectivos": "efectivos", "view-directivas": "directivas" };
   if (map[id]) {
     document.querySelector(`.tab-btn[data-view="${map[id]}"]`)?.classList.add("active");
   }
@@ -40,6 +49,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     const target = btn.dataset.view;
     if (target === "dashboard") { showView("view-dashboard"); loadNotas(); }
     if (target === "efectivos") { showView("view-efectivos"); loadEfectivos(); }
+    if (target === "directivas") { showView("view-directivas"); loadDirectivasView(); }
   });
 });
 
@@ -78,6 +88,10 @@ async function onAuthed(session) {
   // que algo más (como una búsqueda) forzara un segundo render.
   await loadEfectivos();
   loadNotas();
+  // Se precarga en segundo plano (no se espera) para que estén listas en
+  // cuanto se abra el modal de Orden de Sanción o el asistente flotante,
+  // sin retrasar el inicio de sesión.
+  loadDirectivasView();
 }
 
 function onSignedOut() {
@@ -393,7 +407,7 @@ async function renderNotaDetail(nota) {
       <h3>Orden de Sanción</h3>
       ${puedeSancion ? `
         <form id="sancionForm">
-          <div class="label" style="margin-bottom:8px">Sanción a imponer (evaluando el descargo)</div>
+          <div class="label" style="margin-bottom:8px">Sanción a imponer (evaluando el descargo${nota.fecha_descargo ? " — puede marcarla usted o dejar que la IA la elija" : ""})</div>
           ${opcionesSancion.map((o) => {
             const marcado = (o.value === "amonestacion" && nota.sancion_tipo === "amonestacion") ||
               (nota.sancion_tipo === "dias" && String(nota.sancion_dias) === o.value);
@@ -407,8 +421,9 @@ async function renderNotaDetail(nota) {
           </label>
           ${nota.fecha_descargo ? `
           <div class="modal-actions" style="justify-content:flex-start; margin-bottom:10px">
-            <button type="button" class="btn-secondary" id="btnRedactarIA">✨ Redactar con IA</button>
+            <button type="button" class="btn-secondary" id="btnRedactarIA">✨ Analizar descargo y redactar con IA</button>
           </div>
+          <p class="muted small">La IA elige el tercio y redacta el resumen del descargo y el análisis, usando las directivas internas activas como única fuente de reglas institucionales — si el descargo invoca algo que ninguna directiva regula, la IA lo dice en vez de inventarlo.</p>
           <p id="sancionIAStatus" class="muted small hidden"></p>
           ` : `<p class="muted small">Sin descargo: el texto se genera automáticamente según el tercio que elija arriba — no necesita IA ni escribir nada, solo revisar.</p>`}
           <p id="sancionError" class="error hidden"></p>
@@ -503,20 +518,37 @@ async function submitNotificacion(e, notaId) {
   openNotaDetail(notaId);
 }
 
+// Casos previos del mismo investigado ya registrados en el sistema (mismo
+// criterio de emparejamiento por nombre que usa el resto de la app: al menos
+// 2 palabras en común entre apellidos y nombres). Se le pasa a la IA como
+// posible agravante, igual que en notificacion-imputacion-pnp.
+function buscarAntecedentes(nota, todasNotas) {
+  if (!nota?.apellidos || !todasNotas?.length) return [];
+  const objetivo = tokens(`${nota.apellidos} ${nota.nombres || ""}`);
+  if (!objetivo.length) return [];
+  return todasNotas
+    .filter((n) => n.id !== nota.id)
+    .filter((n) => {
+      const t = new Set(tokens(`${n.apellidos || ""} ${n.nombres || ""}`));
+      return objetivo.filter((tok) => t.has(tok)).length >= 2;
+    })
+    .map((n) => ({ codigo_infraccion: n.codigo_infraccion || null, fecha_falta: n.fecha_falta || null }))
+    .sort((a, b) => (b.fecha_falta || "").localeCompare(a.fecha_falta || ""));
+}
+
+// A diferencia de la versión anterior, la IA ya no solo redacta un tercio que
+// el oficial eligió a mano: ahora ELLA misma evalúa el descargo (apoyada en
+// las directivas internas cargadas y los antecedentes del investigado) y
+// elige el tercio, marcando el radio correspondiente. El oficial sigue
+// revisando y puede cambiar la selección o el texto antes de guardar — el
+// botón "Guardar y descargar" sigue siendo el paso final manual.
 async function redactarConIA(nota) {
   const btn = $("btnRedactarIA");
   const statusEl = $("sancionIAStatus");
   const errEl = $("sancionError");
   errEl.classList.add("hidden");
 
-  const tercioValue = document.querySelector('input[name="sancionTercio"]:checked')?.value;
-  if (!tercioValue) {
-    errEl.textContent = "Seleccione primero la sanción a imponer, para que la IA sepa qué justificar.";
-    errEl.classList.remove("hidden");
-    return;
-  }
   const opciones = opcionesTercio(nota.codigo_infraccion) || [];
-  const opcion = opciones.find((o) => o.value === tercioValue);
   const infraccion = getInfraccion(nota.codigo_infraccion);
 
   btn.disabled = true;
@@ -528,23 +560,37 @@ async function redactarConIA(nota) {
       descargoNotas = (await extraerTextoDescargo(nota, (msg) => { statusEl.textContent = msg; })).trim();
     }
 
-    statusEl.textContent = "Redactando con IA...";
+    statusEl.textContent = "Consultando directivas internas y antecedentes...";
+    const directivas = directivasParaIA(state.directivas.length ? state.directivas : await listarDirectivas(supabase));
+    const antecedentes = buscarAntecedentes(nota, state.notas);
+
+    statusEl.textContent = "Analizando el descargo y redactando con IA...";
     const { data, error } = await supabase.functions.invoke("redactar-analisis", {
       body: {
         investigadoCompleto: `${nota.grado || ""} ${nota.apellidos || ""} ${nota.nombres || ""}`.replace(/\s+/g, " ").trim(),
         codigoInfraccion: normalizarCodigoInfraccion(nota.codigo_infraccion),
         infraccionTexto: infraccion?.infraccion || "",
         hechoResumen: buildCasoConcreto(nota),
-        tercioLabel: opcion?.label || "",
+        tercios: opciones.map((o) => ({ value: o.value, label: o.label, extremo: o.extremo })),
         descargoNotas,
         analisisNotas: $("sSancionAnalisis").value.trim(),
+        antecedentes,
+        directivas,
       },
     });
     if (error) throw error;
     if (data?.error) throw new Error(data.error);
     if (data?.descargo_texto) $("sSancionDescargo").value = data.descargo_texto;
-    if (data?.analisis_texto) $("sSancionAnalisis").value = data.analisis_texto;
-    statusEl.textContent = "Listo — revise el texto antes de guardar y descargar.";
+    if (data?.analisis_texto) {
+      $("sSancionAnalisis").value = data.analisis_texto;
+      $("sSancionAnalisis").dataset.autofilled = "false";
+    }
+    if (data?.tercio_value) {
+      const radio = [...document.querySelectorAll('input[name="sancionTercio"]')]
+        .find((r) => r.value === data.tercio_value);
+      if (radio) radio.checked = true;
+    }
+    statusEl.textContent = "Listo — la IA evaluó el descargo y eligió el tercio. Revise la selección y el texto antes de guardar.";
   } catch (err) {
     console.error(err);
     statusEl.classList.add("hidden");
@@ -1343,6 +1389,187 @@ $("btnGuardarReincLote").addEventListener("click", async () => {
   reincLoteFilas = [];
   closeReincLoteModal();
   loadNotas();
+});
+
+// ---------- Directivas internas ----------
+async function loadDirectivasView() {
+  try {
+    state.directivas = await listarDirectivas(supabase);
+  } catch (err) {
+    console.error(err);
+    state.directivas = [];
+  }
+  renderDirectivasList(state.directivas);
+}
+
+function renderDirectivasList(list) {
+  const container = $("directivasList");
+  if (!container) return;
+  $("directivasEmpty").classList.toggle("hidden", list.length > 0);
+  const isAdmin = state.role === "admin";
+  container.innerHTML = list.map((d) => `
+    <div class="directiva-card" data-id="${d.id}">
+      <div class="directiva-card-header">
+        <h3>${escapeHtml(d.titulo)}${d.numero_documento ? ` <span class="muted small">(${escapeHtml(d.numero_documento)})</span>` : ""}</h3>
+        <span class="pill ${d.activa ? "pill-yes" : "pill-inactive"}">${d.activa ? "Activa" : "Inactiva"}</span>
+      </div>
+      <div class="directiva-contenido">${escapeHtml(d.contenido)}</div>
+      ${isAdmin ? `
+        <div class="directiva-actions">
+          <button type="button" class="btn-secondary btn-editar-directiva">Editar</button>
+          <button type="button" class="btn-danger btn-eliminar-directiva">Eliminar</button>
+        </div>
+      ` : ""}
+    </div>
+  `).join("");
+
+  if (!isAdmin) return;
+  container.querySelectorAll(".btn-editar-directiva").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const id = e.currentTarget.closest(".directiva-card").dataset.id;
+      const directiva = state.directivas.find((d) => String(d.id) === id);
+      if (directiva) abrirModalDirectiva(directiva);
+    });
+  });
+  container.querySelectorAll(".btn-eliminar-directiva").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const id = e.currentTarget.closest(".directiva-card").dataset.id;
+      if (!confirm("¿Eliminar esta directiva? Esta acción no se puede deshacer.")) return;
+      try {
+        await eliminarDirectiva(supabase, id);
+        loadDirectivasView();
+      } catch (err) {
+        alert("No se pudo eliminar: " + (err.message || err));
+      }
+    });
+  });
+}
+
+function abrirModalDirectiva(directiva) {
+  $("directivaForm").reset();
+  $("dvId").value = directiva?.id || "";
+  $("dvTitulo").value = directiva?.titulo || "";
+  $("dvNumero").value = directiva?.numero_documento || "";
+  $("dvContenido").value = directiva?.contenido || "";
+  $("dvActiva").checked = directiva ? !!directiva.activa : true;
+  $("dvArchivoStatus").classList.add("hidden");
+  $("directivaError").classList.add("hidden");
+  $("directivaModalTitulo").textContent = directiva ? "Editar directiva" : "Nueva directiva";
+  $("modalDirectiva").classList.remove("hidden");
+}
+function closeModalDirectiva() { $("modalDirectiva").classList.add("hidden"); }
+
+$("btnNuevaDirectiva")?.addEventListener("click", () => abrirModalDirectiva(null));
+$("btnCerrarModalDirectiva")?.addEventListener("click", closeModalDirectiva);
+$("btnCancelarDirectiva")?.addEventListener("click", closeModalDirectiva);
+
+$("dvArchivo")?.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  const statusEl = $("dvArchivoStatus");
+  if (!file) { statusEl.classList.add("hidden"); return; }
+  statusEl.textContent = "Leyendo archivo...";
+  statusEl.classList.remove("hidden");
+  try {
+    let texto = "";
+    if (file.type === "application/pdf") {
+      texto = await extractPdfText(file, (msg) => { statusEl.textContent = msg; });
+    } else if (file.type.startsWith("image/")) {
+      statusEl.textContent = "Leyendo imagen con reconocimiento de texto (OCR)...";
+      texto = await extractImagenTextoConOcr(file);
+    }
+    texto = texto.trim();
+    if (texto) {
+      if (!$("dvContenido").value.trim()) $("dvContenido").value = texto;
+      statusEl.textContent = "Texto extraído del archivo. Revíselo y corríjalo antes de guardar — el reconocimiento automático puede tener errores.";
+    } else {
+      statusEl.textContent = "No se pudo extraer texto del archivo. Péguelo usted mismo en el campo de abajo.";
+    }
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "No se pudo leer el archivo automáticamente. Péguelo usted mismo en el campo de abajo.";
+  }
+});
+
+$("directivaForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errEl = $("directivaError");
+  errEl.classList.add("hidden");
+  const id = $("dvId").value || null;
+  const titulo = $("dvTitulo").value.trim();
+  const numero_documento = $("dvNumero").value.trim();
+  const contenido = $("dvContenido").value.trim();
+  const activa = $("dvActiva").checked;
+  if (!titulo || !contenido) return;
+
+  const submitBtn = e.target.querySelector("button[type=submit]");
+  submitBtn.disabled = true;
+  try {
+    const savedId = await guardarDirectiva(supabase, { id, titulo, numero_documento, contenido, activa, userId: state.session.user.id });
+    const file = $("dvArchivo").files[0];
+    if (file) {
+      const { path, nombre } = await subirArchivoDirectiva(supabase, savedId, file);
+      await guardarDirectiva(supabase, { id: savedId, titulo, numero_documento, contenido, activa, archivo_path: path, archivo_nombre: nombre });
+    }
+    closeModalDirectiva();
+    loadDirectivasView();
+  } catch (err) {
+    console.error(err);
+    errEl.textContent = "Error: " + (err.message || err);
+    errEl.classList.remove("hidden");
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+
+// ---------- Asistente de consulta flotante ----------
+function agregarMensajeAsistente(role, texto) {
+  state.asistenteHistorial.push({ role, texto });
+  const div = document.createElement("div");
+  div.className = `asistente-msg ${role === "asistente" ? "asistente-msg-bot" : "asistente-msg-user"}`;
+  div.textContent = texto;
+  const mensajesEl = $("asistenteMensajes");
+  mensajesEl.appendChild(div);
+  mensajesEl.scrollTop = mensajesEl.scrollHeight;
+}
+
+$("btnAbrirAsistente")?.addEventListener("click", () => {
+  $("asistenteWidget").classList.remove("hidden");
+  if (!state.asistenteHistorial.length) {
+    agregarMensajeAsistente("asistente", "Hola, soy el asistente de consulta de Moral y Disciplina. Puede preguntarme sobre el procedimiento (Nota Informativa → reincorporación → descargo → Orden de Sanción), sobre L21/L24, o sobre las directivas internas cargadas en el sistema.");
+  }
+});
+$("btnCerrarAsistente")?.addEventListener("click", () => {
+  $("asistenteWidget").classList.add("hidden");
+});
+
+$("asistenteForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = $("asistenteInput");
+  const pregunta = input.value.trim();
+  if (!pregunta) return;
+  agregarMensajeAsistente("oficial", pregunta);
+  input.value = "";
+  const submitBtn = e.target.querySelector("button[type=submit]");
+  submitBtn.disabled = true;
+  try {
+    const directivas = directivasParaIA(state.directivas.length ? state.directivas : await listarDirectivas(supabase));
+    const { data, error } = await supabase.functions.invoke("asistente-md", {
+      body: {
+        catalogo: CATALOGO_ASISTENTE,
+        directivas,
+        historial: state.asistenteHistorial.slice(0, -1).slice(-8),
+        pregunta,
+      },
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    agregarMensajeAsistente("asistente", data?.respuesta || "No se pudo obtener una respuesta.");
+  } catch (err) {
+    console.error(err);
+    agregarMensajeAsistente("asistente", "Ocurrió un error al consultar: " + (err.message || err));
+  } finally {
+    submitBtn.disabled = false;
+  }
 });
 
 // ---------- Utils ----------
