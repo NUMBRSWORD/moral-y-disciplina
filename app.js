@@ -469,6 +469,7 @@ async function renderNotaDetail(nota) {
           <div class="detail-field"><div class="label">Tiempo ausente</div><div class="value">${formatearHorasFalto(nota) || "-"}</div></div>
           <div class="detail-field"><div class="label">Archivo</div><div class="value">${reincArchivo}</div></div>
         </div>
+        ${nota.reincorporacion_observacion ? `<p class="ai-box ai-box-warning" style="margin-top:12px">⚕ ${escapeHtml(nota.reincorporacion_observacion)}</p>` : ""}
       ` : `
         <p class="muted small">Aún no ha sido reincorporado.</p>
         ${isAdmin ? `
@@ -478,6 +479,9 @@ async function renderNotaDetail(nota) {
             <label>N.º de nota de reincorporación<input type="text" id="rNumero" required /></label>
           </div>
           <label>Hora de reincorporación<input type="time" id="rHora" /></label>
+          <label>Observación (opcional — p.ej. descanso médico expedido por Sanidad, no se presentó físicamente)
+            <textarea id="rObservacion" rows="2" placeholder="Déjelo en blanco si se reincorporó físicamente sin ninguna circunstancia particular."></textarea>
+          </label>
           <label>Archivo de reincorporación<input type="file" id="rArchivo" accept="application/pdf,image/*" /></label>
           <p id="reincAutoStatus" class="muted small hidden"></p>
           <p id="reincError" class="error hidden"></p>
@@ -830,6 +834,7 @@ async function submitReincorporacion(e, notaId) {
   const fecha = $("rFecha").value;
   const numero = $("rNumero").value.trim();
   const hora = $("rHora").value || null;
+  const observacion = $("rObservacion").value.trim() || null;
   const file = $("rArchivo").files[0];
 
   let archivo_reincorporacion_path = null;
@@ -858,6 +863,7 @@ async function submitReincorporacion(e, notaId) {
     fecha_reincorporacion: fecha,
     numero_nota_reincorporacion: numero,
     hora_reincorporacion: hora,
+    reincorporacion_observacion: observacion,
     ...(codigo_infraccion ? { codigo_infraccion } : {}),
     ...(archivo_reincorporacion_path ? { archivo_reincorporacion_path, archivo_reincorporacion_nombre } : {}),
   }).eq("id", notaId);
