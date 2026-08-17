@@ -399,6 +399,7 @@ async function fileLinkHtml(bucket, path, name) {
 async function renderNotaDetail(nota) {
   const exp = (nota.expedientes && nota.expedientes[0]) || null;
   const isAdmin = state.role === "admin";
+  const esDuenoDeLaNota = !!state.cip && nota.oficial_constato_cip === state.cip;
 
   const notaArchivo = await fileLinkHtml("notas", nota.archivo_nota_path, nota.archivo_nota_nombre);
   const reincArchivo = await fileLinkHtml("notas", nota.archivo_reincorporacion_path, nota.archivo_reincorporacion_nombre);
@@ -563,6 +564,31 @@ async function renderNotaDetail(nota) {
     </div>
     ` : ""}
 
+    ${(isAdmin || esDuenoDeLaNota) && nota.orden_sancion_generada_at ? `
+    <div class="detail-card">
+      <h3>Notificación de la Orden de Sanción</h3>
+      ${nota.orden_notificada_at ? `
+        <p class="muted small">Notificada el ${formatDate(nota.orden_notificada_at.slice(0, 10))}.</p>
+      ` : `
+        <p class="muted small">Suba el cargo de notificación firmado por el investigado (la IA verifica que corresponda antes de guardar).</p>
+        <form id="ordenNotifForm">
+          <label>Cargo de notificación firmado (PDF o foto)
+            <input type="file" id="fOrdenNotifArchivo" accept="application/pdf,image/*" required />
+          </label>
+          <div class="modal-actions" style="justify-content:flex-start; margin:8px 0">
+            <button type="button" class="btn-secondary" id="btnVerificarNotifIA">✨ Verificar con IA</button>
+          </div>
+          <p id="ordenNotifIAStatus" class="muted small hidden"></p>
+          <label>Fecha de notificación (la completa la IA si la detecta; verifíquela)
+            <input type="date" id="fOrdenNotifFecha" required />
+          </label>
+          <p id="ordenNotifError" class="error hidden"></p>
+          <button type="submit" class="btn-primary">Registrar notificación</button>
+        </form>
+      `}
+    </div>
+    ` : ""}
+
     ${isAdmin ? `
     <div class="detail-card">
       <h3>Expediente</h3>
@@ -610,6 +636,8 @@ async function renderNotaDetail(nota) {
   $("descargoForm")?.addEventListener("submit", (e) => submitDescargo(e, nota.id));
   $("sancionForm")?.addEventListener("submit", (e) => submitSancion(e, nota));
   $("btnRedactarIA")?.addEventListener("click", () => redactarConIA(nota));
+  $("btnVerificarNotifIA")?.addEventListener("click", () => verificarNotificacionOrdenIA(nota));
+  $("ordenNotifForm")?.addEventListener("submit", (e) => submitNotificacionOrden(e, nota));
 
   // Si no hubo descargo, al elegir el tercio se rellena el "Análisis y
   // Evaluación" con el párrafo estándar (venció el plazo...) cerrando según
@@ -736,6 +764,72 @@ async function redactarConIA(nota) {
   } finally {
     btn.disabled = false;
   }
+}
+
+async function verificarNotificacionOrdenIA(nota) {
+  const file = $("fOrdenNotifArchivo").files[0];
+  const statusEl = $("ordenNotifIAStatus");
+  if (!file) { statusEl.textContent = "Seleccione primero el archivo del cargo firmado."; statusEl.classList.remove("hidden"); return; }
+  const btn = $("btnVerificarNotifIA");
+  btn.disabled = true;
+  statusEl.classList.remove("hidden");
+  statusEl.textContent = "Leyendo el archivo...";
+  try {
+    const esPdf = file.type === "application/pdf";
+    const esImagen = file.type.startsWith("image/");
+    const textoDocumento = esPdf
+      ? await extractPdfText(file, (msg) => { statusEl.textContent = msg; })
+      : esImagen
+      ? await extractImagenTextoConOcr(file)
+      : "";
+
+    statusEl.textContent = "Verificando con IA...";
+    const infraccion = getInfraccion(nota.codigo_infraccion);
+    const sancionImpuesta = nota.sancion_tipo === "amonestacion" ? "amonestación" : `${nota.sancion_dias} días de Sanción Simple`;
+    const { data, error } = await supabase.functions.invoke("revisar-documento-ia", {
+      body: {
+        tipo: "notificacion_orden",
+        investigadoCompleto: `${nota.grado || ""} ${nota.apellidos || ""} ${nota.nombres || ""}`.replace(/\s+/g, " ").trim(),
+        codigoInfraccion: normalizarCodigoInfraccion(nota.codigo_infraccion),
+        sancionImpuesta,
+        textoDocumento,
+      },
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    if (data?.fecha_detectada) $("fOrdenNotifFecha").value = data.fecha_detectada;
+    const observaciones = (data?.observaciones || []).join(" · ");
+    statusEl.textContent = data?.consistente
+      ? `✓ El documento corresponde a esta notificación.${observaciones ? " " + observaciones : ""}`
+      : `⚠ ${observaciones || "La IA no pudo confirmar que el documento corresponda. Revise antes de guardar."}`;
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "No se pudo verificar con IA: " + (err.message || err);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function submitNotificacionOrden(e, nota) {
+  e.preventDefault();
+  const errEl = $("ordenNotifError");
+  errEl.classList.add("hidden");
+  const file = $("fOrdenNotifArchivo").files[0];
+  const fecha = $("fOrdenNotifFecha").value;
+  if (!file || !fecha) return;
+
+  const path = `${nota.id}/orden_notif_${Date.now()}_${file.name}`;
+  const { error: upErr } = await supabase.storage.from("notas").upload(path, file);
+  if (upErr) { errEl.textContent = "Error al subir archivo: " + upErr.message; errEl.classList.remove("hidden"); return; }
+
+  const { error } = await supabase.rpc("registrar_notificacion_orden", {
+    p_nota_id: nota.id,
+    p_fecha: fecha,
+    p_archivo_path: path,
+    p_archivo_nombre: file.name,
+  });
+  if (error) { errEl.textContent = "Error: " + error.message; errEl.classList.remove("hidden"); return; }
+  openNotaDetail(nota.id);
 }
 
 async function submitSancion(e, nota) {
@@ -944,6 +1038,11 @@ $("btnNuevaNota").addEventListener("click", () => {
   $("pdfAutoStatus").classList.add("hidden");
   pdfCandidates = [];
   renderCandidatesChecklist();
+  // Quien registra la nota suele ser el mismo oficial que constató --
+  // se autocompleta con sus propios datos (buscados por su CIP de sesión),
+  // igual que en notificacion-imputacion-pnp; se puede editar si no aplica.
+  const yoMismo = state.cip ? state.efectivos.find((ef) => ef.cip === state.cip) : null;
+  $("fOficialConstato").value = yoMismo ? `${yoMismo.grado || ""} ${yoMismo.apellidos_nombres || ""}`.replace(/\s+/g, " ").trim() : "";
   $("modalNuevaNota").classList.remove("hidden");
 });
 $("btnCerrarModal").addEventListener("click", closeModal);
