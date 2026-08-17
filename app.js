@@ -1,7 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
-import { createWorker } from "https://esm.sh/tesseract.js@5.1.1";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 import saveAs from "https://esm.sh/file-saver@2.0.5";
 import { renderizarImputacionDocx, puedeGenerarImputacion, buscarOficialConstato, tokens } from "./lib/imputacion.js";
@@ -780,7 +779,7 @@ async function verificarNotificacionOrdenIA(nota) {
     const textoDocumento = esPdf
       ? await extractPdfText(file, (msg) => { statusEl.textContent = msg; })
       : esImagen
-      ? await extractImagenTextoConOcr(file)
+      ? await extractImagenTextoConOcr(file, (msg) => { statusEl.textContent = msg; })
       : "";
 
     statusEl.textContent = "Verificando con IA...";
@@ -1087,6 +1086,51 @@ const MESES_ABREV = {
   JUL: "07", AGO: "08", SET: "09", SEP: "09", OCT: "10", NOV: "11", DIC: "12",
 };
 
+// Antes esto usaba tesseract.js (OCR genérico corriendo en el navegador):
+// lentísimo en documentos largos (minutos) y con errores frecuentes en
+// escaneos reales (sellos, membretes, mala calidad). Ahora, cuando el PDF no
+// tiene texto seleccionable, cada página se manda como imagen a la función
+// "extraer-texto-vision" (Claude con visión) -- mucho más preciso, y corre
+// en el servidor en vez de trabar el navegador del oficial.
+const PAGINAS_POR_LOTE_VISION = 4;
+
+function canvasABase64Jpeg(canvas) {
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+  return dataUrl.slice(dataUrl.indexOf(",") + 1);
+}
+
+async function blobABase64(blob) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+  return dataUrl.slice(dataUrl.indexOf(",") + 1);
+}
+
+async function transcribirPaginasConIA(paginas, onEstado) {
+  const lotes = [];
+  for (let i = 0; i < paginas.length; i += PAGINAS_POR_LOTE_VISION) {
+    lotes.push(paginas.slice(i, i + PAGINAS_POR_LOTE_VISION));
+  }
+  const textos = [];
+  for (let i = 0; i < lotes.length; i++) {
+    const desde = i * PAGINAS_POR_LOTE_VISION + 1;
+    const hasta = Math.min((i + 1) * PAGINAS_POR_LOTE_VISION, paginas.length);
+    onEstado?.(paginas.length > 1
+      ? `Transcribiendo con IA: página${hasta > desde ? "s" : ""} ${desde}${hasta > desde ? `-${hasta}` : ""} de ${paginas.length}...`
+      : "Transcribiendo la imagen con IA...");
+    const { data, error } = await supabase.functions.invoke("extraer-texto-vision", {
+      body: { paginas: lotes[i] },
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    textos.push(data?.texto || "");
+  }
+  return textos.join("\n\n");
+}
+
 async function extractPdfText(file, onEstado) {
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
@@ -1097,43 +1141,27 @@ async function extractPdfText(file, onEstado) {
     text += content.items.map((it) => it.str).join(" ") + "\n";
   }
   // Algunas notas se generan como una foto/escaneo de la página (sin texto
-  // seleccionable): pdf.js no extrae nada de ellas. En ese caso se recurre a
-  // reconocimiento óptico de caracteres (OCR) sobre la página renderizada.
+  // seleccionable): pdf.js no extrae nada de ellas. En ese caso se recurre a IA con visión.
   if (text.trim().length < 30) {
-    onEstado?.("Esta nota es una imagen escaneada: leyendo con reconocimiento de texto (OCR), puede tardar unos segundos...");
-    text = await extractPdfTextConOcr(pdf);
-  }
-  return text;
-}
-
-async function extractPdfTextConOcr(pdf) {
-  const worker = await createWorker("spa");
-  let text = "";
-  try {
+    onEstado?.("Esta nota es una imagen escaneada: preparando las páginas para leerlas con IA...");
+    const paginas = [];
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
-      const viewport = page.getViewport({ scale: 3 });
+      const viewport = page.getViewport({ scale: 1.8 });
       const canvas = document.createElement("canvas");
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-      const { data } = await worker.recognize(canvas);
-      text += data.text + "\n";
+      paginas.push({ data: canvasABase64Jpeg(canvas), mediaType: "image/jpeg" });
     }
-  } finally {
-    await worker.terminate();
+    text = await transcribirPaginasConIA(paginas, onEstado);
   }
   return text;
 }
 
-async function extractImagenTextoConOcr(blob) {
-  const worker = await createWorker("spa");
-  try {
-    const { data } = await worker.recognize(blob);
-    return data.text || "";
-  } finally {
-    await worker.terminate();
-  }
+async function extractImagenTextoConOcr(blob, onEstado) {
+  const base64 = await blobABase64(blob);
+  return await transcribirPaginasConIA([{ data: base64, mediaType: blob.type || "image/jpeg" }], onEstado);
 }
 
 // Lee automáticamente el archivo de descargo ya subido (PDF o foto), para
@@ -1149,10 +1177,7 @@ async function extraerTextoDescargo(nota, onEstado) {
   const esImagen = /\.(jpe?g|png|webp|bmp)$/i.test(nombre) || blob.type.startsWith("image/");
   try {
     if (esPdf) return await extractPdfText(blob, onEstado);
-    if (esImagen) {
-      onEstado?.("Leyendo el archivo del descargo con reconocimiento de texto (OCR)...");
-      return await extractImagenTextoConOcr(blob);
-    }
+    if (esImagen) return await extractImagenTextoConOcr(blob, onEstado);
   } catch (err) {
     console.error("No se pudo leer el archivo de descargo:", err);
   }
@@ -1798,13 +1823,12 @@ $("dvArchivo")?.addEventListener("change", async (e) => {
     if (file.type === "application/pdf") {
       texto = await extractPdfText(file, (msg) => { statusEl.textContent = msg; });
     } else if (file.type.startsWith("image/")) {
-      statusEl.textContent = "Leyendo imagen con reconocimiento de texto (OCR)...";
-      texto = await extractImagenTextoConOcr(file);
+      texto = await extractImagenTextoConOcr(file, (msg) => { statusEl.textContent = msg; });
     }
     texto = texto.trim();
     if (texto) {
       if (!$("dvContenido").value.trim()) $("dvContenido").value = texto;
-      statusEl.textContent = "Texto extraído del archivo. Revíselo y corríjalo antes de guardar — el reconocimiento automático puede tener errores.";
+      statusEl.textContent = "Texto extraído del archivo con IA. Revíselo antes de guardar — puede tener errores puntuales en fragmentos poco legibles.";
     } else {
       statusEl.textContent = "No se pudo extraer texto del archivo. Péguelo usted mismo en el campo de abajo.";
     }
