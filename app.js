@@ -1040,9 +1040,18 @@ $("btnNuevaNota").addEventListener("click", () => {
   // Quien registra la nota suele ser el mismo oficial que constató --
   // se autocompleta con sus propios datos (buscados por su CIP de sesión),
   // igual que en notificacion-imputacion-pnp; se puede editar si no aplica.
+  // Se marca dataset.autofilled="true" para que, si luego se sube un PDF
+  // y la IA detecta un oficial distinto, ese dato SÍ pueda reemplazar este
+  // valor puesto por default (antes el autocompletado con el propio nombre
+  // bloqueaba silenciosamente la detección real del PDF, porque esa lógica
+  // solo llenaba el campo si estaba vacío).
   const yoMismo = state.cip ? state.efectivos.find((ef) => ef.cip === state.cip) : null;
   $("fOficialConstato").value = yoMismo ? `${yoMismo.grado || ""} ${yoMismo.apellidos_nombres || ""}`.replace(/\s+/g, " ").trim() : "";
+  $("fOficialConstato").dataset.autofilled = yoMismo ? "true" : "false";
   $("modalNuevaNota").classList.remove("hidden");
+});
+$("fOficialConstato").addEventListener("input", () => {
+  $("fOficialConstato").dataset.autofilled = "false";
 });
 $("btnCerrarModal").addEventListener("click", closeModal);
 $("btnCancelarNota").addEventListener("click", closeModal);
@@ -1431,7 +1440,10 @@ async function autocompletarDesdeArchivo(file) {
     if (data.fecha_falta && !$("fFechaFalta").value) $("fFechaFalta").value = data.fecha_falta;
     if (data.numero_nota_falta && !$("fNumeroNotaFalta").value) $("fNumeroNotaFalta").value = data.numero_nota_falta;
     if (data.hora_falta && !$("fHoraFalta").value) $("fHoraFalta").value = data.hora_falta;
-    if (data.oficial_constato && !$("fOficialConstato").value) $("fOficialConstato").value = data.oficial_constato;
+    if (data.oficial_constato && (!$("fOficialConstato").value || $("fOficialConstato").dataset.autofilled === "true")) {
+      $("fOficialConstato").value = data.oficial_constato;
+      $("fOficialConstato").dataset.autofilled = "false";
+    }
     pdfCandidates = data.candidates || [];
     renderCandidatesChecklist();
     if (Object.keys(data).length) {
