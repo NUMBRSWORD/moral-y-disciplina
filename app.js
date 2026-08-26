@@ -63,7 +63,7 @@ function showView(id) {
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $(id).classList.remove("hidden");
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-  const map = { "view-dashboard": "dashboard", "view-efectivos": "efectivos", "view-directivas": "directivas", "view-panel": "panel", "view-historial": "historial" };
+  const map = { "view-dashboard": "dashboard", "view-efectivos": "efectivos", "view-directivas": "directivas", "view-agenda": "agenda", "view-documentos": "documentos", "view-panel": "panel", "view-historial": "historial" };
   if (map[id]) {
     document.querySelector(`.tab-btn[data-view="${map[id]}"]`)?.classList.add("active");
   }
@@ -75,6 +75,8 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (target === "dashboard") { showView("view-dashboard"); loadNotas(); }
     if (target === "efectivos") { showView("view-efectivos"); loadEfectivos(); }
     if (target === "directivas") { showView("view-directivas"); loadDirectivasView(); }
+    if (target === "agenda") { showView("view-agenda"); renderAgendaNotas(); }
+    if (target === "documentos") { showView("view-documentos"); loadDocumentosGenerados(); }
     if (target === "panel") { showView("view-panel"); renderPanel(); }
     if (target === "historial") { showView("view-historial"); loadHistorial(); }
   });
@@ -229,6 +231,64 @@ function renderBandejaAccionesNotas() {
     btn.addEventListener("click", () => openNotaDetail(btn.dataset.id));
   });
 }
+
+function renderAgendaNotas() {
+  const query = $("buscarAgenda").value.trim().toLowerCase();
+  const acciones = obtenerAccionesPrioritariasNotas().filter((accion) =>
+    !query || `${accion.nombre} ${accion.tipo} ${accion.detalle}`.toLowerCase().includes(query)
+  );
+  $("agendaEmpty").classList.toggle("hidden", acciones.length > 0);
+  $("agendaLista").innerHTML = acciones.map((accion, index) => `
+    <article class="agenda-item ${accion.clase}">
+      <div class="agenda-order">${index + 1}</div>
+      <div class="action-item-copy">
+        <span class="action-type">${escapeHtml(accion.tipo)}</span>
+        <strong>${escapeHtml(accion.nombre)}</strong>
+        <span class="muted small">${escapeHtml(accion.detalle)}</span>
+      </div>
+      <button type="button" class="btn-primary btn-abrir-agenda" data-id="${escapeHtml(accion.nota.id)}">Abrir nota</button>
+    </article>`).join("");
+  document.querySelectorAll(".btn-abrir-agenda").forEach((btn) => btn.addEventListener("click", () => openNotaDetail(btn.dataset.id)));
+}
+
+$("buscarAgenda").addEventListener("input", renderAgendaNotas);
+
+function exportarAgendaCalendario() {
+  const fechaIcs = (fecha) => String(fecha || new Date().toISOString().slice(0, 10)).slice(0, 10).replaceAll("-", "");
+  const escaparIcs = (texto) => String(texto || "").replace(/[\\,;]/g, "\\$&").replace(/\n/g, "\\n");
+  const eventos = obtenerAccionesPrioritariasNotas().map((accion, index) => {
+    const fecha = accion.tipo === "Plazo vencido" ? fechaLimiteDescargo(accion.nota) : (accion.nota.created_at || new Date().toISOString());
+    const stamp = `${Date.now()}-${index}@moral-y-disciplina`;
+    return ["BEGIN:VEVENT", `UID:${stamp}`, `DTSTAMP:${fechaIcs(new Date().toISOString())}T000000Z`, `DTSTART;VALUE=DATE:${fechaIcs(fecha)}`, `SUMMARY:${escaparIcs(`${accion.tipo}: ${accion.nombre}`)}`, `DESCRIPTION:${escaparIcs(accion.detalle)}`, "END:VEVENT"].join("\r\n");
+  });
+  const contenido = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Moral y Disciplina//Agenda//ES", ...eventos, "END:VCALENDAR"].join("\r\n");
+  saveAs(new Blob([contenido], { type: "text/calendar;charset=utf-8" }), `agenda_moral_disciplina_${new Date().toISOString().slice(0, 10)}.ics`);
+}
+
+$("btnExportarAgenda").addEventListener("click", exportarAgendaCalendario);
+
+let documentosGenerados = [];
+
+async function loadDocumentosGenerados() {
+  const { data, error } = await supabase.from("documentos_generados").select("*").order("generado_at", { ascending: false });
+  if (error) { console.error(error); return; }
+  documentosGenerados = data || [];
+  await renderDocumentosGenerados();
+}
+
+async function renderDocumentosGenerados() {
+  const query = $("buscarDocumentos").value.trim().toLowerCase();
+  const docs = documentosGenerados.filter((doc) => !query || `${doc.tipo || ""} ${doc.archivo_nombre || ""} ${doc.generado_por_email || ""}`.toLowerCase().includes(query));
+  $("documentosEmpty").classList.toggle("hidden", docs.length > 0);
+  const etiquetas = { imputacion: "Imputación", acta_no_descargo: "Acta de No Descargo", orden_sancion: "Orden de Sanción" };
+  const filas = await Promise.all(docs.map(async (doc) => {
+    const enlace = await fileLinkHtml("notas", doc.archivo_path, doc.archivo_nombre);
+    return `<article class="document-item"><div><span class="action-type">${escapeHtml(etiquetas[doc.tipo] || doc.tipo || "Documento")}</span><strong>${escapeHtml(doc.archivo_nombre || "Sin nombre")}</strong><span class="muted small">Generado ${formatFechaHora(String(doc.generado_at || "").slice(0, 10), String(doc.generado_at || "").slice(11, 16))} · ${escapeHtml(doc.generado_por_email || "-")}</span></div><div>${enlace}</div></article>`;
+  }));
+  $("documentosLista").innerHTML = filas.join("");
+}
+
+$("buscarDocumentos").addEventListener("input", () => { renderDocumentosGenerados(); });
 
 function renderNotasTable(list) {
   notasVisibles = list;
@@ -497,6 +557,10 @@ async function renderNotaDetail(nota) {
       <div class="detail-progress">
         <span class="detail-progress-label">Estado del trámite</span>
         ${progresoNotaHtml(nota)}
+      </div>
+      <div class="timeline-card">
+        <div class="detail-card-header"><h3>Ruta del trámite</h3><span class="muted small">Seguimiento cronológico</span></div>
+        ${cronologiaNotaHtml(nota)}
       </div>
       ${avisoConsistencia ? `<p class="error small">⚠ Según las horas transcurridas entre la falta y la reincorporación (${formatearHorasFalto(nota)}), el código esperado sería <strong>${avisoConsistencia.sugerido}</strong>, pero el registrado es <strong>${escapeHtml(avisoConsistencia.actual)}</strong>. Verifique la fecha/hora de falta y de reincorporación (pueden venir mal leídas de un PDF/OCR) antes de generar los documentos.</p>` : ""}
       ${codigoEsLeve && !puedeDescargar ? `<p class="muted small">Para poder generar el documento, complete la reincorporación (fecha, hora y N.º de nota) y verifique que el oficial que constató la falta ("${escapeHtml(nota.oficial_constato || "")}") esté registrado en Efectivos.</p>` : ""}
@@ -2025,6 +2089,18 @@ function progresoNotaHtml(n) {
     <div class="case-progress-steps">${etiquetas.map((etiqueta, i) => `<span class="${i + 1 <= paso ? "is-done" : ""} ${i + 1 === paso ? "is-current" : ""}">${i + 1}</span>`).join("")}</div>
     <span class="pill ${claseEstadoNota(n)}">${escapeHtml(estadoDeNota(n))}</span>
   </div>`;
+}
+
+function cronologiaNotaHtml(nota) {
+  const pasos = [
+    { titulo: "Nota registrada", fecha: nota.created_at, listo: true },
+    { titulo: "Reincorporación registrada", fecha: nota.fecha_reincorporacion, listo: !!nota.fecha_reincorporacion },
+    { titulo: "Imputación notificada", fecha: nota.imputacion_generada_at, listo: !!nota.imputacion_generada_at },
+    { titulo: "Descargo recibido", fecha: nota.fecha_descargo, listo: !!nota.fecha_descargo },
+    { titulo: "Orden de sanción generada", fecha: nota.orden_sancion_generada_at, listo: !!nota.orden_sancion_generada_at },
+    { titulo: "Orden notificada", fecha: nota.orden_notificada_at, listo: !!nota.orden_notificada_at },
+  ];
+  return `<ol class="case-timeline">${pasos.map((paso) => `<li class="${paso.listo ? "is-complete" : ""}"><span class="timeline-dot"></span><div><strong>${paso.titulo}</strong><small>${paso.listo && paso.fecha ? formatDate(String(paso.fecha).slice(0, 10)) : "Pendiente"}</small></div></li>`).join("")}</ol>`;
 }
 
 function colorTema(varName) {
