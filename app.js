@@ -191,9 +191,49 @@ function renderResumenRapidoNotas() {
     </div>`;
 }
 
+function obtenerAccionesPrioritariasNotas() {
+  return (state.notas || []).flatMap((nota) => {
+    const nombre = `${nota.grado || ""} ${nota.apellidos || ""} ${nota.nombres || ""}`.replace(/\s+/g, " ").trim() || "Nota sin nombre";
+    if (nota.fecha_reincorporacion && nota.imputacion_generada_at && !nota.fecha_descargo && !nota.orden_sancion_generada_at && plazoDescargoVencido(nota)) {
+      return [{ nota, nombre, prioridad: 1, tipo: "Plazo vencido", detalle: "Defina el siguiente trámite: acta de no descargo u orden de sanción.", clase: "is-urgent" }];
+    }
+    if (nota.fecha_descargo && !nota.orden_sancion_generada_at) {
+      return [{ nota, nombre, prioridad: 2, tipo: "Descargo recibido", detalle: "Revise el descargo y prepare la orden de sanción.", clase: "is-ready" }];
+    }
+    if (nota.fecha_reincorporacion && !nota.imputacion_generada_at) {
+      return [{ nota, nombre, prioridad: 3, tipo: "Generar imputación", detalle: "Verifique los datos y genere la notificación de imputación.", clase: "is-pending" }];
+    }
+    if (!nota.fecha_reincorporacion) {
+      return [{ nota, nombre, prioridad: 4, tipo: "Registrar reincorporación", detalle: "Cargue la fecha, hora y nota de reincorporación para continuar.", clase: "is-pending" }];
+    }
+    return [];
+  }).sort((a, b) => a.prioridad - b.prioridad);
+}
+
+function renderBandejaAccionesNotas() {
+  const acciones = obtenerAccionesPrioritariasNotas();
+  const bandeja = $("bandejaAcciones");
+  bandeja.classList.toggle("hidden", acciones.length === 0);
+  if (!acciones.length) return;
+  $("bandejaAccionesCount").textContent = `${acciones.length} pendiente${acciones.length === 1 ? "" : "s"}`;
+  $("bandejaAccionesLista").innerHTML = acciones.slice(0, 5).map((accion) => `
+    <article class="action-item ${accion.clase}">
+      <div class="action-item-copy">
+        <span class="action-type">${escapeHtml(accion.tipo)}</span>
+        <strong>${escapeHtml(accion.nombre)}</strong>
+        <span class="muted small">${escapeHtml(accion.detalle)}</span>
+      </div>
+      <button type="button" class="btn-secondary btn-abrir-accion" data-id="${escapeHtml(accion.nota.id)}">Resolver</button>
+    </article>`).join("");
+  document.querySelectorAll(".btn-abrir-accion").forEach((btn) => {
+    btn.addEventListener("click", () => openNotaDetail(btn.dataset.id));
+  });
+}
+
 function renderNotasTable(list) {
   notasVisibles = list;
   renderResumenRapidoNotas();
+  renderBandejaAccionesNotas();
   const tbody = $("notasTableBody");
   tbody.innerHTML = "";
   $("notasEmpty").classList.toggle("hidden", list.length > 0);
