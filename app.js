@@ -173,8 +173,27 @@ async function loadNotas() {
 
 let notasVisibles = [];
 
+function renderResumenRapidoNotas() {
+  const notas = state.notas || [];
+  const sinReincorporacion = notas.filter((n) => !n.fecha_reincorporacion).length;
+  const porNotificar = notas.filter((n) => n.fecha_reincorporacion && !n.imputacion_generada_at).length;
+  const plazosVencidos = notas.filter((n) => n.fecha_reincorporacion && n.imputacion_generada_at && !n.fecha_descargo && !n.orden_sancion_generada_at && plazoDescargoVencido(n)).length;
+  $("notasResumenRapido").innerHTML = `
+    <div class="quick-summary-copy">
+      <span class="eyebrow">Prioridades de hoy</span>
+      <strong>${notas.length ? "Revise primero los pasos que bloquean el trámite" : "Aún no hay notas informativas registradas"}</strong>
+      <span class="muted small">${notas.length ? "La vista resalta reincorporaciones, notificaciones y plazos que requieren acción." : "Cree la primera nota para iniciar el seguimiento."}</span>
+    </div>
+    <div class="quick-summary-stats">
+      <div><b>${sinReincorporacion}</b><span>sin reincorporación</span></div>
+      <div><b>${porNotificar}</b><span>por notificar</span></div>
+      <div class="${plazosVencidos ? "is-urgent" : ""}"><b>${plazosVencidos}</b><span>plazo vencido</span></div>
+    </div>`;
+}
+
 function renderNotasTable(list) {
   notasVisibles = list;
+  renderResumenRapidoNotas();
   const tbody = $("notasTableBody");
   tbody.innerHTML = "";
   $("notasEmpty").classList.toggle("hidden", list.length > 0);
@@ -192,7 +211,7 @@ function renderNotasTable(list) {
       <td>${escapeHtml(n.numero_nota_reincorporacion || "-")}</td>
       <td>${formatearHorasFalto(n) || "-"}</td>
       <td>${escapeHtml(n.codigo_infraccion || "")}</td>
-      <td>${n.fecha_reincorporacion ? '<span class="pill pill-yes">Sí</span>' : '<span class="pill pill-no">Pendiente</span>'}</td>
+      <td>${progresoNotaHtml(n)}</td>
       <td class="row-actions"><div class="row-actions-inner">${puedeDescargar ? `<button type="button" class="btn-secondary btn-descargar-imputacion" title="Descargar Inicio de Imputación de Infracción Leve">⬇ Imputación</button>` : ""}${puedeActa ? `<button type="button" class="btn-secondary btn-descargar-acta" title="Descargar Acta de No Recepción de Descargos">⬇ Acta No Descargo</button>` : ""} <span class="row-chevron">›</span></div></td>
     `;
     tr.addEventListener("click", () => openNotaDetail(n.id));
@@ -434,6 +453,10 @@ async function renderNotaDetail(nota) {
         ${codigoEsLeve ? `
           <button type="button" class="btn-secondary" id="btnDescargarImputacion" ${puedeDescargar ? "" : "disabled"}>⬇ Descargar Imputación</button>
         ` : ""}
+      </div>
+      <div class="detail-progress">
+        <span class="detail-progress-label">Estado del trámite</span>
+        ${progresoNotaHtml(nota)}
       </div>
       ${avisoConsistencia ? `<p class="error small">⚠ Según las horas transcurridas entre la falta y la reincorporación (${formatearHorasFalto(nota)}), el código esperado sería <strong>${avisoConsistencia.sugerido}</strong>, pero el registrado es <strong>${escapeHtml(avisoConsistencia.actual)}</strong>. Verifique la fecha/hora de falta y de reincorporación (pueden venir mal leídas de un PDF/OCR) antes de generar los documentos.</p>` : ""}
       ${codigoEsLeve && !puedeDescargar ? `<p class="muted small">Para poder generar el documento, complete la reincorporación (fecha, hora y N.º de nota) y verifique que el oficial que constató la falta ("${escapeHtml(nota.oficial_constato || "")}") esté registrado en Efectivos.</p>` : ""}
@@ -1945,6 +1968,23 @@ function estadoDeNota(n) {
   if (n.fecha_descargo) return "Con descargo, evaluando";
   if (plazoDescargoVencido(n)) return "Plazo vencido, pendiente";
   return "Plazo de descargo vigente";
+}
+
+function claseEstadoNota(n) {
+  if (n.orden_sancion_generada_at) return "pill-yes";
+  if (n.fecha_descargo) return "pill-info";
+  if (n.fecha_reincorporacion && n.imputacion_generada_at && plazoDescargoVencido(n)) return "pill-danger";
+  if (n.imputacion_generada_at) return "pill-warning";
+  return "pill-neutral";
+}
+
+function progresoNotaHtml(n) {
+  const paso = n.orden_sancion_generada_at ? 5 : n.fecha_descargo ? 4 : n.imputacion_generada_at ? 3 : n.fecha_reincorporacion ? 2 : 1;
+  const etiquetas = ["Falta", "Reinc.", "Imput.", "Descargo", "Sanción"];
+  return `<div class="case-progress" title="${escapeHtml(estadoDeNota(n))}">
+    <div class="case-progress-steps">${etiquetas.map((etiqueta, i) => `<span class="${i + 1 <= paso ? "is-done" : ""} ${i + 1 === paso ? "is-current" : ""}">${i + 1}</span>`).join("")}</div>
+    <span class="pill ${claseEstadoNota(n)}">${escapeHtml(estadoDeNota(n))}</span>
+  </div>`;
 }
 
 function colorTema(varName) {
