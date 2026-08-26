@@ -67,7 +67,10 @@
   <!-- DASHBOARD: NOTAS INFORMATIVAS -->
   <section id="view-dashboard" class="view hidden">
     <div class="view-header">
-      <h2>Notas informativas</h2>
+      <div>
+        <h2>Seguimiento disciplinario</h2>
+        <p class="muted view-subtitle">Identifique la siguiente acción de cada nota sin abrir expediente por expediente.</p>
+      </div>
       <div class="view-actions">
         <input id="searchNotas" type="search" placeholder="Buscar por nombre, apellido o N.º de nota..." />
         <label class="inline-filter">Desde <input id="filtroDesde" type="date" /></label>
@@ -79,6 +82,7 @@
         <button id="btnNuevaNota" class="btn-primary admin-only hidden">+ Nueva nota</button>
       </div>
     </div>
+    <div id="notasResumenRapido" class="quick-summary" aria-live="polite"></div>
     <div id="resumenEjecutivoPanel" class="detail-card hidden" style="margin-bottom:16px">
       <div class="detail-card-header">
         <h3>Resumen ejecutivo (IA)</h3>
@@ -100,7 +104,7 @@
             <th>N.º nota reinc.</th>
             <th>Tiempo ausente</th>
             <th>Código infracción</th>
-            <th>Reincorporado</th>
+            <th>Etapa actual</th>
             <th></th>
           </tr>
         </thead>
@@ -209,10 +213,14 @@
 <div id="modalNuevaNota" class="modal-overlay hidden">
   <div class="modal">
     <div class="modal-header">
-      <h3>Nueva nota informativa</h3>
+      <div>
+        <h3>Nueva nota informativa</h3>
+        <p class="muted small modal-subtitle">Registre primero la falta; la reincorporación y los documentos se controlan después desde el expediente.</p>
+      </div>
       <button id="btnCerrarModal" class="btn-ghost">✕</button>
     </div>
     <form id="notaForm" class="modal-body">
+      <p class="form-section-title"><span>1</span> Identificación del efectivo</p>
       <div class="lookup-row">
         <label class="grow">Buscar efectivo por CIP o DNI
           <input type="text" id="lookupCipDni" placeholder="Ej. 337635 o 40482528" />
@@ -229,6 +237,7 @@
           <input type="text" id="fCodigoInfraccion" />
         </label>
       </div>
+      <p class="form-section-title"><span>2</span> Datos de la falta</p>
       <div class="grid-2">
         <label>Apellidos
           <input type="text" id="fApellidos" required />
@@ -251,6 +260,7 @@
       <label>Oficial que constató
         <input type="text" id="fOficialConstato" />
       </label>
+      <p class="form-section-title"><span>3</span> Sustento de la nota</p>
       <label>Archivo de la nota (PDF/imagen)
         <input type="file" id="fArchivoNota" accept="application/pdf,image/*" />
       </label>
