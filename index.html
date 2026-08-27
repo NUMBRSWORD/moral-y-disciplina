@@ -403,6 +403,22 @@
   </form>
 </div>
 
+<div id="toasts" aria-live="polite"></div>
+
+<!-- REVISION PREVIA A GENERAR UN DOCUMENTO -->
+<div id="modalRevision" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <h3 id="revisionTitulo">Revisar antes de generar</h3>
+        <p class="muted small modal-subtitle">Qué falta corregir y qué datos exactos se insertarán en el documento.</p>
+      </div>
+      <button id="btnCerrarRevision" class="btn-ghost">✕</button>
+    </div>
+    <div class="modal-body" id="revisionContenido"></div>
+  </div>
+</div>
+
 <!-- PALETA DE BUSQUEDA GLOBAL (Ctrl + K) -->
 <div id="paletaBuscar" class="modal-overlay palette-overlay hidden">
   <div class="palette">
