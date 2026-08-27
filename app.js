@@ -3,9 +3,9 @@ import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 import saveAs from "https://esm.sh/file-saver@2.0.5";
-import { renderizarImputacionDocx, puedeGenerarImputacion, buscarOficialConstato, tokens } from "./lib/imputacion.js";
-import { renderizarActaNoDescargoDocx, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
-import { renderizarOrdenSancionDocx, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
+import { renderizarImputacionDocx, construirDatosImputacion, puedeGenerarImputacion, buscarOficialConstato, tokens } from "./lib/imputacion.js";
+import { renderizarActaNoDescargoDocx, construirDatosActaNoDescargo, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
+import { renderizarOrdenSancionDocx, construirDatosOrdenSancion, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva, subirArchivoDirectiva } from "./lib/directivas.js";
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible } from "./lib/utils.js";
@@ -34,6 +34,23 @@ const CATALOGO_ASISTENTE = ["L21", "L24"]
   .map((codigo) => ({ codigo, ...(getInfraccion(codigo) || {}) }));
 
 const $ = (id) => document.getElementById(id);
+
+// ---------- Avisos flotantes ----------
+// Reemplaza los `console.error(...)` mudos de las cargas: si algo falla (red,
+// permisos, sesión vencida) el oficial ve un aviso en pantalla en vez de creer
+// que simplemente "no hay casos".
+function toast(mensaje, tipo = "error", ms = 6000) {
+  const cont = $("toasts");
+  if (!cont) { console[tipo === "error" ? "error" : "log"](mensaje); return; }
+  const el = document.createElement("div");
+  el.className = `toast is-${tipo === "ok" ? "ok" : tipo === "info" ? "info" : "error"}`;
+  el.textContent = mensaje;
+  cont.appendChild(el);
+  setTimeout(() => {
+    el.style.opacity = "0";
+    setTimeout(() => el.remove(), 220);
+  }, ms);
+}
 
 // ---------- Tema claro/oscuro ----------
 // El oscuro sigue siendo el predeterminado (nadie ve un cambio de
@@ -311,7 +328,7 @@ async function loadNotas() {
     .from("notas_informativas")
     .select("*, expedientes(*)")
     .order("fecha_falta", { ascending: false });
-  if (error) { console.error(error); return; }
+  if (error) { console.error(error); toast("No se pudieron cargar los expedientes: " + (error.message || "error de red o de sesión") + ". Intente recargar la página."); return; }
   // La política de RLS "ve notas propias o es admin" ya filtra en el
   // servidor qué filas puede ver este usuario (por oficial_constato_cip);
   // el navegador nunca recibe las que no le corresponden, así que aquí ya
@@ -657,6 +674,158 @@ $("btnExportarExcel").addEventListener("click", () => {
   XLSX.writeFile(libro, `notas_informativas_${fecha}.xlsx`);
 });
 
+// ---------- Revisar antes de generar (control de calidad + vista previa) ----------
+// Ubica al investigado de la nota dentro del padrón de Efectivos con el mismo
+// criterio que el resto de la app (>= 2 palabras en común).
+function ubicarInvestigadoEnEfectivos(nota, efectivos) {
+  const objetivo = tokens(`${nota?.apellidos || ""} ${nota?.nombres || ""}`);
+  if (objetivo.length < 2 || !efectivos?.length) return null;
+  let mejor = null, mejorScore = 0;
+  for (const ef of efectivos) {
+    const t = new Set(tokens(ef.apellidos_nombres));
+    const s = objetivo.filter((x) => t.has(x)).length;
+    if (s > mejorScore) { mejorScore = s; mejor = ef; }
+  }
+  return mejorScore >= 2 ? mejor : null;
+}
+
+// Junta en un solo lugar las validaciones que hoy están dispersas
+// (puedeGenerar*, plazos, consistencia código/horas, coincidencia con
+// Efectivos, resumen del descargo) y las devuelve como lista legible. `tipo`
+// es "imputacion" | "acta" | "orden".
+function revisarExpediente(nota, tipo) {
+  const bloqueos = [];
+  const avisos = [];
+  const ef = state.efectivos || [];
+  const codigo = normalizarCodigoInfraccion(nota.codigo_infraccion);
+  const infraccion = getInfraccion(codigo);
+  const esLeve = /^L/i.test((nota.codigo_infraccion || "").trim());
+
+  if (!nota.codigo_infraccion) bloqueos.push("Falta el código de infracción.");
+  else if (!infraccion) bloqueos.push(`El código «${nota.codigo_infraccion}» no está en el Anexo I de infracciones leves.`);
+  else if (!esLeve) avisos.push("El código registrado no es Leve (L…); esta aplicación solo tramita infracciones leves.");
+
+  if (!nota.fecha_falta) bloqueos.push("Falta la fecha de la falta.");
+  if (!nota.numero_nota_falta) bloqueos.push("Falta el N.º de nota de la falta.");
+  if (!nota.hora_falta) avisos.push("No se registró la hora de la falta.");
+
+  if (!nota.fecha_reincorporacion) bloqueos.push("Falta registrar la reincorporación (fecha).");
+  if (!nota.numero_nota_reincorporacion) bloqueos.push("Falta el N.º de nota de reincorporación.");
+  if (nota.fecha_reincorporacion && !nota.hora_reincorporacion) avisos.push("No se registró la hora de reincorporación.");
+
+  if (!nota.oficial_constato) bloqueos.push("No se indicó el oficial que constató la falta.");
+  else if (!buscarOficialConstato(nota.oficial_constato, ef)) bloqueos.push(`El oficial «${nota.oficial_constato}» no se ubicó en Efectivos (revise el apellido).`);
+
+  if (!nota.apellidos || !nota.nombres) bloqueos.push("Faltan apellidos o nombres del investigado.");
+  else if (!ubicarInvestigadoEnEfectivos(nota, ef)) avisos.push(`${nombreInvestigadoVisible(nota)} no se ubicó en Efectivos: su CIP/DNI no se completará en los documentos.`);
+
+  const cons = verificarConsistenciaCodigo(nota);
+  if (cons) avisos.push(`Por el tiempo ausente (${formatearHorasFalto(nota) || "?"}) el código esperado sería ${cons.sugerido}, pero está ${cons.actual}. Verifique fechas y horas.`);
+
+  if (tipo === "acta" || tipo === "orden") {
+    if (!nota.imputacion_generada_at) bloqueos.push("La Imputación aún no se ha notificado (no se ha descargado por primera vez).");
+  }
+  if (tipo === "acta") {
+    if (nota.fecha_descargo) bloqueos.push("El investigado sí presentó descargo: no corresponde el Acta de No Descargo.");
+    else if (nota.imputacion_generada_at && !plazoDescargoVencido(nota)) bloqueos.push(`El plazo de descargo aún está vigente (vence el ${formatDate(fechaLimiteDescargo(nota))}).`);
+  }
+  if (tipo === "orden") {
+    if (!nota.fecha_descargo && !plazoDescargoVencido(nota)) bloqueos.push("Todavía no hay descargo ni ha vencido el plazo: aún no corresponde la Orden.");
+    const descargoActual = $("sSancionDescargo") ? $("sSancionDescargo").value : nota.sancion_descargo_resumen;
+    if (nota.fecha_descargo && esResumenDescargoInsuficiente(descargoActual)) {
+      avisos.push("Hay descargo presentado pero sin resumen: use «Analizar descargo con IA» o redáctelo antes de generar la Orden.");
+    }
+    if (!document.querySelector('input[name="sancionTercio"]:checked')) avisos.push("Aún no ha elegido el tercio de la sanción.");
+    if (!($("sSancionAnalisis")?.value || "").trim()) avisos.push("El Análisis y Evaluación está vacío.");
+  }
+  return { bloqueos, avisos };
+}
+
+const DP_LABEL = {
+  investigado_completo: "Investigado", unidad_investigado: "Unidad",
+  descripcion_hecho: "Descripción del hecho", hecho_completo: "Hecho / caso concreto",
+  bien_juridico: "Bien jurídico", codigo_infraccion_texto: "Código de infracción",
+  codigo_texto: "Código de infracción", sancion_texto: "Rango de sanción", sancion_rango: "Rango de sanción",
+  descargo_texto: "Descargo (resumen)", analisis_texto: "Análisis y evaluación",
+  decision_texto: "Decisión", superior_completo: "Superior / firma",
+  signer_nombre: "Firma (nombre)", signer_grado: "Firma (grado)", signer_oa: "Firma (OA)",
+  oficial_nombre_completo: "Sello (nombre)", oficial_grado_seal: "Sello (grado)",
+  oficial_cip: "Sello (CIP)", oficial_cargo: "Cargo",
+  fecha_larga: "Fecha", fecha_corta: "Fecha (corta)", fecha_larga_punto: "Fecha",
+  superior_apellidos: "Superior (apellidos)", superior_nombres: "Superior (nombres)",
+  superior_grado: "Superior (grado)", superior_cip: "Superior (CIP)", superior_dni: "Superior (DNI)",
+  testigo_apellidos: "Testigo (apellidos)", testigo_nombres: "Testigo (nombres)",
+  testigo_grado: "Testigo (grado)", testigo_cip: "Testigo (CIP)", testigo_dni: "Testigo (DNI)",
+  investigado_apellidos: "Investigado (apellidos)", investigado_nombres: "Investigado (nombres)",
+  investigado_cip: "Investigado (CIP)", investigado_dni: "Investigado (DNI)", investigado_grado: "Investigado (grado)",
+  hora_apertura: "Hora de apertura", hora_cierre: "Hora de cierre",
+};
+const DP_CLAVE = new Set(["investigado_completo", "hecho_completo", "codigo_texto", "codigo_infraccion_texto", "decision_texto", "sancion_rango", "sancion_texto", "signer_nombre", "superior_completo", "analisis_texto", "descargo_texto"]);
+
+function datosDocumento(tipo, nota) {
+  if (tipo === "imputacion") return construirDatosImputacion(nota, state.efectivos);
+  if (tipo === "acta") return construirDatosActaNoDescargo(nota, state.efectivos);
+  if (tipo === "orden") {
+    return construirDatosOrdenSancion(nota, state.efectivos, {
+      tercioValue: document.querySelector('input[name="sancionTercio"]:checked')?.value || "",
+      analisisTexto: $("sSancionAnalisis")?.value.trim() || "",
+      descargoTexto: $("sSancionDescargo")?.value.trim() || "",
+    });
+  }
+  return {};
+}
+
+function datosPreviewHtml(datos) {
+  const filas = Object.entries(datos).map(([k, v]) => {
+    const val = String(v ?? "").trim() || "—";
+    return `<div class="dp-row ${DP_CLAVE.has(k) ? "is-clave" : ""}">
+      <div class="dp-key">${escapeHtml(DP_LABEL[k] || k)}</div>
+      <div class="dp-val">${escapeHtml(val)}</div>
+    </div>`;
+  });
+  return `<div class="datos-preview">${filas.join("")}</div>`;
+}
+
+const REVISION_TITULO = { imputacion: "Revisar la Imputación", acta: "Revisar el Acta de No Descargo", orden: "Revisar la Orden de Sanción" };
+
+function abrirRevision(tipo, nota) {
+  const { bloqueos, avisos } = revisarExpediente(nota, tipo);
+  $("revisionTitulo").textContent = REVISION_TITULO[tipo] || "Revisar antes de generar";
+
+  let datosHtml;
+  try {
+    datosHtml = datosPreviewHtml(datosDocumento(tipo, nota));
+  } catch (err) {
+    datosHtml = `<p class="muted small">No se puede mostrar la vista previa todavía: ${escapeHtml(err.message || String(err))}</p>`;
+  }
+
+  const listaHtml = (items, clase) => items.length
+    ? `<ul class="revision-list">${items.map((t) => `<li class="${clase}">${clase === "is-bloqueo" ? "⛔" : "⚠"} ${escapeHtml(t)}</li>`).join("")}</ul>`
+    : "";
+
+  $("revisionContenido").innerHTML = `
+    <div class="revision-section">
+      <h4>Antes de generar</h4>
+      ${bloqueos.length || avisos.length ? "" : `<div class="revision-ok">✓ No se detectaron problemas. Puede generar el documento.</div>`}
+      ${listaHtml(bloqueos, "is-bloqueo")}
+      ${listaHtml(avisos, "is-aviso")}
+      ${bloqueos.length ? `<p class="muted small" style="margin-top:8px">Los puntos en rojo impiden generar un documento correcto; corríjalos primero.</p>` : ""}
+    </div>
+    <div class="revision-section">
+      <h4>Datos que se insertarán</h4>
+      ${datosHtml}
+    </div>
+  `;
+  $("modalRevision").classList.remove("hidden");
+}
+
+function cerrarRevision() { $("modalRevision").classList.add("hidden"); }
+$("btnCerrarRevision").addEventListener("click", cerrarRevision);
+$("modalRevision").addEventListener("click", (e) => { if (e.target === $("modalRevision")) cerrarRevision(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("modalRevision").classList.contains("hidden")) cerrarRevision();
+});
+
 // ---------- Nota detail ----------
 async function openNotaDetail(id) {
   const { data: nota, error } = await supabase
@@ -664,7 +833,7 @@ async function openNotaDetail(id) {
     .select("*, expedientes(*)")
     .eq("id", id)
     .single();
-  if (error) { console.error(error); return; }
+  if (error) { console.error(error); toast("No se pudo abrir el expediente: " + (error.message || "error de red o de sesión") + "."); return; }
   state.currentNotaId = id;
   await renderNotaDetail(nota);
   showView("view-nota-detail");
@@ -714,6 +883,7 @@ async function renderNotaDetail(nota) {
       <div class="detail-card-header">
         <h3>${escapeHtml(nombreInvestigadoVisible(nota, true))}</h3>
         ${codigoEsLeve ? `
+          <button type="button" class="btn-ghost" id="btnRevisarImputacion">🔍 Revisar</button>
           <button type="button" class="btn-secondary" id="btnDescargarImputacion" ${puedeDescargar ? "" : "disabled"}>⬇ Descargar Imputación</button>
         ` : ""}
       </div>
@@ -805,7 +975,8 @@ async function renderNotaDetail(nota) {
       ` : `
         <p class="muted small">Plazo de descargo vence el ${formatDate(fechaLimite)}.</p>
         ${plazoVencido ? `
-          ${puedeActa ? `<button type="button" class="btn-secondary" id="btnDescargarActaDetalle">⬇ Descargar Acta de No Descargo</button>` : `<p class="muted small">Venció el plazo, pero no se pudo ubicar en Efectivos al oficial o al investigado para generar el acta.</p>`}
+          <button type="button" class="btn-ghost" id="btnRevisarActa">🔍 Revisar</button>
+          ${puedeActa ? `<button type="button" class="btn-secondary" id="btnDescargarActaDetalle">⬇ Descargar Acta de No Descargo</button>` : `<p class="muted small">Venció el plazo, pero no se pudo ubicar en Efectivos al oficial o al investigado para generar el acta. Use «Revisar» para ver qué falta.</p>`}
         ` : `<p class="muted small">El plazo aún está vigente, todavía no corresponde generar el acta.</p>`}
         <form id="descargoForm">
           <p class="muted small">Si el investigado sí presenta su descargo, regístrelo aquí para que ya no se genere el acta:</p>
@@ -846,7 +1017,10 @@ async function renderNotaDetail(nota) {
           <p id="sancionIAStatus" class="muted small hidden"></p>
           ` : `<p class="muted small">Sin descargo: el texto se genera automáticamente según el tercio que elija arriba — no necesita IA ni escribir nada, solo revisar.</p>`}
           <p id="sancionError" class="error hidden"></p>
-          <button type="submit" class="btn-primary">Guardar y descargar Orden de Sanción</button>
+          <div class="modal-actions" style="justify-content:flex-start">
+            <button type="button" class="btn-ghost" id="btnRevisarOrden">🔍 Revisar antes de generar</button>
+            <button type="submit" class="btn-primary">Guardar y descargar Orden de Sanción</button>
+          </div>
         </form>
         ${nota.orden_sancion_generada_at ? `<p class="muted small">Generada por última vez el ${formatDate(nota.orden_sancion_generada_at.slice(0, 10))}.</p>` : ""}
       ` : `<p class="muted small">Para generar la Orden de Sanción, verifique que el oficial que constató la falta y el investigado estén registrados en Efectivos.</p>`}
@@ -918,6 +1092,9 @@ async function renderNotaDetail(nota) {
     openNotaDetail(nota.id);
   });
   $("btnDescargarActaDetalle")?.addEventListener("click", (e) => handleDescargarActaNoDescargo(nota, e.currentTarget));
+  $("btnRevisarImputacion")?.addEventListener("click", () => abrirRevision("imputacion", nota));
+  $("btnRevisarActa")?.addEventListener("click", () => abrirRevision("acta", nota));
+  $("btnRevisarOrden")?.addEventListener("click", () => abrirRevision("orden", nota));
   // Registrar la notificación y el descargo lo puede hacer cualquier usuario
   // autenticado (cada oficial notifica en persona y marca su propio caso),
   // no solo admin como el resto de la edición de la nota.
@@ -1304,7 +1481,7 @@ async function loadEfectivos() {
     .from("efectivos")
     .select("*")
     .order("apellidos_nombres", { ascending: true });
-  if (error) { console.error(error); return; }
+  if (error) { console.error(error); toast("No se pudo cargar el padrón de Efectivos: " + (error.message || "error de red") + ". Los documentos podrían no completar CIP/DNI."); return; }
   state.efectivos = data || [];
   renderEfectivosTable(state.efectivos);
 }
@@ -1905,7 +2082,7 @@ function renderReincLoteList() {
   if (!reincLoteFilas.length) { el.innerHTML = ""; return; }
   el.innerHTML = reincLoteFilas.map((f) => {
     const nombreLinea = f.candidate
-      ? `${escapeHtml(f.candidate.grado)} ${escapeHtml(f.candidate.apellidos)} ${escapeHtml(f.candidate.nombres)}`
+      ? escapeHtml(nombreInvestigadoVisible(f.candidate, true))
       : "No se detectó un efectivo en este archivo";
     const pill = f.nota
       ? `<span class="pill pill-yes">Nota encontrada${f.matchPor === "numero" ? " (por N.º de nota)" : " (por nombre)"} — falta ${formatDate(f.nota.fecha_falta)} · N.º ${escapeHtml(f.nota.numero_nota_falta || "-")}</span>`
@@ -2013,7 +2190,7 @@ $("btnGuardarReincLote").addEventListener("click", async () => {
     const fecha = row.querySelector(".rlFechaRow").value;
     const numero = row.querySelector(".rlNumeroRow").value.trim();
     if (!fecha || !numero) {
-      errEl.textContent = `Complete fecha y N.º de nota para ${fila.nota.apellidos} ${fila.nota.nombres}.`;
+      errEl.textContent = `Complete fecha y N.º de nota para ${nombreInvestigadoVisible(fila.nota)}.`;
       errEl.classList.remove("hidden");
       return;
     }
@@ -2270,16 +2447,34 @@ function progresoNotaHtml(n) {
   </div>`;
 }
 
+// Guía del trámite: cada etapa con su estado -- completo / pendiente /
+// vencido / no disponible todavía -- para que el oficial vea de un vistazo
+// qué sigue sin abrir cada sección.
 function cronologiaNotaHtml(nota) {
-  const pasos = [
-    { titulo: "Nota registrada", fecha: nota.created_at, listo: true },
-    { titulo: "Reincorporación registrada", fecha: nota.fecha_reincorporacion, listo: !!nota.fecha_reincorporacion },
-    { titulo: "Imputación notificada", fecha: nota.imputacion_generada_at, listo: !!nota.imputacion_generada_at },
-    { titulo: "Descargo recibido", fecha: nota.fecha_descargo, listo: !!nota.fecha_descargo },
-    { titulo: "Orden de sanción generada", fecha: nota.orden_sancion_generada_at, listo: !!nota.orden_sancion_generada_at },
-    { titulo: "Orden notificada", fecha: nota.orden_notificada_at, listo: !!nota.orden_notificada_at },
+  const exp = (nota.expedientes && nota.expedientes[0]) || null;
+  const vencidoDescargo = !!nota.imputacion_generada_at && !nota.fecha_descargo && plazoDescargoVencido(nota);
+  const hayEvaluacion = !!(nota.sancion_analisis && String(nota.sancion_analisis).trim()) || !!nota.orden_sancion_generada_at;
+  const listoDescargo = nota.fecha_descargo || vencidoDescargo;
+  const cerrado = !!(nota.orden_notificada_at || (exp && (exp.numero_oficio || exp.numero_ht)));
+
+  const nd = "nd";
+  const etapas = [
+    { titulo: "Hecho registrado", fecha: nota.created_at, estado: "completo" },
+    { titulo: "Reincorporación", fecha: nota.fecha_reincorporacion, estado: nota.fecha_reincorporacion ? "completo" : "pendiente" },
+    { titulo: "Imputación / notificación", fecha: nota.imputacion_generada_at, estado: nota.imputacion_generada_at ? "completo" : (nota.fecha_reincorporacion ? "pendiente" : nd) },
+    { titulo: "Descargo", fecha: nota.fecha_descargo, estado: nota.fecha_descargo ? "completo" : (!nota.imputacion_generada_at ? nd : (vencidoDescargo ? "vencido" : "pendiente")) },
+    { titulo: "Evaluación del descargo", fecha: null, estado: !listoDescargo ? nd : (hayEvaluacion ? "completo" : "pendiente") },
+    { titulo: "Orden de Sanción", fecha: nota.orden_sancion_generada_at, estado: nota.orden_sancion_generada_at ? "completo" : (listoDescargo ? "pendiente" : nd) },
+    { titulo: "Cierre (notificación / expediente)", fecha: nota.orden_notificada_at, estado: cerrado ? "completo" : (nota.orden_sancion_generada_at ? "pendiente" : nd) },
   ];
-  return `<ol class="case-timeline">${pasos.map((paso) => `<li class="${paso.listo ? "is-complete" : ""}"><span class="timeline-dot"></span><div><strong>${paso.titulo}</strong><small>${paso.listo && paso.fecha ? formatDate(String(paso.fecha).slice(0, 10)) : "Pendiente"}</small></div></li>`).join("")}</ol>`;
+  const LABEL = { completo: "Completo", pendiente: "Pendiente", vencido: "Vencido", nd: "No disponible" };
+  const ICON = { completo: "✓", pendiente: "•", vencido: "!", nd: "–" };
+  return `<ol class="tramite-etapas">${etapas.map((e) => `
+    <li class="tramite-etapa te-${e.estado}">
+      <span class="te-icon">${ICON[e.estado]}</span>
+      <span class="te-nombre">${escapeHtml(e.titulo)}${e.fecha && e.estado === "completo" ? ` <span class="muted small">— ${formatDate(String(e.fecha).slice(0, 10))}</span>` : ""}</span>
+      <span class="te-estado">${LABEL[e.estado]}</span>
+    </li>`).join("")}</ol>`;
 }
 
 function colorTema(varName) {
