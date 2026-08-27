@@ -8,7 +8,7 @@ import { renderizarActaNoDescargoDocx, puedeGenerarActaNoDescargo, plazoDescargo
 import { renderizarOrdenSancionDocx, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva, subirArchivoDirectiva } from "./lib/directivas.js";
-import { horasAusente, sugerirCodigoInfraccion } from "./lib/utils.js";
+import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible } from "./lib/utils.js";
 import { Chart } from "https://esm.sh/chart.js@4.4.4/auto";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
@@ -195,7 +195,7 @@ function renderResumenRapidoNotas() {
 
 function obtenerAccionesPrioritariasNotas() {
   return (state.notas || []).flatMap((nota) => {
-    const nombre = `${nota.grado || ""} ${nota.apellidos || ""} ${nota.nombres || ""}`.replace(/\s+/g, " ").trim() || "Nota sin nombre";
+    const nombre = nombreInvestigadoVisible(nota, true) || "Nota sin nombre";
     if (nota.fecha_reincorporacion && nota.imputacion_generada_at && !nota.fecha_descargo && !nota.orden_sancion_generada_at && plazoDescargoVencido(nota)) {
       return [{ nota, nombre, prioridad: 1, tipo: "Plazo vencido", detalle: "Defina el siguiente trámite: acta de no descargo u orden de sanción.", clase: "is-urgent" }];
     }
@@ -303,7 +303,7 @@ function renderNotasTable(list) {
     const puedeActa = puedeGenerarActaNoDescargo(n, state.efectivos);
     tr.innerHTML = `
       <td>${escapeHtml(n.grado || "")}</td>
-      <td>${escapeHtml(n.apellidos || "")} ${escapeHtml(n.nombres || "")}</td>
+      <td>${escapeHtml(nombreInvestigadoVisible(n))}</td>
       <td>${formatFechaHora(n.fecha_falta, n.hora_falta)}</td>
       <td>${escapeHtml(n.numero_nota_falta || "")}</td>
       <td>${escapeHtml(n.oficial_constato || "-")}</td>
@@ -351,7 +351,23 @@ async function registrarVersionDocumento(notaId, tipo, blob, nombreArchivo) {
 }
 
 function nombreArchivoDocumento(prefijo, nota) {
-  return `${prefijo} - ${(nota.grado || "").trim()} ${(nota.apellidos || "").trim()} ${(nota.nombres || "").trim()}.docx`.replace(/\s+/g, " ").trim();
+  return `${prefijo} - ${nombreInvestigadoVisible(nota, true)}.docx`.replace(/\s+/g, " ").trim();
+}
+
+// Nombre del investigado en el formato visible "Nombres APELLIDOS" (apellidos
+// en MAYÚSCULAS), opcionalmente con el grado delante. Se usa en tablas,
+// exportaciones, nombres de archivo, encabezados y en lo que se manda a la IA.
+function nombreInvestigadoVisible(nota, incluirGrado = false) {
+  const nombre = nombreCompletoVisible(nota?.apellidos, nota?.nombres);
+  return `${incluirGrado ? (nota?.grado || "").trim() : ""} ${nombre}`.replace(/\s+/g, " ").trim();
+}
+
+// La IA (o el propio oficial) puede dejar el resumen del descargo vacío o con
+// la frase genérica de relleno. En ese caso el resumen no sirve para la Orden
+// y hay que exigir uno real de los puntos relevantes y argumentos de defensa.
+function esResumenDescargoInsuficiente(texto) {
+  const resumen = String(texto || "").replace(/\s+/g, " ").trim();
+  return !resumen || /^El descargo presentado debe ser valorado junto con el archivo original\.?$/i.test(resumen);
 }
 
 async function handleDescargarImputacion(nota, btnEl) {
@@ -427,7 +443,7 @@ $("btnLimpiarFiltroFecha").addEventListener("click", () => {
 // como estado persistido, así que no se manda).
 function construirResumenEstadoCasos() {
   return state.notas.map((n) => ({
-    investigado: `${n.grado || ""} ${n.apellidos || ""} ${n.nombres || ""}`.replace(/\s+/g, " ").trim(),
+    investigado: nombreInvestigadoVisible(n, true),
     codigo_infraccion: n.codigo_infraccion || null,
     fecha_hecho: n.fecha_falta || null,
     reincorporado: !!n.fecha_reincorporacion,
@@ -476,7 +492,7 @@ $("btnExportarExcel").addEventListener("click", () => {
   if (!notasVisibles.length) { alert("No hay notas para exportar (revise el buscador)."); return; }
   const filas = notasVisibles.map((n) => ({
     "Grado": n.grado || "",
-    "Apellidos y nombres": `${n.apellidos || ""} ${n.nombres || ""}`.trim(),
+    "Nombres y apellidos": nombreInvestigadoVisible(n),
     "Fecha/hora falta": formatFechaHora(n.fecha_falta, n.hora_falta),
     "N.º nota": n.numero_nota_falta || "",
     "Oficial": n.oficial_constato || "-",
@@ -549,7 +565,7 @@ async function renderNotaDetail(nota) {
   $("notaDetailContent").innerHTML = `
     <div class="detail-card">
       <div class="detail-card-header">
-        <h3>${escapeHtml(nota.grado || "")} ${escapeHtml(nota.apellidos || "")} ${escapeHtml(nota.nombres || "")}</h3>
+        <h3>${escapeHtml(nombreInvestigadoVisible(nota, true))}</h3>
         ${codigoEsLeve ? `
           <button type="button" class="btn-secondary" id="btnDescargarImputacion" ${puedeDescargar ? "" : "disabled"}>⬇ Descargar Imputación</button>
         ` : ""}
@@ -669,8 +685,8 @@ async function renderNotaDetail(nota) {
               (nota.sancion_tipo === "dias" && String(nota.sancion_dias) === o.value);
             return `<label class="checkbox-row"><input type="radio" name="sancionTercio" value="${o.value}" ${marcado ? "checked" : ""} required /> ${escapeHtml(o.label)}</label>`;
           }).join("")}
-          <label>Descargo del investigado (resumen${nota.fecha_descargo ? " — deje en blanco y presione \"Redactar con IA\" para que se lea solo del archivo subido" : ""})
-            <textarea id="sSancionDescargo" rows="3" placeholder="${nota.fecha_descargo ? "Déjelo en blanco: 'Redactar con IA' lee el archivo del descargo ya subido. O escriba usted mismo un resumen." : ""}">${escapeHtml(nota.sancion_descargo_resumen || (nota.fecha_descargo ? "" : "El investigado no presentó su descargo por escrito dentro del plazo de un (01) día hábil establecido por ley, conforme acta respectiva, precluyendo su derecho a la defensa en la presente etapa procedimental."))}</textarea>
+          <label>Descargo del investigado (resumen de puntos relevantes y argumentos de defensa${nota.fecha_descargo ? " — deje en blanco y presione \"Redactar con IA\" para que se lea solo del archivo subido" : ""})
+            <textarea id="sSancionDescargo" rows="4" placeholder="${nota.fecha_descargo ? "Primero use 'Redactar con IA' o escriba un resumen propio. No copie el descargo completo." : ""}">${escapeHtml(nota.sancion_descargo_resumen || (nota.fecha_descargo ? "" : "El investigado no presentó su descargo por escrito dentro del plazo de un (01) día hábil establecido por ley, conforme acta respectiva, precluyendo su derecho a la defensa en la presente etapa procedimental."))}</textarea>
           </label>
           <label>Análisis y evaluación ${nota.fecha_descargo ? "(notas sueltas o texto final)" : "(se completa solo al elegir el tercio; puede editarlo si lo desea)"}
             <textarea id="sSancionAnalisis" rows="6" required placeholder="Anote en sus palabras: qué se acredita, qué alega el investigado, y por qué corresponde el tercio elegido... o escriba el texto final directamente.">${escapeHtml(nota.sancion_analisis || "")}</textarea>
@@ -846,9 +862,16 @@ async function redactarConIA(nota) {
   statusEl.classList.remove("hidden");
   try {
     let descargoNotas = $("sSancionDescargo").value.trim();
+    // Un resumen guardado antes de esta corrección pudo quedar con la frase
+    // genérica de relleno: no debe analizarse como si fuera el descargo, se
+    // vuelve a leer el archivo original para obtener sus argumentos reales.
+    if (esResumenDescargoInsuficiente(descargoNotas)) descargoNotas = "";
     if (!descargoNotas && nota.archivo_descargo_path) {
       statusEl.textContent = "Leyendo el archivo del descargo ya subido...";
       descargoNotas = (await extraerTextoDescargo(nota, (msg) => { statusEl.textContent = msg; })).trim();
+    }
+    if (!descargoNotas) {
+      throw new Error("No se encontró texto legible del descargo. Revise que el archivo esté cargado o escriba un resumen manual de los puntos relevantes y argumentos de defensa.");
     }
 
     statusEl.textContent = "Consultando directivas internas y antecedentes...";
@@ -858,7 +881,7 @@ async function redactarConIA(nota) {
     statusEl.textContent = "Analizando el descargo y redactando con IA...";
     const { data, error } = await supabase.functions.invoke("redactar-analisis", {
       body: {
-        investigadoCompleto: `${nota.grado || ""} ${nota.apellidos || ""} ${nota.nombres || ""}`.replace(/\s+/g, " ").trim(),
+        investigadoCompleto: nombreInvestigadoVisible(nota, true),
         codigoInfraccion: normalizarCodigoInfraccion(nota.codigo_infraccion),
         infraccionTexto: infraccion?.infraccion || "",
         hechoResumen: buildCasoConcreto(nota),
@@ -871,7 +894,11 @@ async function redactarConIA(nota) {
     });
     if (error) throw error;
     if (data?.error) throw new Error(data.error);
-    if (data?.descargo_texto) $("sSancionDescargo").value = data.descargo_texto;
+    if (data?.descargo_texto && !esResumenDescargoInsuficiente(data.descargo_texto)) {
+      $("sSancionDescargo").value = data.descargo_texto;
+    } else {
+      throw new Error("No se pudo obtener un resumen útil del descargo. Revise el archivo o redacte un resumen de los puntos relevantes y argumentos de defensa antes de generar la orden.");
+    }
     if (data?.analisis_texto) {
       $("sSancionAnalisis").value = data.analisis_texto;
       $("sSancionAnalisis").dataset.autofilled = "false";
@@ -915,7 +942,7 @@ async function verificarNotificacionOrdenIA(nota) {
     const { data, error } = await supabase.functions.invoke("revisar-documento-ia", {
       body: {
         tipo: "notificacion_orden",
-        investigadoCompleto: `${nota.grado || ""} ${nota.apellidos || ""} ${nota.nombres || ""}`.replace(/\s+/g, " ").trim(),
+        investigadoCompleto: nombreInvestigadoVisible(nota, true),
         codigoInfraccion: normalizarCodigoInfraccion(nota.codigo_infraccion),
         sancionImpuesta,
         textoDocumento,
@@ -968,6 +995,11 @@ async function submitSancion(e, nota) {
 
   if (!tercioValue) { errEl.textContent = "Seleccione la sanción a imponer."; errEl.classList.remove("hidden"); return; }
   if (!analisisTexto) { errEl.textContent = "Escriba el Análisis y Evaluación."; errEl.classList.remove("hidden"); return; }
+  if (nota.fecha_descargo && esResumenDescargoInsuficiente(descargoTexto)) {
+    errEl.textContent = "Falta el resumen del descargo. Use «Analizar descargo y redactar con IA» o escriba los puntos relevantes y argumentos de defensa antes de generar la orden.";
+    errEl.classList.remove("hidden");
+    return;
+  }
 
   const submitBtn = e.target.querySelector("button[type=submit]");
   const textoOriginal = submitBtn.textContent;
