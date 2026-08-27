@@ -8,7 +8,7 @@ import { renderizarActaNoDescargoDocx, puedeGenerarActaNoDescargo, plazoDescargo
 import { renderizarOrdenSancionDocx, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva, subirArchivoDirectiva } from "./lib/directivas.js";
-import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible } from "./lib/utils.js";
+import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible } from "./lib/utils.js";
 import { Chart } from "https://esm.sh/chart.js@4.4.4/auto";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
@@ -83,6 +83,153 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 });
 
 $("btnVolverDashboard").addEventListener("click", () => { showView("view-dashboard"); loadNotas(); });
+
+// ---------- Paleta de búsqueda global (Ctrl + K) ----------
+// Reemplaza tener Efectivos como pestaña siempre visible: cualquiera puede
+// buscar una persona por nombre/apellido/CIP/DNI (si escribe solo un apellido
+// salen todas las personas que lo tienen) y saltar a un expediente, sin
+// recorrer pestañas. Trabaja sobre lo ya cargado en memoria (state.efectivos
+// es el padrón completo; state.notas ya viene filtrado por RLS a lo que este
+// usuario puede ver), así que no dispara consultas nuevas.
+const paleta = {
+  overlay: $("paletaBuscar"),
+  input: $("paletaInput"),
+  resultados: $("paletaResultados"),
+  activo: -1,
+  items: [],
+};
+
+function abrirPaleta() {
+  if (!state.session) return;
+  paleta.overlay.classList.remove("hidden");
+  paleta.input.value = "";
+  renderPaleta("");
+  paleta.input.focus();
+}
+
+function cerrarPaleta() {
+  paleta.overlay.classList.add("hidden");
+}
+
+function coincidePorTokens(consultaTokens, textoTokens) {
+  return consultaTokens.every((qt) => textoTokens.some((t) => t.startsWith(qt)));
+}
+
+function renderPaleta(raw) {
+  const q = (raw || "").trim();
+  const qTokens = tokens(q);
+  const qDigits = q.replace(/\D+/g, "");
+  paleta.resultados.innerHTML = "";
+  paleta.items = [];
+  paleta.activo = -1;
+
+  if (!qTokens.length && qDigits.length < 3) {
+    paleta.resultados.innerHTML = `<p class="palette-empty">Escriba un nombre, apellido, CIP o DNI.</p>`;
+    return;
+  }
+
+  const efectivos = (state.efectivos || []).filter((ef) => {
+    const textoTokens = tokens(`${ef.apellidos_nombres || ""} ${ef.grado || ""}`);
+    const porNombre = qTokens.length && coincidePorTokens(qTokens, textoTokens);
+    const porDoc = qDigits.length >= 3 &&
+      [`${ef.cip || ""}`, `${ef.dni || ""}`].some((d) => d.includes(qDigits));
+    return porNombre || porDoc;
+  }).sort((a, b) => (a.apellidos_nombres || "").localeCompare(b.apellidos_nombres || ""));
+
+  const expedientes = (state.notas || []).filter((n) => {
+    if (!qTokens.length) return false;
+    const textoTokens = tokens(`${n.apellidos || ""} ${n.nombres || ""} ${n.grado || ""} ${n.codigo_infraccion || ""} ${n.numero_nota_falta || ""}`);
+    return coincidePorTokens(qTokens, textoTokens);
+  });
+
+  const cont = document.createDocumentFragment();
+
+  if (efectivos.length) {
+    const h = document.createElement("div");
+    h.className = "palette-group-title";
+    h.textContent = `Personas (${efectivos.length})`;
+    cont.appendChild(h);
+    const MAX = 40;
+    for (const ef of efectivos.slice(0, MAX)) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "palette-item";
+      b.innerHTML = `<span class="pi-nombre">${escapeHtml(ef.grado || "")} ${escapeHtml(limpiarNombreVisible(ef.apellidos_nombres || ""))}</span>` +
+        `<span class="pi-meta">CIP ${escapeHtml(ef.cip || "—")} · DNI ${escapeHtml(ef.dni || "—")}</span>`;
+      b.addEventListener("click", () => copiarAlPortapapeles(ef.cip || "", b));
+      cont.appendChild(b);
+      paleta.items.push(b);
+    }
+    if (efectivos.length > MAX) {
+      const p = document.createElement("p");
+      p.className = "palette-empty";
+      p.textContent = `y ${efectivos.length - MAX} más — afine la búsqueda`;
+      cont.appendChild(p);
+    }
+  }
+
+  if (expedientes.length) {
+    const h = document.createElement("div");
+    h.className = "palette-group-title";
+    h.textContent = `Expedientes (${expedientes.length})`;
+    cont.appendChild(h);
+    for (const n of expedientes.slice(0, 20)) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "palette-item";
+      b.innerHTML = `<span class="pi-nombre">${escapeHtml(nombreInvestigadoVisible(n, true))}</span>` +
+        `<span class="pi-meta">${escapeHtml(n.codigo_infraccion || "sin código")} · falta ${formatDate(n.fecha_falta)}</span>`;
+      b.addEventListener("click", () => { cerrarPaleta(); openNotaDetail(n.id); });
+      cont.appendChild(b);
+      paleta.items.push(b);
+    }
+  }
+
+  if (!efectivos.length && !expedientes.length) {
+    paleta.resultados.innerHTML = `<p class="palette-empty">Sin coincidencias para «${escapeHtml(q)}».</p>`;
+    return;
+  }
+  paleta.resultados.appendChild(cont);
+}
+
+function copiarAlPortapapeles(texto, btnEl) {
+  if (!texto) return;
+  navigator.clipboard?.writeText(texto).then(() => {
+    const meta = btnEl.querySelector(".pi-meta");
+    if (!meta) return;
+    const original = meta.textContent;
+    meta.textContent = "CIP copiado ✓";
+    setTimeout(() => { meta.textContent = original; }, 1200);
+  }).catch(() => {});
+}
+
+function moverActivo(delta) {
+  if (!paleta.items.length) return;
+  paleta.items[paleta.activo]?.classList.remove("is-active");
+  paleta.activo = (paleta.activo + delta + paleta.items.length) % paleta.items.length;
+  const el = paleta.items[paleta.activo];
+  el.classList.add("is-active");
+  el.scrollIntoView({ block: "nearest" });
+}
+
+$("btnPaletaBuscar").addEventListener("click", abrirPaleta);
+$("paletaCerrar").addEventListener("click", cerrarPaleta);
+paleta.overlay.addEventListener("click", (e) => { if (e.target === paleta.overlay) cerrarPaleta(); });
+paleta.input.addEventListener("input", (e) => renderPaleta(e.target.value));
+paleta.input.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown") { e.preventDefault(); moverActivo(1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); moverActivo(-1); }
+  else if (e.key === "Enter") { e.preventDefault(); paleta.items[paleta.activo]?.click(); }
+});
+
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "k" || e.key === "K")) {
+    e.preventDefault();
+    if (paleta.overlay.classList.contains("hidden")) abrirPaleta(); else cerrarPaleta();
+  } else if (e.key === "Escape" && !paleta.overlay.classList.contains("hidden")) {
+    cerrarPaleta();
+  }
+});
 
 // ---------- Auth ----------
 async function loadProfile(userId) {
