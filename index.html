@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="description" content="Gestión del procedimiento disciplinario de infracciones Leves (Ley N.° 30714) para la PNP: notas informativas, imputación, descargos y órdenes de sanción, con asistencia de IA supervisada." />
-<title>Moral y Disciplina</title>
+<title>CPNP Ventanilla — Uso interno</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <link rel="stylesheet" href="styles.css" />
 <script>
@@ -26,18 +26,22 @@
   <div class="topbar-inner">
     <div class="brand">
       <span class="brand-badge">PNP</span>
-      <span class="brand-title">Moral y Disciplina</span>
+      <span class="brand-titles">
+        <span class="brand-title">CPNP Ventanilla</span>
+        <span class="brand-sub">Moral y Disciplina · <strong>Uso interno</strong></span>
+      </span>
     </div>
     <nav class="tabs">
-      <button class="tab-btn active" data-view="dashboard">Notas informativas</button>
+      <button class="tab-btn active" data-view="dashboard">Expedientes</button>
       <button class="tab-btn admin-only hidden" data-view="efectivos">Efectivos</button>
-      <button class="tab-btn" data-view="directivas">Directivas</button>
-      <button class="tab-btn" data-view="agenda">Agenda</button>
-      <button class="tab-btn" data-view="documentos">Documentos</button>
-      <button class="tab-btn" data-view="panel">Panel</button>
+      <button class="tab-btn admin-only hidden" data-view="directivas">Directivas</button>
+      <button class="tab-btn admin-only hidden" data-view="agenda">Agenda</button>
+      <button class="tab-btn admin-only hidden" data-view="documentos">Documentos</button>
+      <button class="tab-btn admin-only hidden" data-view="panel">Panel</button>
       <button class="tab-btn admin-only hidden" data-view="historial">Historial</button>
     </nav>
     <div class="user-box">
+      <button id="btnPaletaBuscar" class="btn-ghost palette-hint" type="button" title="Buscar persona o expediente (Ctrl + K)">🔎 Buscar <kbd>Ctrl</kbd><kbd>K</kbd></button>
       <span id="userEmail"></span>
       <span id="userRole" class="badge"></span>
       <button id="btnLogout" class="btn-ghost">Salir</button>
@@ -52,8 +56,9 @@
     <form id="loginForm" class="card login-card">
       <div class="brand center">
         <span class="brand-badge lg">PNP</span>
-        <h1>Ingresar</h1>
-        <p class="muted">Ingrese su correo (o su CIP) y clave.</p>
+        <h1>CPNP Ventanilla</h1>
+        <p class="muted">Moral y Disciplina — infracciones Leves (Ley N.° 30714)</p>
+        <p class="uso-interno-chip">🔒 Sistema de uso interno · Acceso solo para personal autorizado</p>
       </div>
       <label>Correo o CIP
         <input type="text" id="loginEmail" required autocomplete="username" />
@@ -396,6 +401,19 @@
     <input type="text" id="asistenteInput" placeholder="Escriba su pregunta..." autocomplete="off" />
     <button type="submit" class="btn-primary">➤</button>
   </form>
+</div>
+
+<!-- PALETA DE BUSQUEDA GLOBAL (Ctrl + K) -->
+<div id="paletaBuscar" class="modal-overlay palette-overlay hidden">
+  <div class="palette">
+    <div class="palette-input-row">
+      <span class="palette-icon">🔎</span>
+      <input type="text" id="paletaInput" placeholder="Nombre, apellido, CIP o DNI…" autocomplete="off" spellcheck="false" />
+      <button type="button" id="paletaCerrar" class="btn-ghost">Esc</button>
+    </div>
+    <div id="paletaResultados" class="palette-results"></div>
+    <p class="palette-foot muted small">Escriba un apellido para ver a todas las personas que lo tienen. <kbd>Ctrl</kbd>+<kbd>K</kbd> para abrir · <kbd>Esc</kbd> para cerrar</p>
+  </div>
 </div>
 
 <script type="module" src="app.js"></script>
