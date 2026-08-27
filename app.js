@@ -52,6 +52,98 @@ function toast(mensaje, tipo = "error", ms = 6000) {
   }, ms);
 }
 
+// ---------- Borradores locales (autoguardado) ----------
+// Los textos largos de la Orden de Sanción (análisis y resumen del descargo)
+// se guardan en el navegador mientras se escriben, para no perderlos si se
+// navega, se recarga o expira la sesión antes de "Guardar y descargar". Es
+// solo del navegador de quien redacta: no toca la base ni a otros usuarios.
+const BORRADOR_PREFIJO = "borrador:";
+function borradorKey(notaId, campo) { return `${BORRADOR_PREFIJO}${notaId}:${campo}`; }
+
+function guardarBorrador(notaId, campo, texto) {
+  try {
+    localStorage.setItem(borradorKey(notaId, campo), JSON.stringify({ texto, ts: Date.now() }));
+  } catch (_) { /* almacenamiento lleno o bloqueado: se ignora */ }
+}
+function leerBorrador(notaId, campo) {
+  try {
+    const raw = localStorage.getItem(borradorKey(notaId, campo));
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    return obj && typeof obj.texto === "string" ? obj : null;
+  } catch (_) { return null; }
+}
+function borrarBorrador(notaId, campo) {
+  try { localStorage.removeItem(borradorKey(notaId, campo)); } catch (_) {}
+}
+function limpiarBorradoresNota(notaId) {
+  ["analisis", "descargo"].forEach((c) => borrarBorrador(notaId, c));
+}
+
+function tiempoRelativo(ts) {
+  const seg = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (seg < 10) return "hace un momento";
+  if (seg < 60) return `hace ${seg} s`;
+  const min = Math.round(seg / 60);
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  return `hace ${Math.round(h / 24)} d`;
+}
+
+let debounceBorrador = {};
+// Conecta el autoguardado a las dos áreas de texto de la Orden de Sanción y,
+// si hay un borrador local distinto de lo que se acaba de cargar, ofrece
+// restaurarlo (sin pisar nada automáticamente).
+function activarAutoguardadoSancion(nota) {
+  const campos = [
+    { campo: "analisis", el: $("sSancionAnalisis"), etiqueta: "Análisis y evaluación" },
+    { campo: "descargo", el: $("sSancionDescargo"), etiqueta: "Resumen del descargo" },
+  ];
+  const form = $("sancionForm");
+  if (!form) return;
+
+  for (const { campo, el, etiqueta } of campos) {
+    if (!el) continue;
+    const estado = document.createElement("p");
+    estado.className = "campo-guardado";
+    estado.id = `guardado-${campo}`;
+    el.insertAdjacentElement("afterend", estado);
+
+    el.addEventListener("input", () => {
+      clearTimeout(debounceBorrador[campo]);
+      debounceBorrador[campo] = setTimeout(() => {
+        guardarBorrador(nota.id, campo, el.value);
+        estado.textContent = `Borrador guardado ${tiempoRelativo(Date.now())}`;
+      }, 700);
+    });
+
+    const b = leerBorrador(nota.id, campo);
+    if (b && b.texto.trim() && b.texto.trim() !== (el.value || "").trim()) {
+      const banner = document.createElement("div");
+      banner.className = "borrador-banner";
+      banner.innerHTML = `<span class="grow">Hay un borrador local de «${escapeHtml(etiqueta)}» sin guardar (${escapeHtml(tiempoRelativo(b.ts))}).</span>`;
+      const restaurar = document.createElement("button");
+      restaurar.type = "button";
+      restaurar.className = "btn-secondary";
+      restaurar.textContent = "Restaurar";
+      restaurar.addEventListener("click", () => {
+        el.value = b.texto;
+        if (campo === "analisis") el.dataset.autofilled = "false";
+        banner.remove();
+        estado.textContent = "Borrador restaurado.";
+      });
+      const descartar = document.createElement("button");
+      descartar.type = "button";
+      descartar.className = "btn-ghost";
+      descartar.textContent = "Descartar";
+      descartar.addEventListener("click", () => { borrarBorrador(nota.id, campo); banner.remove(); });
+      banner.append(restaurar, descartar);
+      form.prepend(banner);
+    }
+  }
+}
+
 // ---------- Tema claro/oscuro ----------
 // El oscuro sigue siendo el predeterminado (nadie ve un cambio de
 // apariencia sin pedirlo); el script inline en <head> ya aplicó
@@ -1129,6 +1221,8 @@ async function renderNotaDetail(nota) {
     });
   }
 
+  activarAutoguardadoSancion(nota);
+
   if (isAdmin) {
     $("btnEliminarNota")?.addEventListener("click", () => eliminarNota(nota.id));
     $("codigoInfraccionForm")?.addEventListener("submit", (e) => submitCodigoInfraccion(e, nota.id));
@@ -1232,6 +1326,10 @@ async function redactarConIA(nota) {
         .find((r) => r.value === data.tercio_value);
       if (radio) radio.checked = true;
     }
+    // Guarda lo que redactó la IA como borrador: si se recarga antes de
+    // "Guardar y descargar", no se pierde.
+    guardarBorrador(nota.id, "descargo", $("sSancionDescargo").value);
+    guardarBorrador(nota.id, "analisis", $("sSancionAnalisis").value);
     statusEl.textContent = "Listo — la IA evaluó el descargo y eligió el tercio. Revise la selección y el texto antes de guardar.";
   } catch (err) {
     console.error(err);
@@ -1344,6 +1442,7 @@ async function submitSancion(e, nota) {
       p_descargo_resumen: descargoTexto,
     });
     if (error) { errEl.textContent = "Se generó el documento, pero no se pudo guardar la decisión: " + error.message; errEl.classList.remove("hidden"); return; }
+    limpiarBorradoresNota(nota.id);
     openNotaDetail(nota.id);
   } catch (err) {
     console.error(err);
