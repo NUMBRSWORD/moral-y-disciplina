@@ -354,7 +354,10 @@ async function loadProfile(userId) {
   // saca el CIP para saber, más adelante, cuáles notas le corresponden (en las
   // que él figura como oficial que constató).
   state.cip = (state.email || "").split("@")[0];
-  $("userEmail").textContent = state.email;
+  // El correo interno "{cip}@moralydisciplina.local" no se muestra tal cual:
+  // en la barra basta el CIP.
+  const correoInterno = /@moralydisciplina\.local$/i.test(state.email || "");
+  $("userEmail").textContent = correoInterno ? `CIP ${state.cip}` : (state.email || "");
   $("userRole").textContent = state.role;
   document.querySelectorAll(".admin-only").forEach((el) => {
     el.classList.toggle("hidden", state.role !== "admin");
@@ -979,12 +982,8 @@ async function renderNotaDetail(nota) {
           <button type="button" class="btn-secondary" id="btnDescargarImputacion" ${puedeDescargar ? "" : "disabled"}>⬇ Descargar Imputación</button>
         ` : ""}
       </div>
-      <div class="detail-progress">
-        <span class="detail-progress-label">Estado del trámite</span>
-        ${progresoNotaHtml(nota)}
-      </div>
       <div class="timeline-card">
-        <div class="detail-card-header"><h3>Ruta del trámite</h3><span class="muted small">Seguimiento cronológico</span></div>
+        <div class="detail-card-header"><h3>Ruta del trámite</h3><span class="muted small">Estado por etapa</span></div>
         ${cronologiaNotaHtml(nota)}
       </div>
       ${avisoConsistencia ? `<p class="error small">⚠ Según las horas transcurridas entre la falta y la reincorporación (${formatearHorasFalto(nota)}), el código esperado sería <strong>${avisoConsistencia.sugerido}</strong>, pero el registrado es <strong>${escapeHtml(avisoConsistencia.actual)}</strong>. Verifique la fecha/hora de falta y de reincorporación (pueden venir mal leídas de un PDF/OCR) antes de generar los documentos.</p>` : ""}
