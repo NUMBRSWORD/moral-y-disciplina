@@ -85,6 +85,7 @@
         <button id="btnLimpiarFiltroFecha" class="btn-ghost">Limpiar fechas</button>
         <button id="btnExportarExcel" class="btn-secondary">Exportar a Excel</button>
         <button id="btnResumenEjecutivo" class="btn-secondary">✨ Resumen ejecutivo IA</button>
+        <button id="btnFaltasLote" class="btn-secondary admin-only hidden">Faltas (PDF grupal)</button>
         <button id="btnReincorporacionLote" class="btn-secondary admin-only hidden">Reincorporación (PDF grupal)</button>
         <button id="btnNuevaNota" class="btn-primary admin-only hidden">+ Nueva nota</button>
       </div>
@@ -329,6 +330,29 @@
         <button type="submit" class="btn-primary">Guardar nota</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- MODAL FALTAS EN LOTE -->
+<div id="modalFaltasLote" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Faltas desde PDF</h3>
+      <button id="btnCerrarModalFaltas" class="btn-ghost">✕</button>
+    </div>
+    <div class="modal-body">
+      <label>Archivo(s) de nota de falta (PDF) — puede seleccionar varios a la vez, uno por efectivo o uno grupal
+        <input type="file" id="flArchivo" accept="application/pdf" multiple />
+      </label>
+      <p class="muted small">Se crea una nota por cada efectivo detectado. El código de infracción se completa después, en cada expediente. No se vuelven a crear las faltas que ya estén registradas.</p>
+      <p id="flStatus" class="muted small hidden"></p>
+      <div id="flLista"></div>
+      <p id="flError" class="error hidden"></p>
+      <div class="modal-actions">
+        <button type="button" id="btnCancelarFaltasLote" class="btn-ghost">Cancelar</button>
+        <button type="button" id="btnGuardarFaltasLote" class="btn-primary">Registrar faltas</button>
+      </div>
+    </div>
   </div>
 </div>
 
