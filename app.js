@@ -1952,8 +1952,11 @@ function oficialCorregidoDesdeTexto(texto) {
   ];
   for (const re of patrones) {
     const m = t.match(re);
-    if (m && /\bPNP\b/i.test(m[1])) {
-      return m[1].replace(/\s*\bPNP\b\.?\s*/i, " ").replace(/\s+/g, " ").trim();
+    // "PNP" puede venir pegado al apellido si el PDF se extrajo sin espacio
+    // ("PNPQUISPE"), así que no se exige límite de palabra; y al limpiarlo se
+    // quita también ese "PNP" pegado como prefijo del nombre.
+    if (m && /PNP/i.test(m[1])) {
+      return m[1].replace(/\s*\bPNP\b\.?\s*/i, " ").replace(/\bPNP\.?/i, "").replace(/\s+/g, " ").trim();
     }
   }
   return null;
@@ -2047,9 +2050,14 @@ async function autocompletarDesdeArchivo(file) {
       data = parseNotaInformativa(text);
     }
     // Si es una Nota de "Corrección", el oficial que constató del párrafo
-    // original está equivocado: se reemplaza por el que indica la corrección.
+    // original está equivocado: la corrección es autoritativa y pisa lo que
+    // haya extraído la IA o el parser (y lo que ya estuviera en el campo).
     const oficialCorr = oficialCorregidoDesdeTexto(text);
-    if (oficialCorr) data.oficial_constato = oficialCorr;
+    if (oficialCorr) {
+      data.oficial_constato = oficialCorr;
+      $("fOficialConstato").value = oficialCorr;
+      $("fOficialConstato").dataset.autofilled = "false";
+    }
     if (data.grado && !$("fGrado").value) $("fGrado").value = data.grado;
     if (data.apellidos && !$("fApellidos").value) $("fApellidos").value = data.apellidos;
     if (data.nombres && !$("fNombres").value) $("fNombres").value = data.nombres;
