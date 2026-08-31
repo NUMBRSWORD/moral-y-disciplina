@@ -2333,6 +2333,206 @@ $("btnGuardarReincLote").addEventListener("click", async () => {
   loadNotas();
 });
 
+// ---------- Faltas desde PDF (uno o varios archivos), en lote ----------
+// Equivalente a la reincorporación en lote, pero para el inicio del trámite:
+// cada PDF de nota de falta -- uno por efectivo o uno grupal con varios --
+// crea una nota nueva por cada efectivo. El código de infracción se completa
+// después, en cada expediente (depende del tiempo ausente, que aún no se sabe).
+let faltasLoteFilas = [];
+
+// ¿Ya hay una nota para esta persona con este mismo N.º de nota de falta?
+// Evita duplicar si el mismo PDF grupal se sube dos veces o la falta ya se
+// registró a mano. Sin N.º, cualquier nota de esa persona ya cuenta como
+// posible duplicado (se marca para que el oficial decida).
+function faltaYaRegistrada(numeroNotaFalta, candidate) {
+  if (!candidate || !candidate.apellidos) return null;
+  const objetivo = normalizarNombre(candidate.apellidos, candidate.nombres);
+  const apellidosObj = normalizarTexto(candidate.apellidos);
+  return state.notas.find((n) => {
+    const mismoNombre = normalizarNombre(n.apellidos, n.nombres) === objetivo ||
+      (!candidate.nombres && normalizarTexto(n.apellidos) === apellidosObj);
+    if (!mismoNombre) return false;
+    if (numeroNotaFalta && n.numero_nota_falta) return n.numero_nota_falta === numeroNotaFalta;
+    return true;
+  }) || null;
+}
+
+function renderFaltasLoteList() {
+  const el = $("flLista");
+  if (!faltasLoteFilas.length) { el.innerHTML = ""; return; }
+  el.innerHTML = faltasLoteFilas.map((f, i) => {
+    const dup = f.duplicada;
+    const pill = dup
+      ? `<span class="pill pill-warning">Ya existe una nota de esta persona${dup.numero_nota_falta ? ` (N.º ${escapeHtml(dup.numero_nota_falta)})` : ""} — no se creará de nuevo</span>`
+      : `<span class="pill pill-yes">Se creará una nota nueva</span>`;
+    return `
+      <div class="multi-efectivo-row" data-idx="${i}">
+        <label class="checkbox-row"><input type="checkbox" class="flCheck" ${dup ? "" : "checked"} /></label>
+        <div class="value" style="flex:1">
+          <div style="display:flex; gap:8px">
+            <input type="text" class="flGrado" value="${escapeHtml(f.grado || "")}" placeholder="Grado" style="flex:1" />
+            <input type="text" class="flApellidos" value="${escapeHtml(f.apellidos || "")}" placeholder="Apellidos" style="flex:2" />
+            <input type="text" class="flNombres" value="${escapeHtml(f.nombres || "")}" placeholder="Nombres" style="flex:2" />
+          </div>
+          <div style="display:flex; gap:8px; margin-top:6px">
+            <input type="date" class="flFechaRow" value="${escapeHtml(f.fecha_falta || "")}" style="flex:1" />
+            <input type="time" class="flHoraRow" value="${escapeHtml(f.hora_falta || "")}" style="flex:1" />
+            <input type="text" class="flNumeroRow" value="${escapeHtml(f.numero_nota_falta || "")}" placeholder="N.º nota de falta" style="flex:1" />
+          </div>
+          <div class="muted small" style="margin-top:4px">Oficial que constató: ${escapeHtml(f.oficial_constato || "—")} · Archivo: ${escapeHtml(f.file.name)}</div>
+          ${pill}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+$("btnFaltasLote").addEventListener("click", () => {
+  $("flArchivo").value = "";
+  $("flStatus").classList.add("hidden");
+  $("flError").classList.add("hidden");
+  faltasLoteFilas = [];
+  renderFaltasLoteList();
+  $("modalFaltasLote").classList.remove("hidden");
+});
+$("btnCerrarModalFaltas").addEventListener("click", closeFaltasLoteModal);
+$("btnCancelarFaltasLote").addEventListener("click", closeFaltasLoteModal);
+function closeFaltasLoteModal() { $("modalFaltasLote").classList.add("hidden"); }
+
+$("flArchivo").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  const statusEl = $("flStatus");
+  faltasLoteFilas = [];
+  renderFaltasLoteList();
+  if (!files.length) { statusEl.classList.add("hidden"); return; }
+  statusEl.textContent = `Leyendo ${files.length} archivo(s)...`;
+  statusEl.classList.remove("hidden");
+  try {
+    const filas = [];
+    for (const file of files) {
+      if (file.type !== "application/pdf") continue;
+      const text = await extractPdfText(file, (msg) => { statusEl.textContent = `${file.name}: ${msg}`; });
+      const norm = text.replace(/\s+/g, " ");
+      let doc, candidates;
+      try {
+        statusEl.textContent = `${file.name}: interpretando el contenido con IA...`;
+        doc = normalizarResultadoFaltaIA(await extraerDatosNotaIA(text, "falta"));
+        candidates = doc.candidates;
+      } catch (iaErr) {
+        console.error("Extracción por IA falló, se usa el reconocimiento por patrones como respaldo:", iaErr);
+        doc = parseNotaInformativa(text);
+        candidates = (doc.candidates && doc.candidates.length)
+          ? doc.candidates
+          : extractPersonCandidates(norm).map((c) => ({ grado: c.grado, ...splitApellidosNombres(c.nombreCompleto) }));
+      }
+      const base = {
+        file,
+        fecha_falta: doc.fecha_falta || "",
+        hora_falta: doc.hora_falta || "",
+        numero_nota_falta: doc.numero_nota_falta || "",
+        oficial_constato: doc.oficial_constato || "",
+      };
+      const lista = (candidates && candidates.length)
+        ? candidates
+        : [{ grado: doc.grado || "", apellidos: doc.apellidos || "", nombres: doc.nombres || "" }];
+      for (const c of lista) {
+        filas.push({
+          ...base,
+          grado: (c.grado || "").trim(),
+          apellidos: (c.apellidos || "").trim(),
+          nombres: (c.nombres || "").trim(),
+          duplicada: faltaYaRegistrada(base.numero_nota_falta, c),
+        });
+      }
+    }
+    faltasLoteFilas = filas;
+    renderFaltasLoteList();
+    const nuevas = filas.filter((f) => !f.duplicada).length;
+    statusEl.textContent = `Se procesaron ${files.length} archivo(s): ${filas.length} persona(s), ${nuevas} nueva(s). Verifique los datos y desmarque lo que no corresponda antes de guardar.`;
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "No se pudieron leer algunos archivos automáticamente.";
+  }
+});
+
+$("btnGuardarFaltasLote").addEventListener("click", async () => {
+  const errEl = $("flError");
+  errEl.classList.add("hidden");
+  const rows = [...document.querySelectorAll("#flLista .multi-efectivo-row")];
+  const seleccionados = rows
+    .map((row, i) => ({ row, fila: faltasLoteFilas[i] }))
+    .filter(({ row }) => row.querySelector(".flCheck").checked);
+
+  if (!seleccionados.length) {
+    errEl.textContent = "No hay faltas marcadas para registrar.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+
+  const registros = [];
+  for (const { row, fila } of seleccionados) {
+    const grado = row.querySelector(".flGrado").value.trim();
+    const apellidos = row.querySelector(".flApellidos").value.trim();
+    const nombres = row.querySelector(".flNombres").value.trim();
+    const fecha_falta = row.querySelector(".flFechaRow").value;
+    const hora_falta = row.querySelector(".flHoraRow").value || null;
+    const numero_nota_falta = row.querySelector(".flNumeroRow").value.trim();
+    if (!apellidos || !nombres || !fecha_falta || !numero_nota_falta) {
+      errEl.textContent = `Complete apellidos, nombres, fecha y N.º de nota para ${apellidos || "(sin apellido)"} ${nombres}.`;
+      errEl.classList.remove("hidden");
+      return;
+    }
+    registros.push({ file: fila.file, grado, apellidos, nombres, fecha_falta, hora_falta, numero_nota_falta, oficial_constato: fila.oficial_constato || null });
+  }
+
+  // Cada PDF se sube una sola vez; el path se enlaza a todas sus notas.
+  const archivosSubidos = new Map();
+  for (const r of registros) {
+    if (archivosSubidos.has(r.file)) continue;
+    const path = `lote_faltas/${Date.now()}_${r.file.name}`;
+    const { error: upErr } = await supabase.storage.from("notas").upload(path, r.file);
+    if (!upErr) archivosSubidos.set(r.file, { path, nombre: r.file.name });
+  }
+
+  const payloads = registros.map((r) => ({
+    grado: r.grado,
+    apellidos: r.apellidos,
+    nombres: r.nombres,
+    fecha_falta: r.fecha_falta,
+    hora_falta: r.hora_falta,
+    numero_nota_falta: r.numero_nota_falta,
+    codigo_infraccion: "",
+    oficial_constato: r.oficial_constato,
+    // Igual que en la creación individual: es lo que usa la RLS para decidir
+    // qué notas ve cada oficial.
+    oficial_constato_cip: buscarOficialConstato(r.oficial_constato, state.efectivos)?.cip || null,
+    created_by: state.session.user.id,
+  }));
+
+  const { data: inserted, error } = await supabase
+    .from("notas_informativas")
+    .insert(payloads)
+    .select();
+
+  if (error) {
+    errEl.textContent = "No se pudieron registrar las faltas: " + error.message;
+    errEl.classList.remove("hidden");
+    return;
+  }
+
+  for (let i = 0; i < inserted.length; i++) {
+    const archivo = archivosSubidos.get(registros[i].file);
+    if (!archivo) continue;
+    await supabase.from("notas_informativas")
+      .update({ archivo_nota_path: archivo.path, archivo_nota_nombre: archivo.nombre })
+      .eq("id", inserted[i].id);
+  }
+
+  faltasLoteFilas = [];
+  closeFaltasLoteModal();
+  loadNotas();
+});
+
 // ---------- Directivas internas ----------
 async function loadDirectivasView() {
   try {
