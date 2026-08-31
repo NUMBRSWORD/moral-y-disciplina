@@ -1925,7 +1925,38 @@ function parseNotaInformativa(text) {
     }
   }
 
+  const oficialCorr = oficialCorregidoDesdeTexto(text);
+  if (oficialCorr) result.oficial_constato = oficialCorr;
+
   return result;
+}
+
+// Algunas Notas Informativas son una "Corrección de información" de otra: en
+// el cuerpo repiten el párrafo original (con el dato equivocado) y luego
+// aclaran, p. ej., que el oficial que dio cuenta de los faltos no fue el que
+// figuraba, "debiendo consignarse al CAP. PNP X, quien se encontraba como
+// Oficial de Permanencia". Tanto la IA como el parser por patrones leen el
+// nombre del párrafo original; esta función detecta la corrección y devuelve
+// el oficial correcto (mismo formato "GRADO. APELLIDOS Nombres", sin "PNP").
+function oficialCorregidoDesdeTexto(texto) {
+  const t = (texto || "").replace(/\s+/g, " ");
+  if (!/correcci[oó]n|error\s+material|se\s+consign[oó]\s+de\s+manera\s+err[oó]nea/i.test(t)) return null;
+  // El terminador no incluye "." a secas para no cortar en el punto de la
+  // abreviatura del grado ("CAP.", "MY.", "TNTE."); se corta en coma, punto
+  // y coma, o las palabras que suelen seguir al nombre.
+  const patrones = [
+    /debiendo\s+consignars?e\s+(?:a\s+|al\s+)?(.{3,80}?)(?:\s*[,;]|\s+quien|\s+como|\s+el\s+mismo|\s+siendo|$)/i,
+    /siendo\s+lo\s+correcto\s+(?:el\s+|la\s+)?(.{3,80}?)(?:\s*[,;]|\s+quien|\s+como|$)/i,
+    /lo\s+correcto\s+es\s+(?:el\s+|que\s+sea\s+)?(.{3,80}?)(?:\s*[,;]|\s+quien|\s+como|$)/i,
+    /en\s+lugar\s+de\s+.+?\s+debe(?:r[ií]a)?\s+(?:decir|consignarse|ser)\s+(.{3,80}?)(?:\s*[,;]|\s+quien|$)/i,
+  ];
+  for (const re of patrones) {
+    const m = t.match(re);
+    if (m && /\bPNP\b/i.test(m[1])) {
+      return m[1].replace(/\s*\bPNP\b\.?\s*/i, " ").replace(/\s+/g, " ").trim();
+    }
+  }
+  return null;
 }
 
 function parseReincorporacion(text) {
@@ -2015,6 +2046,10 @@ async function autocompletarDesdeArchivo(file) {
       console.error("Extracción por IA falló, se usa el reconocimiento por patrones como respaldo:", iaErr);
       data = parseNotaInformativa(text);
     }
+    // Si es una Nota de "Corrección", el oficial que constató del párrafo
+    // original está equivocado: se reemplaza por el que indica la corrección.
+    const oficialCorr = oficialCorregidoDesdeTexto(text);
+    if (oficialCorr) data.oficial_constato = oficialCorr;
     if (data.grado && !$("fGrado").value) $("fGrado").value = data.grado;
     if (data.apellidos && !$("fApellidos").value) $("fApellidos").value = data.apellidos;
     if (data.nombres && !$("fNombres").value) $("fNombres").value = data.nombres;
@@ -2425,6 +2460,10 @@ $("flArchivo").addEventListener("change", async (e) => {
           ? doc.candidates
           : extractPersonCandidates(norm).map((c) => ({ grado: c.grado, ...splitApellidosNombres(c.nombreCompleto) }));
       }
+      // Nota de "Corrección": el oficial correcto es el que indica el cuerpo,
+      // no el del párrafo original que copia la nota corregida.
+      const oficialCorr = oficialCorregidoDesdeTexto(text);
+      if (oficialCorr) doc.oficial_constato = oficialCorr;
       const base = {
         file,
         fecha_falta: doc.fecha_falta || "",
