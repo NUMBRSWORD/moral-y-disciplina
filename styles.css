@@ -1,39 +1,44 @@
+/* Paleta alineada con SICPIP (DIVCOP): fondo claro, verde institucional PNP
+   en la barra de navegación, cian como color de acción, y estados Bootstrap.
+   El tema claro es el predeterminado (igual que SICPIP); el oscuro queda
+   como opción con el botón 🌙 (data-theme="dark"). */
 :root {
+  --bg: #f4f6f9;
+  --bg-elev: #ffffff;
+  --bg-card: #ffffff;
+  --border: #dee2e6;
+  --text: #212529;
+  --text-muted: #6c757d;
+  --accent: #17a2b8;
+  --accent-hover: #138496;
+  --accent-soft: rgba(23, 162, 184, 0.14);
+  --danger: #dc3545;
+  --danger-soft: rgba(220, 53, 69, 0.12);
+  --brand: #104a38;          /* verde institucional de la barra de SICPIP */
+  --brand-strong: #0c3a2c;
+  --on-brand: #ffffff;
+  --radius: 10px;
+  --shadow-color: 71, 85, 105;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+:root[data-theme="dark"] {
   --bg: #0f1720;
   --bg-elev: #16212c;
   --bg-card: #1b2836;
   --border: #2a3947;
   --text: #e7edf3;
   --text-muted: #93a3b3;
-  --accent: #1f9d55;
-  --accent-hover: #199049;
-  --accent-soft: rgba(31, 157, 85, 0.15);
+  --accent: #2bb7cd;
+  --accent-hover: #1f9fb4;
+  --accent-soft: rgba(43, 183, 205, 0.16);
   --danger: #e5484d;
   --danger-soft: rgba(229, 72, 77, 0.15);
-  --radius: 10px;
+  --brand: #0f3d2e;
+  --brand-strong: #0a2c21;
+  --on-brand: #eaf5f1;
   --shadow-color: 5, 9, 14;
-  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
-}
-
-/* Tema claro, activado con [data-theme="light"] en <html> (ver
-   btnTemaToggle en app.js). El oscuro de arriba sigue siendo el
-   predeterminado -- es el que ya conocían todos los oficiales -- así que
-   esto es una opción nueva, no un cambio de apariencia para nadie. */
-:root[data-theme="light"] {
-  --bg: #eef1f4;
-  --bg-elev: #ffffff;
-  --bg-card: #ffffff;
-  --border: #d8dee4;
-  --text: #16222c;
-  --text-muted: #5c6b78;
-  --accent: #1a8a4a;
-  --accent-hover: #157139;
-  --accent-soft: rgba(26, 138, 74, 0.12);
-  --danger: #c0342c;
-  --danger-soft: rgba(192, 52, 44, 0.1);
-  --radius: 10px;
-  --shadow-color: 71, 85, 105;
 }
 
 * { box-sizing: border-box; }
@@ -42,7 +47,7 @@ html { scroll-behavior: smooth; }
 
 body {
   margin: 0;
-  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: "Open Sans", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
@@ -65,10 +70,12 @@ body {
 
 h1, h2, h3 { letter-spacing: -0.01em; }
 
-/* Topbar */
+/* Topbar -- barra verde institucional, como la barra lateral de SICPIP,
+   con una línea cian inferior (el acento de SICPIP). */
 #topbar {
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elev);
+  border-bottom: 3px solid var(--accent);
+  background: var(--brand);
+  color: var(--on-brand);
   position: sticky; top: 0; z-index: 10;
 }
 .topbar-inner {
@@ -79,23 +86,31 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand.center { flex-direction: column; text-align: center; gap: 6px; margin-bottom: 8px; }
 .brand-badge {
-  background: var(--accent); color: #fff; font-weight: 700;
+  background: var(--on-brand); color: var(--brand); font-weight: 800;
   font-size: 0.75rem; letter-spacing: 0.05em;
   padding: 4px 8px; border-radius: 6px;
 }
 .brand-badge.lg { font-size: 1rem; padding: 8px 14px; border-radius: 8px; }
-.brand-title { font-weight: 600; }
+/* Fuera de la barra verde (p. ej. el login), el badge va con el verde de fondo. */
+.brand.center .brand-badge { background: var(--brand); color: var(--on-brand); }
+.brand-title { font-weight: 700; color: var(--on-brand); }
+#topbar .brand-sub { color: rgba(255, 255, 255, 0.72); }
+#topbar .brand-sub strong { color: #8fe1ec; }
 .tabs { display: flex; gap: 4px; flex: 1; }
 .tab-btn {
-  background: transparent; border: none; color: var(--text-muted);
+  background: transparent; border: none; color: rgba(255, 255, 255, 0.82);
   padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 0.95rem;
   transition: background-color 160ms var(--ease-out), color 160ms var(--ease-out);
 }
-.tab-btn:hover { background: var(--bg-card); color: var(--text); }
-.tab-btn.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.user-box { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: var(--text-muted); }
+.tab-btn:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.tab-btn.active { background: rgba(255, 255, 255, 0.2); color: #fff; font-weight: 600; }
+.user-box { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: rgba(255, 255, 255, 0.9); }
+#topbar .btn-ghost { color: rgba(255, 255, 255, 0.9); }
+#topbar .btn-ghost:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+#topbar kbd { border-color: rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.12); color: #eaf5f1; }
 .badge {
-  background: var(--bg-card); border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.16); border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #fff;
   padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; text-transform: uppercase;
 }
 
