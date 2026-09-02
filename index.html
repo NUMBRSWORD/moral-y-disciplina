@@ -6,18 +6,13 @@
 <meta name="description" content="Gestión del procedimiento disciplinario de infracciones Leves (Ley N.° 30714) para la PNP: notas informativas, imputación, descargos y órdenes de sanción, con asistencia de IA supervisada." />
 <title>CPNP Ventanilla — Uso interno</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" />
 <link rel="stylesheet" href="styles.css" />
 <script>
-  // Aplica el tema guardado ANTES de pintar la página, para que no haya
-  // parpadeo. El claro (paleta SICPIP) es el predeterminado; el oscuro es
-  // opción con el botón 🌙.
+  // Aplica el tema guardado ANTES de pintar la página, para que no se vea
+  // un parpadeo del tema oscuro por defecto al cargar con "claro" elegido.
   (function () {
-    if (localStorage.getItem("tema") === "dark") {
-      document.documentElement.setAttribute("data-theme", "dark");
-    }
+    var t = localStorage.getItem("tema");
+    if (t === "light") document.documentElement.setAttribute("data-theme", "light");
   })();
 </script>
 </head>
