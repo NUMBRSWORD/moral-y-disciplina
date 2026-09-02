@@ -145,23 +145,24 @@ function activarAutoguardadoSancion(nota) {
 }
 
 // ---------- Tema claro/oscuro ----------
-// El claro (paleta SICPIP) es el predeterminado; el oscuro es opción y se
-// activa con data-theme="dark". El script inline en <head> ya lo aplicó si
-// esa era la preferencia guardada; aquí solo se sincroniza ícono y clic.
+// El oscuro sigue siendo el predeterminado (nadie ve un cambio de
+// apariencia sin pedirlo); el script inline en <head> ya aplicó
+// data-theme="light" antes de este punto si esa era la preferencia
+// guardada, así que aquí solo hace falta sincronizar el ícono y el clic.
 function actualizarIconoTema() {
-  const oscuro = document.documentElement.getAttribute("data-theme") === "dark";
-  $("btnTemaToggle").textContent = oscuro ? "☀️" : "🌙";
-  $("btnTemaToggle").title = oscuro ? "Cambiar a tema claro" : "Cambiar a tema oscuro";
+  const claro = document.documentElement.getAttribute("data-theme") === "light";
+  $("btnTemaToggle").textContent = claro ? "☀️" : "🌙";
+  $("btnTemaToggle").title = claro ? "Cambiar a tema oscuro" : "Cambiar a tema claro";
 }
 actualizarIconoTema();
 $("btnTemaToggle").addEventListener("click", () => {
-  const oscuroAhora = document.documentElement.getAttribute("data-theme") === "dark";
-  if (oscuroAhora) {
+  const claroAhora = document.documentElement.getAttribute("data-theme") === "light";
+  if (claroAhora) {
     document.documentElement.removeAttribute("data-theme");
-    localStorage.setItem("tema", "light");
-  } else {
-    document.documentElement.setAttribute("data-theme", "dark");
     localStorage.setItem("tema", "dark");
+  } else {
+    document.documentElement.setAttribute("data-theme", "light");
+    localStorage.setItem("tema", "light");
   }
   actualizarIconoTema();
 });
