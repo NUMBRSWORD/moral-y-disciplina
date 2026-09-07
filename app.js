@@ -1123,7 +1123,11 @@ async function renderNotaDetail(nota) {
           </div>
           <p class="muted small">La IA elige el tercio y redacta el resumen del descargo y el análisis, usando las directivas internas activas como única fuente de reglas institucionales — si el descargo invoca algo que ninguna directiva regula, la IA lo dice en vez de inventarlo.</p>
           <p id="sancionIAStatus" class="muted small hidden"></p>
-          ` : `<p class="muted small">Sin descargo: el texto se genera automáticamente según el tercio que elija arriba — no necesita IA ni escribir nada, solo revisar.</p>`}
+          ` : `
+          <div class="modal-actions" style="justify-content:flex-start; margin-bottom:6px">
+            <button type="button" class="btn-secondary" id="btnTextoEstandarSinDescargo">Poner texto estándar (sin descargo)</button>
+          </div>
+          <p class="muted small">Sin descargo: elija el tercio arriba y el texto se completa solo; o use el botón para ponerlo/reemplazarlo. Puede editarlo antes de generar.</p>`}
           <p id="sancionError" class="error hidden"></p>
           <div class="modal-actions" style="justify-content:flex-start">
             <button type="button" class="btn-ghost" id="btnRevisarOrden">🔍 Revisar antes de generar</button>
@@ -1235,6 +1239,15 @@ async function renderNotaDetail(nota) {
     // "lo puso el autocompletado".
     analisisEl.addEventListener("input", () => {
       analisisEl.dataset.autofilled = "false";
+    });
+    // Botón para poner/reemplazar con el párrafo estándar de "sin descargo"
+    // (útil cuando quedó texto viejo de un descargo que se quitó por error).
+    $("btnTextoEstandarSinDescargo")?.addEventListener("click", () => {
+      const tercio = document.querySelector('input[name="sancionTercio"]:checked')?.value;
+      if (!tercio) { $("sancionError").textContent = "Elija primero el tercio de la sanción."; $("sancionError").classList.remove("hidden"); return; }
+      $("sancionError").classList.add("hidden");
+      analisisEl.value = analisisSinDescargoDefault(nota.codigo_infraccion, tercio);
+      analisisEl.dataset.autofilled = "true";
     });
   }
 
