@@ -173,6 +173,7 @@
       <h2>Efectivos (CIP / DNI)</h2>
       <div class="view-actions">
         <input id="searchEfectivos" type="search" placeholder="Buscar por CIP, DNI o nombre..." />
+        <button id="btnNuevoEfectivo" class="btn-primary admin-only hidden">+ Nuevo efectivo</button>
       </div>
     </div>
     <div class="table-wrap">
@@ -375,6 +376,39 @@
         <button type="button" id="btnGuardarReincLote" class="btn-primary">Registrar reincorporación</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- MODAL NUEVO EFECTIVO -->
+<div id="modalNuevoEfectivo" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Nuevo efectivo</h3>
+      <button id="btnCerrarModalEfectivo" class="btn-ghost">✕</button>
+    </div>
+    <form id="efectivoForm" class="modal-body">
+      <div class="grid-2">
+        <label>Grado
+          <input type="text" id="efGrado" required />
+        </label>
+        <label>CIP
+          <input type="text" id="efCip" inputmode="numeric" required />
+        </label>
+      </div>
+      <div class="grid-2">
+        <label>Apellidos y nombres
+          <input type="text" id="efApellidosNombres" required placeholder="APELLIDO APELLIDO, Nombres" />
+        </label>
+        <label>DNI
+          <input type="text" id="efDni" inputmode="numeric" required />
+        </label>
+      </div>
+      <p id="efectivoFormError" class="error hidden"></p>
+      <div class="modal-actions">
+        <button type="button" id="btnCancelarEfectivo" class="btn-ghost">Cancelar</button>
+        <button type="submit" class="btn-primary">Guardar efectivo</button>
+      </div>
+    </form>
   </div>
 </div>
 
