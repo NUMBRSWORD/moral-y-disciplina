@@ -52,6 +52,21 @@ function toast(mensaje, tipo = "error", ms = 6000) {
   }, ms);
 }
 
+// Cuando una Edge Function responde con un status no-2xx, supabase-js entrega
+// un FunctionsHttpError genérico ("non-2xx status code") y deja el detalle real
+// en el cuerpo de la respuesta (error.context). Esto lo extrae para mostrarlo.
+async function mensajeErrorFuncion(error) {
+  const generico = error?.message || String(error || "error desconocido");
+  try {
+    const resp = error?.context;
+    if (resp && typeof resp.clone === "function") {
+      const cuerpo = await resp.clone().json();
+      if (cuerpo?.error) return String(cuerpo.error);
+    }
+  } catch (_) { /* el cuerpo no era JSON legible */ }
+  return generico;
+}
+
 // ---------- Borradores locales (autoguardado) ----------
 // Los textos largos de la Orden de Sanción (análisis y resumen del descargo)
 // se guardan en el navegador mientras se escriben, para no perderlos si se
@@ -730,7 +745,7 @@ async function generarResumenEjecutivo() {
     const { data, error } = await supabase.functions.invoke("generar-resumen-casos", {
       body: { fechaHoy: new Date().toISOString().slice(0, 10), casos },
     });
-    if (error) throw error;
+    if (error) throw new Error(await mensajeErrorFuncion(error));
     if (data?.error) throw new Error(data.error);
     contenidoEl.textContent = data?.resumen || "No se pudo generar el resumen.";
     statusEl.classList.add("hidden");
@@ -1309,7 +1324,7 @@ async function redactarConIA(nota) {
         directivas,
       },
     });
-    if (error) throw error;
+    if (error) throw new Error(await mensajeErrorFuncion(error));
     if (data?.error) throw new Error(data.error);
     if (data?.descargo_texto && !esResumenDescargoInsuficiente(data.descargo_texto)) {
       $("sSancionDescargo").value = data.descargo_texto;
@@ -1369,7 +1384,7 @@ async function verificarNotificacionOrdenIA(nota) {
         textoDocumento,
       },
     });
-    if (error) throw error;
+    if (error) throw new Error(await mensajeErrorFuncion(error));
     if (data?.error) throw new Error(data.error);
     if (data?.fecha_detectada) $("fOrdenNotifFecha").value = data.fecha_detectada;
     const observaciones = (data?.observaciones || []).join(" · ");
