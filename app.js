@@ -1078,6 +1078,8 @@ async function renderNotaDetail(nota) {
           <div class="detail-field"><div class="label">N.º de documento</div><div class="value">${escapeHtml(nota.numero_descargo || "-")}</div></div>
           <div class="detail-field"><div class="label">Archivo</div><div class="value">${descargoArchivo}</div></div>
         </div>
+        <button type="button" class="btn-danger" id="btnQuitarDescargo" style="margin-top:12px">Quitar descargo</button>
+        <p class="muted small">Úselo si se registró por error (p. ej. se subió el archivo de otro efectivo). Se borra la fecha, el N.º, el archivo y el resumen del descargo; el resto del expediente no cambia.</p>
       ` : `
         <p class="muted small">Plazo de descargo vence el ${formatDate(fechaLimite)}.</p>
         ${plazoVencido ? `
@@ -1206,6 +1208,7 @@ async function renderNotaDetail(nota) {
   // no solo admin como el resto de la edición de la nota.
   $("notificacionForm")?.addEventListener("submit", (e) => submitNotificacion(e, nota.id));
   $("descargoForm")?.addEventListener("submit", (e) => submitDescargo(e, nota.id));
+  $("btnQuitarDescargo")?.addEventListener("click", () => quitarDescargo(nota));
   $("sancionForm")?.addEventListener("submit", (e) => submitSancion(e, nota));
   $("btnRedactarIA")?.addEventListener("click", () => redactarConIA(nota));
   $("btnVerificarNotifIA")?.addEventListener("click", () => verificarNotificacionOrdenIA(nota));
@@ -1496,6 +1499,25 @@ async function submitDescargo(e, notaId) {
 
   if (error) { errEl.textContent = "Error: " + error.message; errEl.classList.remove("hidden"); return; }
   openNotaDetail(notaId);
+}
+
+// Deshace un descargo registrado por error (archivo de otro efectivo, fecha
+// equivocada, etc.). Borra fecha, N.º, archivo y el resumen del descargo;
+// no toca la sanción ni las versiones ya generadas.
+async function quitarDescargo(nota) {
+  if (!confirm(`¿Quitar el descargo registrado de ${nombreInvestigadoVisible(nota)}?\n\nSe borrará la fecha, el N.º, el archivo y el resumen del descargo de este expediente. El resto no cambia.`)) return;
+  const btn = $("btnQuitarDescargo");
+  if (btn) { btn.disabled = true; btn.textContent = "Quitando..."; }
+  const rutaArchivo = nota.archivo_descargo_path;
+  const { error } = await supabase.rpc("quitar_descargo", { p_nota_id: nota.id });
+  if (error) {
+    if (btn) { btn.disabled = false; btn.textContent = "Quitar descargo"; }
+    toast("No se pudo quitar el descargo: " + error.message);
+    return;
+  }
+  // Mejor esfuerzo: borrar también el archivo del bucket (si la RLS lo permite).
+  if (rutaArchivo) { try { await supabase.storage.from("notas").remove([rutaArchivo]); } catch (_) {} }
+  openNotaDetail(nota.id);
 }
 
 async function submitCodigoInfraccion(e, notaId) {
