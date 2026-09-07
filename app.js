@@ -1623,6 +1623,54 @@ $("searchEfectivos").addEventListener("input", (e) => {
   renderEfectivosTable(filtered);
 });
 
+// Alta manual de un efectivo al padrón (solo admin; la RLS ya lo exige).
+function cerrarModalEfectivo() { $("modalNuevoEfectivo").classList.add("hidden"); }
+$("btnNuevoEfectivo")?.addEventListener("click", () => {
+  $("efectivoForm").reset();
+  $("efectivoFormError").classList.add("hidden");
+  $("modalNuevoEfectivo").classList.remove("hidden");
+  $("efGrado").focus();
+});
+$("btnCerrarModalEfectivo")?.addEventListener("click", cerrarModalEfectivo);
+$("btnCancelarEfectivo")?.addEventListener("click", cerrarModalEfectivo);
+$("modalNuevoEfectivo")?.addEventListener("click", (e) => { if (e.target === $("modalNuevoEfectivo")) cerrarModalEfectivo(); });
+
+$("efectivoForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errEl = $("efectivoFormError");
+  errEl.classList.add("hidden");
+  const cip = $("efCip").value.trim();
+  const dni = $("efDni").value.trim();
+  const apellidos_nombres = $("efApellidosNombres").value.trim();
+  const grado = $("efGrado").value.trim();
+  if (!cip || !dni || !apellidos_nombres) {
+    errEl.textContent = "Complete grado, CIP, DNI y apellidos y nombres.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  const btn = e.target.querySelector("button[type=submit]");
+  btn.disabled = true;
+  try {
+    const { error } = await supabase.from("efectivos").insert({
+      grado, cip, dni, apellidos_nombres,
+      created_by: state.session.user.id,
+    });
+    if (error) {
+      errEl.textContent = /duplicate key|unique/i.test(error.message)
+        ? `Ya existe un efectivo con ese CIP o DNI.`
+        : "No se pudo guardar: " + error.message;
+      errEl.classList.remove("hidden");
+      return;
+    }
+    cerrarModalEfectivo();
+    await loadEfectivos();
+    $("searchEfectivos").value = cip;
+    $("searchEfectivos").dispatchEvent(new Event("input"));
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 // ---------- Nueva nota modal ----------
 let pdfCandidates = [];
 
