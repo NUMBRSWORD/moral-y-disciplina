@@ -24,6 +24,7 @@ const state = {
   efectivos: [],
   currentNotaId: null,
   directivas: [],
+  expedientesRemitidos: [],
   asistenteHistorial: [],
 };
 
@@ -313,7 +314,7 @@ function showView(id) {
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $(id).classList.remove("hidden");
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-  const map = { "view-dashboard": "dashboard", "view-efectivos": "efectivos", "view-directivas": "directivas", "view-agenda": "agenda", "view-documentos": "documentos", "view-panel": "panel", "view-historial": "historial" };
+  const map = { "view-dashboard": "dashboard", "view-efectivos": "efectivos", "view-directivas": "directivas", "view-agenda": "agenda", "view-documentos": "documentos", "view-recepcion": "recepcion", "view-panel": "panel", "view-historial": "historial" };
   if (map[id]) {
     document.querySelector(`.tab-btn[data-view="${map[id]}"]`)?.classList.add("active");
   }
@@ -327,6 +328,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (target === "directivas") { showView("view-directivas"); loadDirectivasView(); }
     if (target === "agenda") { showView("view-agenda"); renderAgendaNotas(); }
     if (target === "documentos") { showView("view-documentos"); loadDocumentosGenerados(); }
+    if (target === "recepcion") { showView("view-recepcion"); loadNotas().then(loadExpedientesRemitidos); }
     if (target === "panel") { showView("view-panel"); renderPanel(); }
     if (target === "historial") { showView("view-historial"); loadHistorial(); }
   });
@@ -703,6 +705,211 @@ async function renderDocumentosGenerados() {
 }
 
 $("buscarDocumentos").addEventListener("input", () => { renderDocumentosGenerados(); });
+
+// ---------- Mesa de partes: recepción de expedientes cerrados ----------
+// El admin registra el PDF firmado final de un expediente ya cerrado (Orden
+// generada + notificada). Cada archivo recibe una carpeta lógica automática
+// dentro del bucket, para ubicarlo sin renombrarlo a mano.
+function segmentoRuta(texto, fallback = "sin-dato") {
+  const limpio = String(texto || "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim();
+  return (limpio || fallback).slice(0, 90);
+}
+function datosRutaExpedienteCerrado(nota, archivoNombre) {
+  const ahora = new Date();
+  const anio = String(ahora.getFullYear());
+  const mes = String(ahora.getMonth() + 1).padStart(2, "0");
+  const investigado = ubicarInvestigadoEnEfectivos(nota, state.efectivos);
+  const cipInvestigado = investigado?.cip || "SIN-CIP";
+  const carpeta = [
+    nota.fecha_falta || "sin-fecha", nombreInvestigadoVisible(nota),
+    `CIP ${cipInvestigado}`, nota.codigo_infraccion || "SIN-CODIGO",
+  ].map((v) => segmentoRuta(v)).join(" - ");
+  const nombreSeguro = segmentoRuta(archivoNombre || "expediente_firmado.pdf", "expediente_firmado.pdf");
+  return { carpeta, cipInvestigado, ruta: `expedientes_cerrados/${anio}/${mes}/${carpeta}/${Date.now()}_${nombreSeguro}` };
+}
+function etiquetaEstadoRecepcion(estado) {
+  return ({ remitido: "Por revisar", recibido: "Recibido", observado: "Observado", archivado: "Archivado" })[estado] || "Por revisar";
+}
+
+async function loadExpedientesRemitidos() {
+  const { data, error } = await supabase
+    .from("expedientes_remitidos").select("*").order("remitido_at", { ascending: false });
+  if (error) { console.error(error); toast("No se pudo cargar la recepción: " + error.message); return; }
+  state.expedientesRemitidos = data || [];
+  await renderExpedientesRemitidos();
+}
+
+async function componentesExpedienteCompleto(nota) {
+  const { data: docs, error } = await supabase.from("documentos_generados").select("tipo").eq("nota_id", nota.id);
+  if (error) throw error;
+  const tiene = (t) => (docs || []).some((d) => d.tipo === t);
+  return [
+    { etiqueta: "Inicio de Imputación", listo: tiene("imputacion") },
+    { etiqueta: "Notificación de la Imputación", listo: !!nota.imputacion_generada_at },
+    nota.fecha_descargo
+      ? { etiqueta: "Descargo del investigado adjunto", listo: !!nota.archivo_descargo_path }
+      : { etiqueta: "Acta de No Descargo", listo: tiene("acta_no_descargo") },
+    { etiqueta: "Orden de Sanción", listo: tiene("orden_sancion") },
+    { etiqueta: "Cargo firmado de la Orden", listo: !!nota.orden_notificada_at && !!nota.archivo_orden_notificacion_path },
+  ];
+}
+
+async function actualizarChecklistExpedienteCompleto() {
+  const contenedor = $("checklistExpedienteRecibido");
+  if (!contenedor) return;
+  const nota = state.notas.find((n) => n.id === $("fNotaRecibida").value);
+  if (!nota) { contenedor.innerHTML = '<p class="muted small">Seleccione un expediente para revisar sus documentos firmados.</p>'; return; }
+  try {
+    const componentes = await componentesExpedienteCompleto(nota);
+    contenedor.innerHTML = componentes.map((item) =>
+      `<div class="detail-field"><div class="label">${item.listo ? "✓" : "⚠"} ${escapeHtml(item.etiqueta)}</div><div class="value">${item.listo ? "Registrado digitalmente" : "Falta registrar o adjuntar"}</div></div>`
+    ).join("");
+  } catch (error) {
+    contenedor.innerHTML = '<p class="error">No se pudo revisar los documentos del expediente.</p>';
+    console.error(error);
+  }
+}
+
+function prepararFormularioRegistroRecepcion() {
+  const panel = $("registroRecepcionPanel");
+  const select = $("fNotaRecibida");
+  if (!panel || !select) return;
+  const registrados = new Set(state.expedientesRemitidos.map((e) => e.nota_id));
+  const disponibles = (state.notas || []).filter((n) =>
+    n.orden_sancion_generada_at && n.orden_notificada_at && !registrados.has(n.id)
+  );
+  select.innerHTML = `<option value="">Seleccione un expediente cerrado...</option>${disponibles.map((n) =>
+    `<option value="${escapeHtml(n.id)}">${escapeHtml(`${nombreInvestigadoVisible(n, true)} · Falta ${formatDate(n.fecha_falta)} · ${n.codigo_infraccion || "sin código"}`)}</option>`
+  ).join("")}`;
+  select.onchange = actualizarChecklistExpedienteCompleto;
+  $("btnRegistrarExpedienteRecibido").onclick = () => { panel.classList.remove("hidden"); actualizarChecklistExpedienteCompleto(); };
+  $("btnCancelarRegistroRecepcion").onclick = () => panel.classList.add("hidden");
+  $("registroRecepcionForm").onsubmit = submitRegistroRecepcion;
+}
+
+async function renderExpedientesRemitidos() {
+  const q = ($("buscarRecepcion")?.value || "").toLowerCase().trim();
+  const lista = state.expedientesRemitidos.filter((item) => !q ||
+    [item.investigado_nombre, item.investigado_cip, item.codigo_infraccion, item.remitido_por_cip, item.remitido_por_email, item.fecha_falta]
+      .filter(Boolean).join(" ").toLowerCase().includes(q));
+  const porRevisar = state.expedientesRemitidos.filter((i) => i.estado === "remitido").length;
+  const observados = state.expedientesRemitidos.filter((i) => i.estado === "observado").length;
+  const archivados = state.expedientesRemitidos.filter((i) => i.estado === "archivado").length;
+  $("recepcionResumen").innerHTML = `
+    <div class="quick-summary-copy"><span class="eyebrow">Mesa de partes digital</span><strong>${porRevisar ? "Hay expedientes pendientes de revisión" : "La bandeja está al día"}</strong><span class="muted small">Cada archivo conserva una carpeta automática para ubicarlo sin renombrarlo.</span></div>
+    <div class="quick-summary-stats"><div class="is-pending"><b>${porRevisar}</b><span>por revisar</span></div><div class="is-urgent"><b>${observados}</b><span>observados</span></div><div class="is-ready"><b>${archivados}</b><span>archivados</span></div></div>`;
+  $("recepcionEmpty").classList.toggle("hidden", lista.length > 0);
+  const filas = await Promise.all(lista.map(async (item) => {
+    const enlace = await fileLinkHtml("expedientes-terminados-pnp", item.archivo_path, item.archivo_nombre);
+    const enlaceHt = await fileLinkHtml("expedientes-terminados-pnp", item.archivo_ht_path, item.archivo_ht_nombre);
+    const enlaceOficio = await fileLinkHtml("expedientes-terminados-pnp", item.archivo_oficio_path, item.archivo_oficio_nombre);
+    const esPendiente = item.estado === "remitido";
+    return `<article class="reception-item estado-${escapeHtml(item.estado || "remitido")}">
+      <div class="reception-item-main">
+        <div class="reception-title-row"><span class="reception-status">${escapeHtml(etiquetaEstadoRecepcion(item.estado))}</span><strong>${escapeHtml(item.investigado_nombre || "Investigado sin nombre")}</strong></div>
+        <div class="reception-meta"><span>📅 Falta: ${formatDate(item.fecha_falta)}</span><span>⚖ ${escapeHtml(item.codigo_infraccion || "-")}</span><span>🪪 CIP investigado: ${escapeHtml(item.investigado_cip || "-")}</span></div>
+        <p class="muted small">Registrado por ${escapeHtml(item.remitido_por_cip ? `CIP ${item.remitido_por_cip}` : (item.remitido_por_email || "-"))} · ${formatFechaHora(String(item.remitido_at || "").slice(0, 10), String(item.remitido_at || "").slice(11, 16))}</p>
+        ${item.observacion ? `<p class="reception-observation"><b>Observación:</b> ${escapeHtml(item.observacion)}</p>` : ""}
+        <p class="storage-path" title="Carpeta de archivo">📁 ${escapeHtml(item.carpeta_archivo || item.archivo_path || "")}</p>
+      </div>
+      <div class="reception-actions"><div>${enlace}</div>${esPendiente
+        ? `<button type="button" class="btn-primary btn-recibir-expediente" data-id="${item.id}">✓ Recibir</button><button type="button" class="btn-secondary btn-observar-expediente" data-id="${item.id}">Observar</button>`
+        : item.estado === "recibido" ? `<button type="button" class="btn-secondary btn-archivar-expediente" data-id="${item.id}">Archivar</button>` : ""}</div>
+      <details class="reception-documents"><summary class="btn-secondary">HT y Oficio</summary><div class="reception-documents-body"><div><span class="muted small">HT</span>${enlaceHt}</div><div><span class="muted small">Oficio</span>${enlaceOficio}</div><form class="form-documentos-cierre" data-id="${item.id}"><label>Adjuntar HT<input type="file" class="f-ht-cierre" accept="application/pdf,image/*" /></label><label>Adjuntar Oficio<input type="file" class="f-oficio-cierre" accept="application/pdf,image/*" /></label><button type="submit" class="btn-secondary">Guardar documentos</button></form></div></details>
+    </article>`;
+  }));
+  $("recepcionLista").innerHTML = filas.join("");
+  document.querySelectorAll(".btn-recibir-expediente").forEach((b) => b.addEventListener("click", () => actualizarEstadoRecepcion(b.dataset.id, "recibido")));
+  document.querySelectorAll(".btn-archivar-expediente").forEach((b) => b.addEventListener("click", () => actualizarEstadoRecepcion(b.dataset.id, "archivado")));
+  document.querySelectorAll(".btn-observar-expediente").forEach((b) => b.addEventListener("click", () => {
+    const observacion = prompt("Indique qué debe corregir o completar:");
+    if (observacion?.trim()) actualizarEstadoRecepcion(b.dataset.id, "observado", observacion.trim());
+  }));
+  document.querySelectorAll(".form-documentos-cierre").forEach((f) => f.addEventListener("submit", submitDocumentosCierre));
+  prepararFormularioRegistroRecepcion();
+}
+
+async function actualizarEstadoRecepcion(id, estado, observacion = null) {
+  const cambios = { estado, updated_at: new Date().toISOString() };
+  if (estado === "recibido") { cambios.recibido_at = new Date().toISOString(); cambios.recibido_por = state.session.user.id; }
+  if (observacion !== null) cambios.observacion = observacion;
+  const { error } = await supabase.from("expedientes_remitidos").update(cambios).eq("id", id);
+  if (error) { toast("No se pudo actualizar la recepción: " + error.message); return; }
+  loadExpedientesRemitidos();
+}
+
+async function submitRegistroRecepcion(e) {
+  e.preventDefault();
+  const errorEl = $("registroRecepcionError");
+  errorEl.classList.add("hidden");
+  const nota = state.notas.find((n) => n.id === $("fNotaRecibida").value);
+  const archivo = $("fArchivoExpedienteRecibido").files[0];
+  if (!nota || !archivo) { errorEl.textContent = "Seleccione un expediente cerrado y adjunte el PDF firmado."; errorEl.classList.remove("hidden"); return; }
+  if (archivo.type !== "application/pdf" && !/\.pdf$/i.test(archivo.name)) { errorEl.textContent = "El expediente completo debe subirse como un único archivo PDF."; errorEl.classList.remove("hidden"); return; }
+  const boton = e.target.querySelector("button[type=submit]");
+  boton.disabled = true; boton.textContent = "Verificando...";
+  try {
+    const componentes = await componentesExpedienteCompleto(nota);
+    const faltantes = componentes.filter((c) => !c.listo).map((c) => c.etiqueta);
+    if (faltantes.length) { errorEl.textContent = `No se puede recibir: faltan registros de ${faltantes.join(", ")}.`; errorEl.classList.remove("hidden"); return; }
+    boton.textContent = "Registrando...";
+    const ruta = datosRutaExpedienteCerrado(nota, archivo.name);
+    const { error: upErr } = await supabase.storage.from("expedientes-terminados-pnp").upload(ruta.ruta, archivo, { upsert: false });
+    if (upErr) throw upErr;
+    const ahora = new Date().toISOString();
+    const { error } = await supabase.from("expedientes_remitidos").insert({
+      nota_id: nota.id, investigado_nombre: nombreInvestigadoVisible(nota, true), investigado_cip: ruta.cipInvestigado,
+      fecha_falta: nota.fecha_falta, codigo_infraccion: nota.codigo_infraccion,
+      remitido_por: state.session.user.id, remitido_por_email: state.email, remitido_por_cip: state.cip,
+      remitido_at: ahora, archivo_path: ruta.ruta, archivo_nombre: archivo.name, carpeta_archivo: ruta.carpeta,
+      estado: "recibido", observacion: $("fObservacionExpedienteRecibido").value.trim() || null,
+      recibido_por: state.session.user.id, recibido_at: ahora,
+    });
+    if (error) throw error;
+    $("registroRecepcionPanel").classList.add("hidden");
+    e.target.reset();
+    await loadExpedientesRemitidos();
+  } catch (error) {
+    errorEl.textContent = "No se pudo registrar el expediente: " + (error.message || error);
+    errorEl.classList.remove("hidden");
+  } finally {
+    boton.disabled = false; boton.textContent = "Registrar expediente";
+  }
+}
+
+async function submitDocumentosCierre(e) {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const id = form.dataset.id;
+  const registro = state.expedientesRemitidos.find((i) => i.id === id);
+  const ht = form.querySelector(".f-ht-cierre").files[0];
+  const oficio = form.querySelector(".f-oficio-cierre").files[0];
+  if (!registro || (!ht && !oficio)) { toast("Adjunte por lo menos el HT o el Oficio.", "info"); return; }
+  const boton = form.querySelector("button[type=submit]");
+  boton.disabled = true; boton.textContent = "Guardando...";
+  try {
+    const cambios = { updated_at: new Date().toISOString() };
+    for (const [tipo, archivo] of [["ht", ht], ["oficio", oficio]]) {
+      if (!archivo) continue;
+      const ruta = `${registro.nota_id}/cierre/${tipo}_${Date.now()}_${segmentoRuta(archivo.name, `${tipo}.pdf`)}`;
+      const { error: upErr } = await supabase.storage.from("expedientes-terminados-pnp").upload(ruta, archivo, { upsert: false });
+      if (upErr) throw upErr;
+      cambios[`archivo_${tipo}_path`] = ruta;
+      cambios[`archivo_${tipo}_nombre`] = archivo.name;
+    }
+    const { error } = await supabase.from("expedientes_remitidos").update(cambios).eq("id", id);
+    if (error) throw error;
+    await loadExpedientesRemitidos();
+  } catch (error) {
+    toast("No se pudieron guardar los documentos: " + (error.message || error));
+  } finally {
+    boton.disabled = false; boton.textContent = "Guardar documentos";
+  }
+}
+
+$("buscarRecepcion")?.addEventListener("input", renderExpedientesRemitidos);
 
 function renderNotasTable(list) {
   notasVisibles = list;
@@ -1119,6 +1326,16 @@ async function renderNotaDetail(nota) {
       }))).join("")
     : "";
 
+  // Cierre administrativo: el PDF firmado, HT y Oficio del expediente cerrado
+  // se registran en la pestaña Recepción, pero el admin también los ve aquí.
+  const cerrado = nota.orden_sancion_generada_at && nota.orden_notificada_at;
+  const { data: expedienteCerrado } = (isAdmin && cerrado)
+    ? await supabase.from("expedientes_remitidos").select("*").eq("nota_id", nota.id).maybeSingle()
+    : { data: null };
+  const cierreArchivo = expedienteCerrado ? await fileLinkHtml("expedientes-terminados-pnp", expedienteCerrado.archivo_path, expedienteCerrado.archivo_nombre) : "";
+  const cierreHt = expedienteCerrado ? await fileLinkHtml("expedientes-terminados-pnp", expedienteCerrado.archivo_ht_path, expedienteCerrado.archivo_ht_nombre) : "";
+  const cierreOficio = expedienteCerrado ? await fileLinkHtml("expedientes-terminados-pnp", expedienteCerrado.archivo_oficio_path, expedienteCerrado.archivo_oficio_nombre) : "";
+
   const puedeDescargar = puedeGenerarImputacion(nota, state.efectivos);
   const codigoEsLeve = /^L/i.test((nota.codigo_infraccion || "").trim());
   const puedeActa = puedeGenerarActaNoDescargo(nota, state.efectivos);
@@ -1337,6 +1554,22 @@ async function renderNotaDetail(nota) {
       <div class="detail-grid">${versionesHtml}</div>
     </div>
     ` : ""}
+
+    ${isAdmin && cerrado ? `
+    <div class="detail-card cierre-administrativo-card">
+      <div class="detail-card-header"><div><span class="eyebrow">Cierre administrativo</span><h3>Expediente firmado, HT y Oficio</h3></div><span class="reception-status">${escapeHtml(expedienteCerrado ? etiquetaEstadoRecepcion(expedienteCerrado.estado) : "Pendiente de registro")}</span></div>
+      ${expedienteCerrado ? `
+        <div class="detail-grid">
+          <div class="detail-field"><div class="label">Expediente firmado</div><div class="value">${cierreArchivo}</div></div>
+          <div class="detail-field"><div class="label">HT</div><div class="value">${cierreHt}</div></div>
+          <div class="detail-field"><div class="label">Oficio</div><div class="value">${cierreOficio}</div></div>
+          <div class="detail-field"><div class="label">Carpeta de archivo</div><div class="value storage-path">${escapeHtml(expedienteCerrado.carpeta_archivo || "-")}</div></div>
+        </div>
+        ${expedienteCerrado.observacion ? `<p class="reception-observation"><b>Observación:</b> ${escapeHtml(expedienteCerrado.observacion)}</p>` : ""}
+      ` : `<p class="muted small">El expediente está cerrado pero aún no se registró en Recepción. Regístrelo allí para adjuntar el PDF firmado, el HT y el Oficio.</p>`}
+      <button type="button" id="btnAbrirRecepcionDesdeNota" class="btn-secondary" style="margin-top:10px">Abrir Recepción</button>
+    </div>
+    ` : ""}
   `;
 
   $("btnDescargarImputacion")?.addEventListener("click", async (e) => {
@@ -1344,6 +1577,7 @@ async function renderNotaDetail(nota) {
     openNotaDetail(nota.id);
   });
   $("btnDescargarActaDetalle")?.addEventListener("click", (e) => handleDescargarActaNoDescargo(nota, e.currentTarget));
+  $("btnAbrirRecepcionDesdeNota")?.addEventListener("click", () => { showView("view-recepcion"); loadNotas().then(loadExpedientesRemitidos); });
   $("btnRevisarImputacion")?.addEventListener("click", () => abrirRevision("imputacion", nota));
   $("btnRevisarActa")?.addEventListener("click", () => abrirRevision("acta", nota));
   $("btnRevisarOrden")?.addEventListener("click", () => abrirRevision("orden", nota));
