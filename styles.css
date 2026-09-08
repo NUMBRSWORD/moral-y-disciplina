@@ -200,6 +200,10 @@ main { max-width: 1500px; margin: 0 auto; padding: 24px 20px 60px; }
 .reception-meta { display: flex; flex-wrap: wrap; gap: 7px 14px; margin-top: 9px; color: var(--text-muted); font-size: .82rem; }
 .reception-observation { margin: 10px 0 0; padding: 9px 11px; border-radius: 7px; background: var(--danger-soft); color: var(--text); font-size: .84rem; }
 .storage-path { margin: 10px 0 0; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .72rem; overflow-wrap: anywhere; }
+.drive-estado { display: inline-block; margin-top: 8px; font-size: .76rem; }
+.drive-estado.ok { color: var(--ok, #1f9d55); }
+.drive-estado.pend { color: var(--text-muted); }
+.drive-estado.error { color: var(--danger, #d64545); overflow-wrap: anywhere; }
 .reception-actions { display: flex; flex: 0 0 auto; flex-direction: column; align-items: stretch; gap: 8px; min-width: 135px; }
 .reception-actions .file-link { display: block; padding: 8px 0; text-align: center; }
 .reception-documents { flex: 1 1 100%; border-top: 1px solid var(--border); padding-top: 12px; }
