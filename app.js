@@ -35,6 +35,17 @@ const CATALOGO_ASISTENTE = ["L21", "L24"]
 
 const $ = (id) => document.getElementById(id);
 
+// ---------- PWA: instalable en el celular ----------
+// Registra el service worker para que la app se pueda "Agregar a pantalla de
+// inicio" y abra como aplicación, tolerando conexión intermitente. No cambia
+// nada del flujo web normal.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js", { scope: "./" })
+      .catch((e) => console.warn("No se pudo registrar el service worker:", e));
+  });
+}
+
 // ---------- Avisos flotantes ----------
 // Reemplaza los `console.error(...)` mudos de las cargas: si algo falla (red,
 // permisos, sesión vencida) el oficial ve un aviso en pantalla en vez de creer
