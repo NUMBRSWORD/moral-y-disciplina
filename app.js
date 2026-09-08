@@ -1078,7 +1078,7 @@ function esResumenDescargoInsuficiente(texto) {
 
 async function handleDescargarImputacion(nota, btnEl) {
   const textoOriginal = btnEl ? btnEl.textContent : null;
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Generando..."; }
+  if (btnEl) { btnEl.disabled = true; btnEl.classList.add("is-busy"); btnEl.textContent = "Generando..."; }
   try {
     const blob = await renderizarImputacionDocx(nota, state.efectivos);
     const nombreArchivo = nombreArchivoDocumento("IMPUTACION LEVE", nota);
@@ -1095,13 +1095,13 @@ async function handleDescargarImputacion(nota, btnEl) {
     console.error(err);
     alert(err.message || "No se pudo generar el documento de imputación.");
   } finally {
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = textoOriginal; }
+    if (btnEl) { btnEl.disabled = false; btnEl.classList.remove("is-busy"); btnEl.textContent = textoOriginal; }
   }
 }
 
 async function handleDescargarActaNoDescargo(nota, btnEl) {
   const textoOriginal = btnEl ? btnEl.textContent : null;
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Generando..."; }
+  if (btnEl) { btnEl.disabled = true; btnEl.classList.add("is-busy"); btnEl.textContent = "Generando..."; }
   try {
     const blob = await renderizarActaNoDescargoDocx(nota, state.efectivos);
     const nombreArchivo = nombreArchivoDocumento("ACTA NO DESCARGO", nota);
@@ -1111,7 +1111,7 @@ async function handleDescargarActaNoDescargo(nota, btnEl) {
     console.error(err);
     alert(err.message || "No se pudo generar el acta de no descargo.");
   } finally {
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = textoOriginal; }
+    if (btnEl) { btnEl.disabled = false; btnEl.classList.remove("is-busy"); btnEl.textContent = textoOriginal; }
   }
 }
 
@@ -1172,6 +1172,7 @@ async function generarResumenEjecutivo() {
   statusEl.textContent = "Generando resumen ejecutivo con IA...";
   statusEl.classList.remove("hidden");
   btn.disabled = true;
+  btn.classList.add("is-busy");
   try {
     const casos = construirResumenEstadoCasos();
     const { data, error } = await supabase.functions.invoke("generar-resumen-casos", {
@@ -1186,6 +1187,7 @@ async function generarResumenEjecutivo() {
     statusEl.textContent = "No se pudo generar el resumen: " + (err.message || err);
   } finally {
     btn.disabled = false;
+    btn.classList.remove("is-busy");
   }
 }
 
@@ -1421,6 +1423,7 @@ async function renderNotaDetail(nota) {
   const cierreHt = expedienteCerrado ? await fileLinkHtml("expedientes-terminados-pnp", expedienteCerrado.archivo_ht_path, expedienteCerrado.archivo_ht_nombre) : "";
   const cierreOficio = expedienteCerrado ? await fileLinkHtml("expedientes-terminados-pnp", expedienteCerrado.archivo_oficio_path, expedienteCerrado.archivo_oficio_nombre) : "";
 
+  const actaGenerada = (versionesDocs || []).some((v) => v.tipo === "acta_no_descargo");
   const puedeDescargar = puedeGenerarImputacion(nota, state.efectivos);
   const codigoEsLeve = /^L/i.test((nota.codigo_infraccion || "").trim());
   const puedeActa = puedeGenerarActaNoDescargo(nota, state.efectivos);
@@ -1439,6 +1442,7 @@ async function renderNotaDetail(nota) {
           <button type="button" class="btn-secondary" id="btnDescargarImputacion" ${puedeDescargar ? "" : "disabled"}>⬇ Descargar Imputación</button>
         ` : ""}
       </div>
+      ${siguienteAccionNotaHtml(nota, isAdmin, actaGenerada)}
       <div class="timeline-card">
         <div class="detail-card-header"><h3>Ruta del trámite</h3><span class="muted small">Estado por etapa</span></div>
         ${cronologiaNotaHtml(nota)}
@@ -1766,6 +1770,7 @@ async function redactarConIA(nota) {
   const infraccion = getInfraccion(nota.codigo_infraccion);
 
   btn.disabled = true;
+  btn.classList.add("is-busy");
   statusEl.classList.remove("hidden");
   try {
     let descargoNotas = $("sSancionDescargo").value.trim();
@@ -1827,6 +1832,7 @@ async function redactarConIA(nota) {
     errEl.classList.remove("hidden");
   } finally {
     btn.disabled = false;
+    btn.classList.remove("is-busy");
   }
 }
 
@@ -1836,6 +1842,7 @@ async function verificarNotificacionOrdenIA(nota) {
   if (!file) { statusEl.textContent = "Seleccione primero el archivo del cargo firmado."; statusEl.classList.remove("hidden"); return; }
   const btn = $("btnVerificarNotifIA");
   btn.disabled = true;
+  btn.classList.add("is-busy");
   statusEl.classList.remove("hidden");
   statusEl.textContent = "Leyendo el archivo...";
   try {
@@ -1871,6 +1878,7 @@ async function verificarNotificacionOrdenIA(nota) {
     statusEl.textContent = "No se pudo verificar con IA: " + (err.message || err);
   } finally {
     btn.disabled = false;
+    btn.classList.remove("is-busy");
   }
 }
 
@@ -1915,6 +1923,7 @@ async function submitSancion(e, nota) {
   const submitBtn = e.target.querySelector("button[type=submit]");
   const textoOriginal = submitBtn.textContent;
   submitBtn.disabled = true;
+  submitBtn.classList.add("is-busy");
   submitBtn.textContent = "Generando...";
   try {
     const blob = await renderizarOrdenSancionDocx(nota, state.efectivos, { tercioValue, analisisTexto, descargoTexto });
@@ -1940,6 +1949,7 @@ async function submitSancion(e, nota) {
     errEl.classList.remove("hidden");
   } finally {
     submitBtn.disabled = false;
+    submitBtn.classList.remove("is-busy");
     submitBtn.textContent = textoOriginal;
   }
 }
@@ -3377,6 +3387,60 @@ function progresoNotaHtml(n) {
     <div class="case-progress-steps">${etiquetas.map((etiqueta, i) => `<span class="${i + 1 <= paso ? "is-done" : ""} ${i + 1 === paso ? "is-current" : ""}">${i + 1}</span>`).join("")}</div>
     <span class="pill ${claseEstadoNota(n)}">${escapeHtml(estadoDeNota(n))}</span>
   </div>`;
+}
+
+// Una sola recomendación visible evita que el oficial tenga que leer toda la
+// ruta del trámite para saber qué acción corresponde ahora.
+function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
+  const leve = /^L/i.test((nota.codigo_infraccion || "").trim());
+  const imputacion = !!nota.imputacion_generada_at;
+  const plazoVencido = imputacion && !nota.fecha_descargo && plazoDescargoVencido(nota);
+  const listoDescargo = imputacion && (!!nota.fecha_descargo || plazoVencido);
+  const hayEvaluacion = !!(nota.sancion_analisis && String(nota.sancion_analisis).trim());
+  const orden = !!nota.orden_sancion_generada_at;
+  const notif = !!nota.orden_notificada_at;
+
+  let icono = "→";
+  let titulo = "Complete los datos de la falta";
+  let detalle = "Registre el código de infracción para poder continuar con el trámite.";
+  let tono = "is-pending";
+  if (!nota.codigo_infraccion) {
+    // valores por defecto
+  } else if (!leve) {
+    icono = "•"; titulo = "Falta grave o muy grave";
+    detalle = "Este módulo automatiza los documentos de faltas leves. Continúe el trámite según el procedimiento que corresponde a este código.";
+  } else if (!nota.fecha_reincorporacion) {
+    titulo = "Registre la reincorporación";
+    detalle = "Complete fecha, hora y N.º de nota de reincorporación para habilitar la Imputación.";
+  } else if (!imputacion) {
+    icono = "⬇"; titulo = "Genere la Imputación"; tono = "is-ready";
+    detalle = "Revise los datos y descargue la Imputación; su descarga fija la fecha de notificación y arranca el plazo del descargo.";
+  } else if (!nota.fecha_descargo && !plazoVencido) {
+    icono = "◷"; titulo = "Espere o registre el descargo";
+    detalle = `El plazo está vigente hasta el ${formatDate(fechaLimiteDescargo(nota))}. Si el investigado lo presenta antes, regístrelo aquí.`;
+  } else if (plazoVencido && !actaGenerada) {
+    icono = "!"; titulo = "Genere el Acta de No Descargo"; tono = "is-urgent";
+    detalle = "El plazo venció sin descargo registrado. Genere el acta antes de continuar con la evaluación.";
+  } else if (listoDescargo && !hayEvaluacion) {
+    icono = "✦"; titulo = "Complete la evaluación"; tono = "is-ready";
+    detalle = "Resuma el descargo, redacte el análisis y elija el tercio de la sanción.";
+  } else if (listoDescargo && !orden) {
+    icono = "⬇"; titulo = "Genere la Orden de Sanción"; tono = "is-ready";
+    detalle = "La evaluación está lista. Revise los datos y descargue la Orden.";
+  } else if (orden && !notif) {
+    icono = "✍"; titulo = "Registre la notificación de la Orden";
+    detalle = "Suba el cargo firmado por el investigado y confirme la fecha de notificación.";
+  } else if (orden && notif && isAdmin) {
+    icono = "✓"; titulo = "Registre el expediente cerrado"; tono = "is-ready";
+    detalle = "En Recepción, adjunte el expediente firmado, la HT y el Oficio para archivarlo y respaldarlo en Drive.";
+  } else if (orden && notif) {
+    icono = "✓"; titulo = "Trámite concluido"; tono = "is-done";
+    detalle = "La Orden fue notificada. El cierre administrativo lo realiza el administrador en Recepción.";
+  }
+  return `<aside class="next-action ${tono}" aria-label="Siguiente acción recomendada">
+    <span class="next-action-icon">${icono}</span>
+    <div><span class="eyebrow">Siguiente paso</span><strong>${escapeHtml(titulo)}</strong><p>${escapeHtml(detalle)}</p></div>
+  </aside>`;
 }
 
 // Guía del trámite: cada etapa con su estado -- completo / pendiente /
