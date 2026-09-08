@@ -1,7 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+import { SUPABASE_URL, SUPABASE_ANON_KEY, VAPID_PUBLIC_KEY } from "./config.js";
 import saveAs from "https://esm.sh/file-saver@2.0.5";
 import { renderizarImputacionDocx, construirDatosImputacion, puedeGenerarImputacion, buscarOficialConstato, tokens } from "./lib/imputacion.js";
 import { renderizarActaNoDescargoDocx, construirDatosActaNoDescargo, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
@@ -44,6 +44,121 @@ if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js", { scope: "./" })
       .catch((e) => console.warn("No se pudo registrar el service worker:", e));
   });
+}
+
+// ---------- Alertas push al celular ----------
+// El oficial que constató la falta (el que tramita el expediente) puede
+// activar avisos en su celular. Se envían al generarse la Orden de Sanción
+// (y, cuando se configure el cron, también un repaso diario). Cada
+// suscripción queda atada a su CIP, así solo recibe SUS expedientes.
+let avisoInstalacionDiferido = null;
+let registroSW = null;
+
+function mostrarEstadoMovil(texto) {
+  const el = $("estadoAlertasMovil");
+  if (el) el.textContent = texto;
+}
+
+function vapidABytes(base64) {
+  const relleno = "=".repeat((4 - (base64.length % 4)) % 4);
+  const b64 = (base64 + relleno).replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(b64);
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+async function obtenerRegistroSW() {
+  if (!("serviceWorker" in navigator)) throw new Error("Este navegador no admite la aplicación instalable.");
+  if (!registroSW) registroSW = await navigator.serviceWorker.register("./sw.js", { scope: "./" });
+  return registroSW;
+}
+
+async function prepararAlertasMovil() {
+  const boton = $("btnActivarAlertas");
+  if (!boton) return;
+  if (!state.session || !state.cip) {
+    boton.disabled = true;
+    mostrarEstadoMovil("Ingrese con su CIP para recibir solamente sus alertas.");
+    return;
+  }
+  if (!("PushManager" in window) || !("Notification" in window)) {
+    boton.disabled = true;
+    mostrarEstadoMovil("Este navegador no permite alertas. Use Chrome en Android (o instale la app en iPhone 16.4+).");
+    return;
+  }
+  try {
+    const registro = await obtenerRegistroSW();
+    if (Notification.permission === "denied") {
+      boton.disabled = true;
+      mostrarEstadoMovil("Las alertas están bloqueadas en este celular. Habilítelas desde los ajustes del navegador.");
+      return;
+    }
+    const suscripcion = await registro.pushManager.getSubscription();
+    if (suscripcion && Notification.permission === "granted") {
+      boton.disabled = true;
+      mostrarEstadoMovil("✓ Alertas activas para su CIP en este celular.");
+    } else {
+      boton.disabled = false;
+      mostrarEstadoMovil("Instale la aplicación y active las alertas para recibir avisos de sus expedientes.");
+    }
+  } catch (error) {
+    console.error(error);
+    mostrarEstadoMovil("No se pudieron preparar las alertas en este dispositivo.");
+  }
+}
+
+async function activarAlertasMovil() {
+  const boton = $("btnActivarAlertas");
+  if (!state.cip || !state.session) { mostrarEstadoMovil("Ingrese con su CIP para activar las alertas."); return; }
+  boton.disabled = true;
+  try {
+    const permiso = await Notification.requestPermission();
+    if (permiso !== "granted") { mostrarEstadoMovil("No se activaron las alertas: debe permitirlas en el navegador."); return; }
+    const registro = await obtenerRegistroSW();
+    const suscripcion = await registro.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: vapidABytes(VAPID_PUBLIC_KEY),
+    });
+    const datos = suscripcion.toJSON();
+    const { error } = await supabase.from("suscripciones_movil").upsert({
+      user_id: state.session.user.id,
+      cip: state.cip,
+      endpoint: datos.endpoint,
+      p256dh: datos.keys?.p256dh,
+      auth: datos.keys?.auth,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "endpoint" });
+    if (error) throw error;
+    mostrarEstadoMovil("✓ Alertas activas para su CIP en este celular.");
+  } catch (error) {
+    console.error(error);
+    mostrarEstadoMovil("No se pudieron activar las alertas. Intente de nuevo en unos minutos.");
+  } finally {
+    boton.disabled = false;
+  }
+}
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  avisoInstalacionDiferido = event;
+  $("btnInstalarApp")?.classList.remove("hidden");
+});
+$("btnInstalarApp")?.addEventListener("click", async () => {
+  if (!avisoInstalacionDiferido) return;
+  avisoInstalacionDiferido.prompt();
+  await avisoInstalacionDiferido.userChoice;
+  avisoInstalacionDiferido = null;
+  $("btnInstalarApp")?.classList.add("hidden");
+});
+$("btnActivarAlertas")?.addEventListener("click", activarAlertasMovil);
+
+// Dispara la alerta al oficial cuando se acaba de generar la Orden de Sanción.
+async function enviarAlertaSancionPendiente(notaId) {
+  try {
+    const { error } = await supabase.functions.invoke("notificar-sancion-pendiente", { body: { notaId } });
+    if (error) throw error;
+  } catch (error) {
+    console.warn("No se pudo enviar la alerta móvil:", error);
+  }
 }
 
 // ---------- Avisos flotantes ----------
@@ -394,6 +509,7 @@ async function onAuthed(session) {
   state.session = session;
   $("topbar").classList.remove("hidden");
   await loadProfile(session.user.id);
+  void prepararAlertasMovil();
   showView("view-dashboard");
   // Efectivos se carga ANTES que las notas (y se espera) porque
   // renderNotasTable decide si mostrar el botón "Descargar Imputación" según
@@ -1484,6 +1600,7 @@ async function submitSancion(e, nota) {
     });
     if (error) { errEl.textContent = "Se generó el documento, pero no se pudo guardar la decisión: " + error.message; errEl.classList.remove("hidden"); return; }
     limpiarBorradoresNota(nota.id);
+    void enviarAlertaSancionPendiente(nota.id);
     openNotaDetail(nota.id);
   } catch (err) {
     console.error(err);
