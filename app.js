@@ -738,6 +738,7 @@ async function loadExpedientesRemitidos() {
     .from("expedientes_remitidos").select("*").order("remitido_at", { ascending: false });
   if (error) { console.error(error); toast("No se pudo cargar la recepción: " + error.message); return; }
   state.expedientesRemitidos = data || [];
+  await cargarEstadoRespaldoDrive();
   await renderExpedientesRemitidos();
 }
 
@@ -787,6 +788,8 @@ function prepararFormularioRegistroRecepcion() {
   $("btnRegistrarExpedienteRecibido").onclick = () => { panel.classList.remove("hidden"); actualizarChecklistExpedienteCompleto(); };
   $("btnCancelarRegistroRecepcion").onclick = () => panel.classList.add("hidden");
   $("registroRecepcionForm").onsubmit = submitRegistroRecepcion;
+  const btnDrive = $("btnConectarDrive");
+  if (btnDrive) btnDrive.onclick = conectarGoogleDrive;
 }
 
 async function renderExpedientesRemitidos() {
@@ -806,6 +809,15 @@ async function renderExpedientesRemitidos() {
     const enlaceHt = await fileLinkHtml("expedientes-terminados-pnp", item.archivo_ht_path, item.archivo_ht_nombre);
     const enlaceOficio = await fileLinkHtml("expedientes-terminados-pnp", item.archivo_oficio_path, item.archivo_oficio_nombre);
     const esPendiente = item.estado === "remitido";
+    const driveConectado = $("btnConectarDrive") && /Reconectar/.test($("btnConectarDrive").textContent || "");
+    const driveEstadoHtml = item.drive_expediente_url
+      ? `<span class="drive-estado ok">☁ Copiado a Drive${item.drive_sync_at ? ` · ${formatDate(String(item.drive_sync_at).slice(0, 10))}` : ""}</span>`
+      : item.drive_error
+        ? `<span class="drive-estado error">☁ Error al respaldar: ${escapeHtml(item.drive_error)}</span>`
+        : `<span class="drive-estado pend">☁ Aún no respaldado en Drive</span>`;
+    const driveBotonHtml = driveConectado
+      ? `<button type="button" class="btn-secondary btn-respaldar-drive" data-id="${item.id}">☁ Respaldar en Drive</button>`
+      : "";
     return `<article class="reception-item estado-${escapeHtml(item.estado || "remitido")}">
       <div class="reception-item-main">
         <div class="reception-title-row"><span class="reception-status">${escapeHtml(etiquetaEstadoRecepcion(item.estado))}</span><strong>${escapeHtml(item.investigado_nombre || "Investigado sin nombre")}</strong></div>
@@ -813,10 +825,11 @@ async function renderExpedientesRemitidos() {
         <p class="muted small">Registrado por ${escapeHtml(item.remitido_por_cip ? `CIP ${item.remitido_por_cip}` : (item.remitido_por_email || "-"))} · ${formatFechaHora(String(item.remitido_at || "").slice(0, 10), String(item.remitido_at || "").slice(11, 16))}</p>
         ${item.observacion ? `<p class="reception-observation"><b>Observación:</b> ${escapeHtml(item.observacion)}</p>` : ""}
         <p class="storage-path" title="Carpeta de archivo">📁 ${escapeHtml(item.carpeta_archivo || item.archivo_path || "")}</p>
+        ${driveEstadoHtml}
       </div>
       <div class="reception-actions"><div>${enlace}</div>${esPendiente
         ? `<button type="button" class="btn-primary btn-recibir-expediente" data-id="${item.id}">✓ Recibir</button><button type="button" class="btn-secondary btn-observar-expediente" data-id="${item.id}">Observar</button>`
-        : item.estado === "recibido" ? `<button type="button" class="btn-secondary btn-archivar-expediente" data-id="${item.id}">Archivar</button>` : ""}</div>
+        : item.estado === "recibido" ? `<button type="button" class="btn-secondary btn-archivar-expediente" data-id="${item.id}">Archivar</button>` : ""}${driveBotonHtml}</div>
       <details class="reception-documents"><summary class="btn-secondary">HT y Oficio</summary><div class="reception-documents-body"><div><span class="muted small">HT</span>${enlaceHt}</div><div><span class="muted small">Oficio</span>${enlaceOficio}</div><form class="form-documentos-cierre" data-id="${item.id}"><label>Adjuntar HT<input type="file" class="f-ht-cierre" accept="application/pdf,image/*" /></label><label>Adjuntar Oficio<input type="file" class="f-oficio-cierre" accept="application/pdf,image/*" /></label><button type="submit" class="btn-secondary">Guardar documentos</button></form></div></details>
     </article>`;
   }));
@@ -828,6 +841,12 @@ async function renderExpedientesRemitidos() {
     if (observacion?.trim()) actualizarEstadoRecepcion(b.dataset.id, "observado", observacion.trim());
   }));
   document.querySelectorAll(".form-documentos-cierre").forEach((f) => f.addEventListener("submit", submitDocumentosCierre));
+  document.querySelectorAll(".btn-respaldar-drive").forEach((b) => b.addEventListener("click", async () => {
+    const registro = state.expedientesRemitidos.find((i) => i.id === b.dataset.id);
+    if (!registro) return;
+    b.disabled = true; b.textContent = "Respaldando...";
+    await respaldarExpedienteCompletoEnDrive(registro, false);
+  }));
   prepararFormularioRegistroRecepcion();
 }
 
@@ -859,17 +878,18 @@ async function submitRegistroRecepcion(e) {
     const { error: upErr } = await supabase.storage.from("expedientes-terminados-pnp").upload(ruta.ruta, archivo, { upsert: false });
     if (upErr) throw upErr;
     const ahora = new Date().toISOString();
-    const { error } = await supabase.from("expedientes_remitidos").insert({
+    const { data: insertado, error } = await supabase.from("expedientes_remitidos").insert({
       nota_id: nota.id, investigado_nombre: nombreInvestigadoVisible(nota, true), investigado_cip: ruta.cipInvestigado,
       fecha_falta: nota.fecha_falta, codigo_infraccion: nota.codigo_infraccion,
       remitido_por: state.session.user.id, remitido_por_email: state.email, remitido_por_cip: state.cip,
       remitido_at: ahora, archivo_path: ruta.ruta, archivo_nombre: archivo.name, carpeta_archivo: ruta.carpeta,
       estado: "recibido", observacion: $("fObservacionExpedienteRecibido").value.trim() || null,
       recibido_por: state.session.user.id, recibido_at: ahora,
-    });
+    }).select("id").single();
     if (error) throw error;
     $("registroRecepcionPanel").classList.add("hidden");
     e.target.reset();
+    if (insertado?.id) void respaldarArchivoEnDrive(insertado.id, "expediente", true);
     await loadExpedientesRemitidos();
   } catch (error) {
     errorEl.textContent = "No se pudo registrar el expediente: " + (error.message || error);
@@ -891,6 +911,7 @@ async function submitDocumentosCierre(e) {
   boton.disabled = true; boton.textContent = "Guardando...";
   try {
     const cambios = { updated_at: new Date().toISOString() };
+    const tiposSubidos = [];
     for (const [tipo, archivo] of [["ht", ht], ["oficio", oficio]]) {
       if (!archivo) continue;
       const ruta = `${registro.nota_id}/cierre/${tipo}_${Date.now()}_${segmentoRuta(archivo.name, `${tipo}.pdf`)}`;
@@ -898,15 +919,79 @@ async function submitDocumentosCierre(e) {
       if (upErr) throw upErr;
       cambios[`archivo_${tipo}_path`] = ruta;
       cambios[`archivo_${tipo}_nombre`] = archivo.name;
+      tiposSubidos.push(tipo);
     }
     const { error } = await supabase.from("expedientes_remitidos").update(cambios).eq("id", id);
     if (error) throw error;
+    for (const tipo of tiposSubidos) void respaldarArchivoEnDrive(id, tipo, true);
     await loadExpedientesRemitidos();
   } catch (error) {
     toast("No se pudieron guardar los documentos: " + (error.message || error));
   } finally {
     boton.disabled = false; boton.textContent = "Guardar documentos";
   }
+}
+
+// ---------- Respaldo en Google Drive ----------
+async function cargarEstadoRespaldoDrive() {
+  const estado = $("estadoRespaldoDrive");
+  const boton = $("btnConectarDrive");
+  if (!estado || !boton || state.role !== "admin") { if (estado) estado.classList.add("hidden"); if (boton) boton.classList.add("hidden"); return; }
+  estado.classList.remove("hidden"); boton.classList.remove("hidden");
+  try {
+    const { data, error } = await supabase.rpc("estado_respaldo_drive");
+    if (error) throw error;
+    const conexion = Array.isArray(data) ? data[0] : data;
+    if (conexion?.conectado) {
+      estado.textContent = `✓ Google Drive conectado${conexion.cuenta_google ? `: ${conexion.cuenta_google}` : ""}. Cada expediente firmado se copia a su Drive.`;
+      boton.textContent = "☁ Reconectar Drive";
+    } else {
+      estado.textContent = "Google Drive aún no está conectado. Los expedientes ya están protegidos en Supabase.";
+      boton.textContent = "☁ Conectar Drive";
+    }
+  } catch (error) {
+    console.warn("No se pudo consultar Drive:", error);
+    estado.textContent = "El estado de Drive estará disponible cuando termine la configuración administrativa.";
+  }
+}
+
+async function conectarGoogleDrive() {
+  const boton = $("btnConectarDrive");
+  if (!boton) return;
+  boton.disabled = true;
+  const original = boton.textContent;
+  boton.textContent = "Preparando conexión...";
+  try {
+    const { data, error } = await supabase.functions.invoke("google-drive-conectar", { body: {} });
+    if (error) throw new Error(await mensajeErrorFuncion(error));
+    if (data?.error) throw new Error(data.error);
+    if (!data?.authorizationUrl) throw new Error("No se recibió el enlace de autorización de Google.");
+    window.location.assign(data.authorizationUrl);
+  } catch (error) {
+    toast("No se pudo iniciar la conexión con Drive: " + (error.message || error));
+    boton.disabled = false;
+    boton.textContent = original;
+  }
+}
+
+async function respaldarArchivoEnDrive(expedienteId, tipo, silencioso = false) {
+  const { data, error } = await supabase.functions.invoke("respaldar-expediente-drive", { body: { expedienteId, tipo } });
+  if (error || data?.error) {
+    const mensaje = data?.error || (error ? await mensajeErrorFuncion(error) : "No se pudo copiar el archivo a Drive.");
+    if (!silencioso) toast(mensaje);
+    return { ok: false, error: mensaje };
+  }
+  return { ok: true, data };
+}
+
+async function respaldarExpedienteCompletoEnDrive(expediente, silencioso = false) {
+  const tipos = ["expediente", expediente.archivo_ht_path ? "ht" : null, expediente.archivo_oficio_path ? "oficio" : null].filter(Boolean);
+  const resultados = [];
+  for (const tipo of tipos) resultados.push(await respaldarArchivoEnDrive(expediente.id, tipo, silencioso));
+  const fallo = resultados.find((r) => !r.ok);
+  if (!silencioso) toast(fallo ? `Se respaldaron algunos archivos. Revise: ${fallo.error}` : "✓ El expediente y sus documentos se respaldaron en Drive.", fallo ? "error" : "ok");
+  await loadExpedientesRemitidos();
+  return !fallo;
 }
 
 $("buscarRecepcion")?.addEventListener("input", renderExpedientesRemitidos);
