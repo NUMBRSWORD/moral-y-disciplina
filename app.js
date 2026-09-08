@@ -594,14 +594,27 @@ function renderResumenRapidoNotas() {
     </div>`;
 }
 
+function diasHastaFecha(fecha) {
+  if (!fecha) return null;
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const destino = new Date(`${fecha}T12:00:00`); destino.setHours(0, 0, 0, 0);
+  return Math.round((destino - hoy) / 86400000);
+}
+
 function obtenerAccionesPrioritariasNotas() {
   return (state.notas || []).flatMap((nota) => {
     const nombre = nombreInvestigadoVisible(nota, true) || "Nota sin nombre";
+    if (nota.orden_sancion_generada_at && !nota.orden_notificada_at) {
+      return [{ nota, nombre, prioridad: 0, tipo: "Registrar cargo de Orden", detalle: "La Orden ya se generó; corresponde notificarla y subir el cargo firmado.", clase: "is-urgent" }];
+    }
     if (nota.fecha_reincorporacion && nota.imputacion_generada_at && !nota.fecha_descargo && !nota.orden_sancion_generada_at && plazoDescargoVencido(nota)) {
       return [{ nota, nombre, prioridad: 1, tipo: "Plazo vencido", detalle: "Defina el siguiente trámite: acta de no descargo u orden de sanción.", clase: "is-urgent" }];
     }
+    if (nota.imputacion_generada_at && !nota.fecha_descargo && !nota.orden_sancion_generada_at && diasHastaFecha(fechaLimiteDescargo(nota)) === 1) {
+      return [{ nota, nombre, prioridad: 1.5, tipo: "Plazo vence mañana", detalle: "Verifique la recepción del descargo o prepare el trámite que corresponde.", clase: "is-pending" }];
+    }
     if (nota.fecha_descargo && !nota.orden_sancion_generada_at) {
-      return [{ nota, nombre, prioridad: 2, tipo: "Descargo recibido", detalle: "Revise el descargo y prepare la orden de sanción.", clase: "is-ready" }];
+      return [{ nota, nombre, prioridad: 2, tipo: "Preparar Orden de Sanción", detalle: "El descargo ya fue registrado. Complete el análisis y genere la Orden.", clase: "is-ready" }];
     }
     if (nota.fecha_reincorporacion && !nota.imputacion_generada_at) {
       return [{ nota, nombre, prioridad: 3, tipo: "Generar imputación", detalle: "Verifique los datos y genere la notificación de imputación.", clase: "is-pending" }];
@@ -1947,22 +1960,31 @@ async function transcribirPaginasConIA(paginas, onEstado) {
   return textos.join("\n\n");
 }
 
-async function extractPdfText(file, onEstado) {
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  let text = "";
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    text += content.items.map((it) => it.str).join(" ") + "\n";
-  }
-  // Algunas notas se generan como una foto/escaneo de la página (sin texto
-  // seleccionable): pdf.js no extrae nada de ellas. En ese caso se recurre a IA con visión.
-  if (text.trim().length < 30) {
-    onEstado?.("Esta nota es una imagen escaneada: preparando las páginas para leerlas con IA...");
+// Muchos escaneos traen una capa de texto pobre: pdf.js saca el membrete o
+// la primera línea, pero no el cuerpo del descargo. No basta con "¿hay algo
+// de texto?"; se mide si hay texto ÚTIL por página y si solo predominan
+// datos de trámite (encabezado sin argumentos de defensa).
+function textoPdfPareceIncompleto(textosPorPagina) {
+  const paginas = textosPorPagina.map((t) => String(t || "").replace(/\s+/g, " ").trim());
+  const texto = paginas.join(" ");
+  const letras = (texto.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g) || []).length;
+  const paginasConPocoTexto = paginas.filter((p) => (p.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g) || []).length < 140).length;
+  const soloCabecera = /\b(administrado|sumilla|referencia|interpone descargo|notificaci[oó]n de presunta infracci[oó]n)\b/i.test(texto)
+    && !/\b(alega|sostiene|manifiesta|señala|argumenta|solicita|pide|niega|reconoce|justifica|porque|adjunta|acredita|prueba)\b/i.test(texto);
+  return letras < Math.max(450, paginas.length * 180)
+    || paginasConPocoTexto / Math.max(paginas.length, 1) >= 0.6
+    || soloCabecera;
+}
+
+// Renderiza y transcribe por lotes para que un descargo de muchas páginas no
+// acumule todas las imágenes en memoria del navegador antes de llamar a la IA.
+async function transcribirPdfConVisionIA(pdf, onEstado) {
+  const textos = [];
+  for (let inicio = 1; inicio <= pdf.numPages; inicio += PAGINAS_POR_LOTE_VISION) {
+    const fin = Math.min(pdf.numPages, inicio + PAGINAS_POR_LOTE_VISION - 1);
     const paginas = [];
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
+    for (let numero = inicio; numero <= fin; numero++) {
+      const page = await pdf.getPage(numero);
       const viewport = page.getViewport({ scale: 1.8 });
       const canvas = document.createElement("canvas");
       canvas.width = viewport.width;
@@ -1970,7 +1992,27 @@ async function extractPdfText(file, onEstado) {
       await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
       paginas.push({ data: canvasABase64Jpeg(canvas), mediaType: "image/jpeg" });
     }
-    text = await transcribirPaginasConIA(paginas, onEstado);
+    onEstado?.(`Leyendo con IA las páginas ${inicio}-${fin} de ${pdf.numPages}...`);
+    textos.push(await transcribirPaginasConIA(paginas));
+  }
+  return textos.join("\n\n");
+}
+
+async function extractPdfText(file, onEstado) {
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const textosPorPagina = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    textosPorPagina.push(content.items.map((it) => it.str).join(" "));
+  }
+  let text = textosPorPagina.join("\n");
+  // También se activa cuando el OCR interno del PDF quedó incompleto: así la
+  // IA con visión lee el documento real, no solo el encabezado.
+  if (textoPdfPareceIncompleto(textosPorPagina)) {
+    onEstado?.("El texto interno del PDF parece incompleto. Revisando todas las páginas con IA...");
+    text = await transcribirPdfConVisionIA(pdf, onEstado);
   }
   return text;
 }
