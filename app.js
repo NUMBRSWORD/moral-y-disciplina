@@ -110,7 +110,7 @@ async function prepararAlertasMovil() {
 async function activarAlertasMovil() {
   const boton = $("btnActivarAlertas");
   if (!state.cip || !state.session) { mostrarEstadoMovil("Ingrese con su CIP para activar las alertas."); return; }
-  boton.disabled = true;
+  ocuparBoton(boton, true, "Activando...");
   try {
     const permiso = await Notification.requestPermission();
     if (permiso !== "granted") { mostrarEstadoMovil("No se activaron las alertas: debe permitirlas en el navegador."); return; }
@@ -134,7 +134,7 @@ async function activarAlertasMovil() {
     console.error(error);
     mostrarEstadoMovil("No se pudieron activar las alertas. Intente de nuevo en unos minutos.");
   } finally {
-    boton.disabled = false;
+    ocuparBoton(boton, false);
   }
 }
 
@@ -177,6 +177,22 @@ function toast(mensaje, tipo = "error", ms = 6000) {
     el.style.opacity = "0";
     setTimeout(() => el.remove(), 220);
   }, ms);
+}
+
+// Estado "trabajando" uniforme para cualquier botón: lo deshabilita, le pone el
+// spinner (.is-busy) y opcionalmente cambia el texto, recordando el original.
+function ocuparBoton(btn, ocupado, textoOcupado) {
+  if (!btn) return;
+  if (ocupado) {
+    if (btn.dataset.textoPrevio === undefined) btn.dataset.textoPrevio = btn.textContent;
+    btn.disabled = true;
+    btn.classList.add("is-busy");
+    if (textoOcupado) btn.textContent = textoOcupado;
+  } else {
+    btn.disabled = false;
+    btn.classList.remove("is-busy");
+    if (btn.dataset.textoPrevio !== undefined) { btn.textContent = btn.dataset.textoPrevio; delete btn.dataset.textoPrevio; }
+  }
 }
 
 // Cuando una Edge Function responde con un status no-2xx, supabase-js entrega
@@ -550,10 +566,16 @@ $("loginForm").addEventListener("submit", async (e) => {
   // dominio interno sin que el usuario tenga que verlo ni escribirlo).
   if (/^\d+$/.test(email)) email = `${email}@moralydisciplina.local`;
   const password = $("loginPassword").value;
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) {
-    $("loginError").textContent = "Correo o clave incorrectos.";
-    $("loginError").classList.remove("hidden");
+  const btn = e.target.querySelector("button[type=submit]");
+  ocuparBoton(btn, true, "Ingresando...");
+  try {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      $("loginError").textContent = "Correo o clave incorrectos.";
+      $("loginError").classList.remove("hidden");
+    }
+  } finally {
+    ocuparBoton(btn, false);
   }
 });
 
@@ -844,7 +866,7 @@ async function renderExpedientesRemitidos() {
   document.querySelectorAll(".btn-respaldar-drive").forEach((b) => b.addEventListener("click", async () => {
     const registro = state.expedientesRemitidos.find((i) => i.id === b.dataset.id);
     if (!registro) return;
-    b.disabled = true; b.textContent = "Respaldando...";
+    ocuparBoton(b, true, "Respaldando...");
     await respaldarExpedienteCompletoEnDrive(registro, false);
   }));
   prepararFormularioRegistroRecepcion();
@@ -868,7 +890,7 @@ async function submitRegistroRecepcion(e) {
   if (!nota || !archivo) { errorEl.textContent = "Seleccione un expediente cerrado y adjunte el PDF firmado."; errorEl.classList.remove("hidden"); return; }
   if (archivo.type !== "application/pdf" && !/\.pdf$/i.test(archivo.name)) { errorEl.textContent = "El expediente completo debe subirse como un único archivo PDF."; errorEl.classList.remove("hidden"); return; }
   const boton = e.target.querySelector("button[type=submit]");
-  boton.disabled = true; boton.textContent = "Verificando...";
+  ocuparBoton(boton, true, "Verificando...");
   try {
     const componentes = await componentesExpedienteCompleto(nota);
     const faltantes = componentes.filter((c) => !c.listo).map((c) => c.etiqueta);
@@ -895,7 +917,7 @@ async function submitRegistroRecepcion(e) {
     errorEl.textContent = "No se pudo registrar el expediente: " + (error.message || error);
     errorEl.classList.remove("hidden");
   } finally {
-    boton.disabled = false; boton.textContent = "Registrar expediente";
+    ocuparBoton(boton, false);
   }
 }
 
@@ -908,7 +930,7 @@ async function submitDocumentosCierre(e) {
   const oficio = form.querySelector(".f-oficio-cierre").files[0];
   if (!registro || (!ht && !oficio)) { toast("Adjunte por lo menos el HT o el Oficio.", "info"); return; }
   const boton = form.querySelector("button[type=submit]");
-  boton.disabled = true; boton.textContent = "Guardando...";
+  ocuparBoton(boton, true, "Guardando...");
   try {
     const cambios = { updated_at: new Date().toISOString() };
     const tiposSubidos = [];
@@ -928,7 +950,7 @@ async function submitDocumentosCierre(e) {
   } catch (error) {
     toast("No se pudieron guardar los documentos: " + (error.message || error));
   } finally {
-    boton.disabled = false; boton.textContent = "Guardar documentos";
+    ocuparBoton(boton, false);
   }
 }
 
@@ -958,9 +980,7 @@ async function cargarEstadoRespaldoDrive() {
 async function conectarGoogleDrive() {
   const boton = $("btnConectarDrive");
   if (!boton) return;
-  boton.disabled = true;
-  const original = boton.textContent;
-  boton.textContent = "Preparando conexión...";
+  ocuparBoton(boton, true, "Preparando conexión...");
   try {
     const { data, error } = await supabase.functions.invoke("google-drive-conectar", { body: {} });
     if (error) throw new Error(await mensajeErrorFuncion(error));
@@ -969,8 +989,7 @@ async function conectarGoogleDrive() {
     window.location.assign(data.authorizationUrl);
   } catch (error) {
     toast("No se pudo iniciar la conexión con Drive: " + (error.message || error));
-    boton.disabled = false;
-    boton.textContent = original;
+    ocuparBoton(boton, false);
   }
 }
 
@@ -1990,11 +2009,11 @@ async function submitDescargo(e, notaId) {
 async function quitarDescargo(nota) {
   if (!confirm(`¿Quitar el descargo registrado de ${nombreInvestigadoVisible(nota)}?\n\nSe borrará la fecha, el N.º, el archivo y el resumen del descargo de este expediente. El resto no cambia.`)) return;
   const btn = $("btnQuitarDescargo");
-  if (btn) { btn.disabled = true; btn.textContent = "Quitando..."; }
+  ocuparBoton(btn, true, "Quitando...");
   const rutaArchivo = nota.archivo_descargo_path;
   const { error } = await supabase.rpc("quitar_descargo", { p_nota_id: nota.id });
   if (error) {
-    if (btn) { btn.disabled = false; btn.textContent = "Quitar descargo"; }
+    ocuparBoton(btn, false);
     toast("No se pudo quitar el descargo: " + error.message);
     return;
   }
@@ -2154,7 +2173,7 @@ $("efectivoForm")?.addEventListener("submit", async (e) => {
     return;
   }
   const btn = e.target.querySelector("button[type=submit]");
-  btn.disabled = true;
+  ocuparBoton(btn, true, "Guardando...");
   try {
     const { error } = await supabase.from("efectivos").insert({
       grado, cip, dni, apellidos_nombres,
@@ -2172,7 +2191,7 @@ $("efectivoForm")?.addEventListener("submit", async (e) => {
     $("searchEfectivos").value = cip;
     $("searchEfectivos").dispatchEvent(new Event("input"));
   } finally {
-    btn.disabled = false;
+    ocuparBoton(btn, false);
   }
 });
 
@@ -2747,27 +2766,33 @@ $("notaForm").addEventListener("submit", async (e) => {
 
   const payloads = personas.map((p) => ({ ...compartido, ...p }));
 
-  const { data: inserted, error } = await supabase
-    .from("notas_informativas")
-    .insert(payloads)
-    .select();
+  const btn = e.target.querySelector("button[type=submit]");
+  ocuparBoton(btn, true, "Guardando...");
+  try {
+    const { data: inserted, error } = await supabase
+      .from("notas_informativas")
+      .insert(payloads)
+      .select();
 
-  if (error) { errEl.textContent = "Error: " + error.message; errEl.classList.remove("hidden"); return; }
+    if (error) { errEl.textContent = "Error: " + error.message; errEl.classList.remove("hidden"); return; }
 
-  const file = $("fArchivoNota").files[0];
-  if (file && inserted?.length) {
-    const path = `${inserted[0].id}/${Date.now()}_${file.name}`;
-    const { error: upErr } = await supabase.storage.from("notas").upload(path, file);
-    if (!upErr) {
-      await supabase.from("notas_informativas")
-        .update({ archivo_nota_path: path, archivo_nota_nombre: file.name })
-        .in("id", inserted.map((n) => n.id));
+    const file = $("fArchivoNota").files[0];
+    if (file && inserted?.length) {
+      const path = `${inserted[0].id}/${Date.now()}_${file.name}`;
+      const { error: upErr } = await supabase.storage.from("notas").upload(path, file);
+      if (!upErr) {
+        await supabase.from("notas_informativas")
+          .update({ archivo_nota_path: path, archivo_nota_nombre: file.name })
+          .in("id", inserted.map((n) => n.id));
+      }
     }
-  }
 
-  pdfCandidates = [];
-  closeModal();
-  loadNotas();
+    pdfCandidates = [];
+    closeModal();
+    loadNotas();
+  } finally {
+    ocuparBoton(btn, false);
+  }
 });
 
 // ---------- Reincorporación desde PDF (uno o varios archivos) ----------
@@ -2909,9 +2934,10 @@ $("rlArchivo").addEventListener("change", async (e) => {
   }
 });
 
-$("btnGuardarReincLote").addEventListener("click", async () => {
+$("btnGuardarReincLote").addEventListener("click", async (e) => {
   const errEl = $("rlError");
   errEl.classList.add("hidden");
+  const btnLote = e.currentTarget;
 
   const rows = [...document.querySelectorAll("#rlLista .multi-efectivo-row")];
   const seleccionados = rows
@@ -2934,6 +2960,8 @@ $("btnGuardarReincLote").addEventListener("click", async () => {
     }
   }
 
+  ocuparBoton(btnLote, true, "Guardando...");
+  try {
   const archivosSubidos = new Map();
   for (const { fila } of seleccionados) {
     if (archivosSubidos.has(fila.file)) continue;
@@ -2971,6 +2999,9 @@ $("btnGuardarReincLote").addEventListener("click", async () => {
   reincLoteFilas = [];
   closeReincLoteModal();
   loadNotas();
+  } finally {
+    ocuparBoton(btnLote, false);
+  }
 });
 
 // ---------- Faltas desde PDF (uno o varios archivos), en lote ----------
@@ -3099,9 +3130,10 @@ $("flArchivo").addEventListener("change", async (e) => {
   }
 });
 
-$("btnGuardarFaltasLote").addEventListener("click", async () => {
+$("btnGuardarFaltasLote").addEventListener("click", async (e) => {
   const errEl = $("flError");
   errEl.classList.add("hidden");
+  const btnLote = e.currentTarget;
   const rows = [...document.querySelectorAll("#flLista .multi-efectivo-row")];
   const seleccionados = rows
     .map((row, i) => ({ row, fila: faltasLoteFilas[i] }))
@@ -3129,6 +3161,8 @@ $("btnGuardarFaltasLote").addEventListener("click", async () => {
     registros.push({ file: fila.file, grado, apellidos, nombres, fecha_falta, hora_falta, numero_nota_falta, oficial_constato: fila.oficial_constato || null });
   }
 
+  ocuparBoton(btnLote, true, "Registrando...");
+  try {
   // Cada PDF se sube una sola vez; el path se enlaza a todas sus notas.
   const archivosSubidos = new Map();
   for (const r of registros) {
@@ -3175,6 +3209,9 @@ $("btnGuardarFaltasLote").addEventListener("click", async () => {
   faltasLoteFilas = [];
   closeFaltasLoteModal();
   loadNotas();
+  } finally {
+    ocuparBoton(btnLote, false);
+  }
 });
 
 // ---------- Directivas internas ----------
@@ -3287,7 +3324,7 @@ $("directivaForm")?.addEventListener("submit", async (e) => {
   if (!titulo || !contenido) return;
 
   const submitBtn = e.target.querySelector("button[type=submit]");
-  submitBtn.disabled = true;
+  ocuparBoton(submitBtn, true, "Guardando...");
   try {
     const savedId = await guardarDirectiva(supabase, { id, titulo, numero_documento, contenido, activa, userId: state.session.user.id });
     const file = $("dvArchivo").files[0];
@@ -3302,7 +3339,7 @@ $("directivaForm")?.addEventListener("submit", async (e) => {
     errEl.textContent = "Error: " + (err.message || err);
     errEl.classList.remove("hidden");
   } finally {
-    submitBtn.disabled = false;
+    ocuparBoton(submitBtn, false);
   }
 });
 
@@ -3335,7 +3372,7 @@ $("asistenteForm")?.addEventListener("submit", async (e) => {
   agregarMensajeAsistente("oficial", pregunta);
   input.value = "";
   const submitBtn = e.target.querySelector("button[type=submit]");
-  submitBtn.disabled = true;
+  ocuparBoton(submitBtn, true);
   try {
     const directivas = directivasParaIA(state.directivas.length ? state.directivas : await listarDirectivas(supabase));
     const { data, error } = await supabase.functions.invoke("asistente-md", {
@@ -3353,7 +3390,7 @@ $("asistenteForm")?.addEventListener("submit", async (e) => {
     console.error(err);
     agregarMensajeAsistente("asistente", "Ocurrió un error al consultar: " + (err.message || err));
   } finally {
-    submitBtn.disabled = false;
+    ocuparBoton(submitBtn, false);
   }
 });
 
