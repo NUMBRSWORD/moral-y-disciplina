@@ -292,12 +292,6 @@ tbody tr:last-child td { border-bottom: none; }
 .case-progress-steps .is-done + .is-done::before { background: var(--accent); }
 .case-progress.is-concluida .pill { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 
-/* Segmentador Pendientes / Concluidas / Todas sobre la lista de seguimiento */
-.estado-segmented { display: inline-flex; gap: 2px; margin: 0 0 12px; padding: 3px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 999px; }
-.estado-segmented .es-btn { border: none; background: transparent; color: var(--text-muted); padding: 6px 16px; border-radius: 999px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out); }
-.estado-segmented .es-btn:hover { color: var(--text); }
-.estado-segmented .es-btn.is-active { background: var(--accent); color: #fff; }
-
 /* Modal */
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.55);
@@ -650,8 +644,6 @@ kbd {
   .view-header h2 { font-size: 1.28rem; }
   .view-actions { display: grid; grid-template-columns: 1fr; gap: 8px; justify-content: stretch; }
   .view-actions > button { width: 100%; min-height: 46px; }
-  .estado-segmented { display: flex; width: 100%; }
-  .estado-segmented .es-btn { flex: 1; min-height: 42px; padding: 6px 8px; }
   .search-panel { flex-direction: column; align-items: stretch; padding: 14px; }
   .search-panel > input[type="search"], .search-panel > button, .search-panel > label.inline-filter { width: 100%; min-height: 46px; }
   .search-panel > label.inline-filter { display: flex; align-items: center; gap: 6px; }
@@ -705,29 +697,29 @@ kbd {
   .table-wrap { margin: 0 -12px; border-radius: 0; border-left: 0; border-right: 0; }
   th, td { padding: 11px 12px; }
 
-  /* Expedientes: cada fila se convierte en tarjeta */
-  #view-dashboard .table-wrap { margin: 0; border: 0; background: transparent; overflow: visible; }
-  #view-dashboard .table-wrap table, #view-dashboard .table-wrap tbody { display: block; width: 100%; }
-  #view-dashboard .table-wrap thead { display: none; }
-  #view-dashboard .table-wrap tbody { display: grid; gap: 10px; }
-  #view-dashboard .table-wrap tbody tr {
+  /* Expedientes y Seguimiento: cada fila se convierte en tarjeta */
+  :is(#view-dashboard, #view-seguimiento) .table-wrap { margin: 0; border: 0; background: transparent; overflow: visible; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap table, :is(#view-dashboard, #view-seguimiento) .table-wrap tbody { display: block; width: 100%; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap thead { display: none; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap tbody { display: grid; gap: 10px; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap tbody tr {
     display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 10px;
     padding: 14px; border: 1px solid var(--border); border-radius: 14px;
     background: var(--bg-card); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12); cursor: pointer;
   }
-  #view-dashboard .table-wrap tbody td { display: block; min-width: 0; padding: 0; border: 0; }
-  #view-dashboard .table-wrap tbody td.case-hide { display: none; }
-  #view-dashboard .table-wrap tbody td.case-person { grid-column: 1 / -1; order: 1; }
-  #view-dashboard .table-wrap tbody td.case-person strong { font-size: 1rem; }
-  #view-dashboard .table-wrap tbody td.case-grade { order: 2; width: fit-content; padding: 4px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 0.73rem; font-weight: 700; }
-  #view-dashboard .table-wrap tbody td.case-date { order: 3; justify-self: end; color: var(--text-muted); font-size: 0.78rem; text-align: right; }
-  #view-dashboard .table-wrap tbody td.case-date::before { content: "Falta: "; font-weight: 600; }
-  #view-dashboard .table-wrap tbody td.case-code { order: 4; grid-column: 1 / -1; color: var(--text); font-size: 0.86rem; font-weight: 700; }
-  #view-dashboard .table-wrap tbody td.case-code::before { content: "Infracción: "; color: var(--text-muted); font-weight: 500; }
-  #view-dashboard .table-wrap tbody td.case-progress-cell { order: 5; grid-column: 1 / -1; padding-top: 9px; border-top: 1px solid var(--border); }
-  #view-dashboard .case-progress { min-width: 0; width: 100%; }
-  #view-dashboard .table-wrap tbody td.row-actions { order: 6; grid-column: 1 / -1; padding-top: 3px; }
-  #view-dashboard .row-actions-inner { justify-content: stretch; flex-wrap: wrap; white-space: normal; }
-  #view-dashboard .row-actions .btn-secondary { flex: 1; min-height: 46px; }
-  #view-dashboard .row-chevron { display: none; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap tbody td { display: block; min-width: 0; padding: 0; border: 0; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap tbody td.case-hide { display: none; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap tbody td.case-person { grid-column: 1 / -1; order: 1; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap tbody td.case-person strong { font-size: 1rem; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap tbody td.case-grade { order: 2; width: fit-content; padding: 4px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 0.73rem; font-weight: 700; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap tbody td.case-date { order: 3; justify-self: end; color: var(--text-muted); font-size: 0.78rem; text-align: right; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap tbody td.case-date::before { content: "Falta: "; font-weight: 600; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap tbody td.case-code { order: 4; grid-column: 1 / -1; color: var(--text); font-size: 0.86rem; font-weight: 700; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap tbody td.case-code::before { content: "Infracción: "; color: var(--text-muted); font-weight: 500; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap tbody td.case-progress-cell { order: 5; grid-column: 1 / -1; padding-top: 9px; border-top: 1px solid var(--border); }
+  :is(#view-dashboard, #view-seguimiento) .case-progress { min-width: 0; width: 100%; }
+  :is(#view-dashboard, #view-seguimiento) .table-wrap tbody td.row-actions { order: 6; grid-column: 1 / -1; padding-top: 3px; }
+  :is(#view-dashboard, #view-seguimiento) .row-actions-inner { justify-content: stretch; flex-wrap: wrap; white-space: normal; }
+  :is(#view-dashboard, #view-seguimiento) .row-actions .btn-secondary { flex: 1; min-height: 46px; }
+  :is(#view-dashboard, #view-seguimiento) .row-chevron { display: none; }
 }

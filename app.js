@@ -598,13 +598,16 @@ async function loadNotas() {
   state.notas = data || [];
   renderResumenRapidoNotas();
   renderBandejaAccionesNotas();
-  renderNotasTable(state.notas, "notasTableBody", "notasEmpty");
+  // Inicio (Expedientes): solo lo pendiente. Seguimiento: solo lo resuelto.
+  renderNotasTable(
+    state.notas.filter((n) => !notaConcluida(n)),
+    "notasTableBody", "notasEmpty",
+    "No hay expedientes pendientes. Los resueltos están en la pestaña «Seguimiento».",
+  );
   aplicarFiltrosNotas();
 }
 
 let notasVisibles = [];
-// "pendientes" (por defecto) | "concluidas" | "todas" — segmentador sobre la lista.
-let filtroEstadoSeguimiento = "pendientes";
 
 function renderResumenRapidoNotas() {
   const notas = state.notas || [];
@@ -1021,20 +1024,14 @@ async function respaldarExpedienteCompletoEnDrive(expediente, silencioso = false
 
 $("buscarRecepcion")?.addEventListener("input", renderExpedientesRemitidos);
 
-function renderNotasTable(list, tbodyId = "notasTableBody", emptyId = "notasEmpty") {
+function renderNotasTable(list, tbodyId = "notasTableBody", emptyId = "notasEmpty", emptyMsg = "No hay notas informativas registradas.") {
   notasVisibles = list;
   const tbody = $(tbodyId);
   if (!tbody) return;
   tbody.innerHTML = "";
   const emptyEl = $(emptyId);
   if (emptyEl) {
-    emptyEl.textContent = !state.notas?.length
-      ? "No hay notas informativas registradas."
-      : filtroEstadoSeguimiento === "concluidas"
-        ? "Todavía no hay expedientes concluidos."
-        : filtroEstadoSeguimiento === "pendientes"
-          ? "No hay expedientes pendientes. Cambie a «Concluidas» o «Todas» para ver el historial."
-          : "Ningún expediente coincide con el filtro.";
+    emptyEl.textContent = !state.notas?.length ? "No hay notas informativas registradas." : emptyMsg;
     emptyEl.classList.toggle("hidden", list.length > 0);
   }
   for (const n of list) {
@@ -1149,11 +1146,15 @@ async function handleDescargarActaNoDescargo(nota, btnEl) {
   }
 }
 
+// La pestaña Seguimiento es el archivo de lo resuelto: solo expedientes con la
+// Orden ya notificada, con buscador y filtro por fecha encima.
 function aplicarFiltrosNotas() {
   const q = $("searchNotas").value.toLowerCase();
   const desde = $("filtroDesde").value;
   const hasta = $("filtroHasta").value;
+  const filtrarTexto = !!q, filtrarFecha = !!(desde || hasta);
   const filtered = state.notas.filter((n) => {
+    if (!notaConcluida(n)) return false;
     const coincideTexto = !q || [n.nombres, n.apellidos, n.numero_nota_falta, n.codigo_infraccion, n.grado]
       .filter(Boolean).join(" ").toLowerCase().includes(q);
     // Filtra por fecha de la falta. Los campos de tipo date de Supabase vienen
@@ -1161,20 +1162,13 @@ function aplicarFiltrosNotas() {
     // directamente como texto sin necesidad de convertir a Date.
     const coincideDesde = !desde || (n.fecha_falta && n.fecha_falta >= desde);
     const coincideHasta = !hasta || (n.fecha_falta && n.fecha_falta <= hasta);
-    const coincideEstado = filtroEstadoSeguimiento === "todas"
-      || (filtroEstadoSeguimiento === "concluidas" ? notaConcluida(n) : !notaConcluida(n));
-    return coincideTexto && coincideDesde && coincideHasta && coincideEstado;
+    return coincideTexto && coincideDesde && coincideHasta;
   });
-  renderNotasTable(filtered, "seguimientoTableBody", "seguimientoEmpty");
+  const vacio = (filtrarTexto || filtrarFecha)
+    ? "Ningún expediente resuelto coincide con la búsqueda."
+    : "Todavía no hay expedientes resueltos.";
+  renderNotasTable(filtered, "seguimientoTableBody", "seguimientoEmpty", vacio);
 }
-
-$("filtroEstadoNotas").addEventListener("click", (e) => {
-  const btn = e.target.closest(".es-btn");
-  if (!btn) return;
-  filtroEstadoSeguimiento = btn.dataset.estado;
-  $("filtroEstadoNotas").querySelectorAll(".es-btn").forEach((b) => b.classList.toggle("is-active", b === btn));
-  aplicarFiltrosNotas();
-});
 
 $("searchNotas").addEventListener("input", aplicarFiltrosNotas);
 $("filtroDesde").addEventListener("change", aplicarFiltrosNotas);
