@@ -595,10 +595,12 @@ async function loadNotas() {
   // el navegador nunca recibe las que no le corresponden, así que aquí ya
   // no hace falta (ni conviene) repetir el filtro en JavaScript.
   state.notas = data || [];
-  renderNotasTable(state.notas);
+  aplicarFiltrosNotas();
 }
 
 let notasVisibles = [];
+// "pendientes" (por defecto) | "concluidas" | "todas" — segmentador sobre la lista.
+let filtroEstadoSeguimiento = "pendientes";
 
 function renderResumenRapidoNotas() {
   const notas = state.notas || [];
@@ -1021,6 +1023,13 @@ function renderNotasTable(list) {
   renderBandejaAccionesNotas();
   const tbody = $("notasTableBody");
   tbody.innerHTML = "";
+  $("notasEmpty").textContent = !state.notas?.length
+    ? "No hay notas informativas registradas."
+    : filtroEstadoSeguimiento === "concluidas"
+      ? "Todavía no hay expedientes concluidos."
+      : filtroEstadoSeguimiento === "pendientes"
+        ? "No hay expedientes pendientes. Cambie a «Concluidas» o «Todas» para ver el historial."
+        : "Ningún expediente coincide con el filtro.";
   $("notasEmpty").classList.toggle("hidden", list.length > 0);
   for (const n of list) {
     const tr = document.createElement("tr");
@@ -1146,11 +1155,21 @@ function aplicarFiltrosNotas() {
     // directamente como texto sin necesidad de convertir a Date.
     const coincideDesde = !desde || (n.fecha_falta && n.fecha_falta >= desde);
     const coincideHasta = !hasta || (n.fecha_falta && n.fecha_falta <= hasta);
-    return coincideTexto && coincideDesde && coincideHasta;
+    const coincideEstado = filtroEstadoSeguimiento === "todas"
+      || (filtroEstadoSeguimiento === "concluidas" ? notaConcluida(n) : !notaConcluida(n));
+    return coincideTexto && coincideDesde && coincideHasta && coincideEstado;
   });
   renderNotasTable(filtered);
   actualizarIndicadorBusqueda();
 }
+
+$("filtroEstadoNotas").addEventListener("click", (e) => {
+  const btn = e.target.closest(".es-btn");
+  if (!btn) return;
+  filtroEstadoSeguimiento = btn.dataset.estado;
+  $("filtroEstadoNotas").querySelectorAll(".es-btn").forEach((b) => b.classList.toggle("is-active", b === btn));
+  aplicarFiltrosNotas();
+});
 
 // El buscador y los filtros de fecha viven en un panel plegable para que la
 // pantalla de inicio muestre solo lo pendiente. Si hay un filtro activo con el
@@ -3418,7 +3437,15 @@ let chartsPanel = {};
 // Mismas etapas que ya se muestran en el detalle de cada nota (Acta de No
 // Descargo / Orden de Sanción), resumidas en una sola categoría por caso
 // para el gráfico de estado.
+// Un expediente está "concluido" cuando la Orden de Sanción ya fue notificada
+// al investigado (con su cargo firmado): en este módulo no queda nada más que
+// hacer salvo el cierre administrativo en Recepción.
+function notaConcluida(n) {
+  return !!n.orden_notificada_at;
+}
+
 function estadoDeNota(n) {
+  if (notaConcluida(n)) return "Concluida";
   if (!n.fecha_reincorporacion) return "Reincorporación pendiente";
   if (!n.imputacion_generada_at) return "Notificación pendiente";
   if (n.orden_sancion_generada_at) return "Sanción generada";
@@ -3428,6 +3455,7 @@ function estadoDeNota(n) {
 }
 
 function claseEstadoNota(n) {
+  if (notaConcluida(n)) return "pill-yes";
   if (n.orden_sancion_generada_at) return "pill-yes";
   if (n.fecha_descargo) return "pill-info";
   if (n.fecha_reincorporacion && n.imputacion_generada_at && plazoDescargoVencido(n)) return "pill-danger";
@@ -3436,11 +3464,12 @@ function claseEstadoNota(n) {
 }
 
 function progresoNotaHtml(n) {
+  const concluida = notaConcluida(n);
   const paso = n.orden_sancion_generada_at ? 5 : n.fecha_descargo ? 4 : n.imputacion_generada_at ? 3 : n.fecha_reincorporacion ? 2 : 1;
   const etiquetas = ["Falta", "Reinc.", "Imput.", "Descargo", "Sanción"];
-  return `<div class="case-progress" title="${escapeHtml(estadoDeNota(n))}">
-    <div class="case-progress-steps">${etiquetas.map((etiqueta, i) => `<span class="${i + 1 <= paso ? "is-done" : ""} ${i + 1 === paso ? "is-current" : ""}">${i + 1}</span>`).join("")}</div>
-    <span class="pill ${claseEstadoNota(n)}">${escapeHtml(estadoDeNota(n))}</span>
+  return `<div class="case-progress ${concluida ? "is-concluida" : ""}" title="${escapeHtml(estadoDeNota(n))}">
+    <div class="case-progress-steps">${etiquetas.map((etiqueta, i) => `<span class="${i + 1 <= paso ? "is-done" : ""} ${i + 1 === paso && !concluida ? "is-current" : ""}">${i + 1}</span>`).join("")}</div>
+    <span class="pill ${claseEstadoNota(n)}">${concluida ? "✓ " : ""}${escapeHtml(estadoDeNota(n))}</span>
   </div>`;
 }
 

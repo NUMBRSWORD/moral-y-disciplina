@@ -93,6 +93,8 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 }
 .tab-btn:hover { background: var(--bg-card); color: var(--text); }
 .tab-btn.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+/* La pestaña de inicio siempre en verde, esté activa o no. */
+#tabSeguimiento { color: var(--accent); font-weight: 600; }
 .user-box { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: var(--text-muted); }
 .badge {
   background: var(--bg-card); border: 1px solid var(--border);
@@ -290,6 +292,13 @@ tbody tr:last-child td { border-bottom: none; }
 .case-progress-steps .is-done { color: #fff; background: var(--accent); border-color: var(--accent); }
 .case-progress-steps .is-current { box-shadow: 0 0 0 3px var(--accent-soft); }
 .case-progress-steps .is-done + .is-done::before { background: var(--accent); }
+.case-progress.is-concluida .pill { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+
+/* Segmentador Pendientes / Concluidas / Todas sobre la lista de seguimiento */
+.estado-segmented { display: inline-flex; gap: 2px; margin: 0 0 12px; padding: 3px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 999px; }
+.estado-segmented .es-btn { border: none; background: transparent; color: var(--text-muted); padding: 6px 16px; border-radius: 999px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out); }
+.estado-segmented .es-btn:hover { color: var(--text); }
+.estado-segmented .es-btn.is-active { background: var(--accent); color: #fff; }
 
 /* Modal */
 .modal-overlay {
@@ -643,6 +652,8 @@ kbd {
   .view-header h2 { font-size: 1.28rem; }
   .view-actions { display: grid; grid-template-columns: 1fr; gap: 8px; justify-content: stretch; }
   .view-actions > button { width: 100%; min-height: 46px; }
+  .estado-segmented { display: flex; width: 100%; }
+  .estado-segmented .es-btn { flex: 1; min-height: 42px; padding: 6px 8px; }
   .search-panel { flex-direction: column; align-items: stretch; padding: 14px; }
   .search-panel > input[type="search"], .search-panel > button, .search-panel > label.inline-filter { width: 100%; min-height: 46px; }
   .search-panel > label.inline-filter { display: flex; align-items: center; gap: 6px; }
