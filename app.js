@@ -638,7 +638,7 @@ function obtenerAccionesPrioritariasNotas() {
   return (state.notas || []).flatMap((nota) => {
     const nombre = nombreInvestigadoVisible(nota, true) || "Nota sin nombre";
     if (nota.orden_sancion_generada_at && !nota.orden_notificada_at) {
-      return [{ nota, nombre, prioridad: 0, tipo: "Registrar cargo de Orden", detalle: "La Orden ya se generó; corresponde notificarla y subir el cargo firmado.", clase: "is-urgent" }];
+      return [{ nota, nombre, prioridad: 0, tipo: "Cargar expediente firmado", detalle: "La Orden ya se generó; suba el legajo completo firmado y registre la fecha de notificación.", clase: "is-urgent" }];
     }
     if (nota.fecha_reincorporacion && nota.imputacion_generada_at && !nota.fecha_descargo && !nota.orden_sancion_generada_at && plazoDescargoVencido(nota)) {
       return [{ nota, nombre, prioridad: 1, tipo: "Plazo vencido", detalle: "Defina el siguiente trámite: acta de no descargo u orden de sanción.", clase: "is-urgent" }];
@@ -1438,6 +1438,7 @@ async function renderNotaDetail(nota) {
   const reincArchivo = await fileLinkHtml("notas", nota.archivo_reincorporacion_path, nota.archivo_reincorporacion_nombre);
   const expArchivo = exp ? await fileLinkHtml("expedientes", exp.archivo_expediente_path, exp.archivo_expediente_nombre) : "";
   const descargoArchivo = await fileLinkHtml("notas", nota.archivo_descargo_path, nota.archivo_descargo_nombre);
+  const ordenNotifArchivo = await fileLinkHtml("notas", nota.archivo_orden_notificacion_path, nota.archivo_orden_notificacion_nombre);
 
   const { data: versionesDocs } = await supabase
     .from("documentos_generados")
@@ -1626,24 +1627,27 @@ async function renderNotaDetail(nota) {
 
     ${(isAdmin || esDuenoDeLaNota) && nota.orden_sancion_generada_at ? `
     <div class="detail-card">
-      <h3>Notificación de la Orden de Sanción</h3>
+      <h3>Cargo del expediente firmado</h3>
       ${nota.orden_notificada_at ? `
-        <p class="muted small">Notificada el ${formatDate(nota.orden_notificada_at.slice(0, 10))}.</p>
+        <p class="muted small">Registrado el ${formatDate(nota.orden_notificada_at.slice(0, 10))}.</p>
+        ${ordenNotifArchivo ? `<div class="detail-field"><div class="label">Legajo firmado</div><div class="value">${ordenNotifArchivo}</div></div>` : ""}
+        ${nota.archivo_descargo_path ? `<div class="detail-field"><div class="label">Descargo firmado (adjunto)</div><div class="value">${descargoArchivo}</div></div>` : ""}
       ` : `
-        <p class="muted small">Suba el cargo de notificación firmado por el investigado (la IA verifica que corresponda antes de guardar).</p>
+        <p class="muted small">Suba el legajo completo firmado en un solo PDF: Imputación, notificación de la imputación, ${nota.fecha_descargo ? "descargo del investigado" : "Acta de No Descargo"}, Orden de Sanción y cargo de notificación firmado. La IA revisa que estén todos antes de guardar.</p>
+        ${nota.archivo_descargo_path ? `<p class="campo-guardado">✓ El descargo firmado ya está registrado (${escapeHtml(nota.archivo_descargo_nombre || "archivo")}) y queda adjunto a este expediente — no hace falta volver a subirlo.</p>` : ""}
         <form id="ordenNotifForm">
-          <label>Cargo de notificación firmado (PDF o foto)
+          <label>Cargo del expediente firmado (un solo PDF con todos los documentos)
             <input type="file" id="fOrdenNotifArchivo" accept="application/pdf,image/*" required />
           </label>
           <div class="modal-actions" style="justify-content:flex-start; margin:8px 0">
-            <button type="button" class="btn-secondary" id="btnVerificarNotifIA">✨ Verificar con IA</button>
+            <button type="button" class="btn-secondary" id="btnVerificarNotifIA">✨ Verificar con IA que esté completo</button>
           </div>
           <p id="ordenNotifIAStatus" class="muted small hidden"></p>
           <label>Fecha de notificación (la completa la IA si la detecta; verifíquela)
             <input type="date" id="fOrdenNotifFecha" required />
           </label>
           <p id="ordenNotifError" class="error hidden"></p>
-          <button type="submit" class="btn-primary">Registrar notificación</button>
+          <button type="submit" class="btn-primary">Registrar</button>
         </form>
       `}
     </div>
@@ -1875,10 +1879,28 @@ async function redactarConIA(nota) {
   }
 }
 
+// Documentos que el legajo firmado debe contener para darse por completo. El
+// descargo suele estar cargado aparte al registrarlo: se marca "yaConsta" para
+// que la IA no lo cuente como faltante y quede claro que va adjunto.
+function componentesEsperadosExpediente(nota) {
+  const comps = [
+    { etiqueta: "Inicio de Imputación de Infracción Leve", yaConsta: false },
+    { etiqueta: "Notificación de la imputación al investigado", yaConsta: false },
+  ];
+  if (nota.fecha_descargo) {
+    comps.push({ etiqueta: "Descargo firmado del investigado", yaConsta: !!nota.archivo_descargo_path });
+  } else {
+    comps.push({ etiqueta: "Acta de No Descargo", yaConsta: false });
+  }
+  comps.push({ etiqueta: "Orden de Sanción", yaConsta: false });
+  comps.push({ etiqueta: "Cargo de notificación firmado por el investigado", yaConsta: false });
+  return comps;
+}
+
 async function verificarNotificacionOrdenIA(nota) {
   const file = $("fOrdenNotifArchivo").files[0];
   const statusEl = $("ordenNotifIAStatus");
-  if (!file) { statusEl.textContent = "Seleccione primero el archivo del cargo firmado."; statusEl.classList.remove("hidden"); return; }
+  if (!file) { statusEl.textContent = "Seleccione primero el PDF del legajo firmado."; statusEl.classList.remove("hidden"); return; }
   const btn = $("btnVerificarNotifIA");
   btn.disabled = true;
   btn.classList.add("is-busy");
@@ -1893,25 +1915,27 @@ async function verificarNotificacionOrdenIA(nota) {
       ? await extractImagenTextoConOcr(file, (msg) => { statusEl.textContent = msg; })
       : "";
 
-    statusEl.textContent = "Verificando con IA...";
-    const infraccion = getInfraccion(nota.codigo_infraccion);
+    statusEl.textContent = "Verificando con IA que el expediente esté completo...";
     const sancionImpuesta = nota.sancion_tipo === "amonestacion" ? "amonestación" : `${nota.sancion_dias} días de Sanción Simple`;
+    const componentesEsperados = componentesEsperadosExpediente(nota);
     const { data, error } = await supabase.functions.invoke("revisar-documento-ia", {
       body: {
-        tipo: "notificacion_orden",
+        tipo: "expediente_completo",
         investigadoCompleto: nombreInvestigadoVisible(nota, true),
         codigoInfraccion: normalizarCodigoInfraccion(nota.codigo_infraccion),
         sancionImpuesta,
+        componentesEsperados,
         textoDocumento,
       },
     });
     if (error) throw new Error(await mensajeErrorFuncion(error));
     if (data?.error) throw new Error(data.error);
     if (data?.fecha_detectada) $("fOrdenNotifFecha").value = data.fecha_detectada;
+    const faltantes = data?.faltantes || [];
     const observaciones = (data?.observaciones || []).join(" · ");
-    statusEl.textContent = data?.consistente
-      ? `✓ El documento corresponde a esta notificación.${observaciones ? " " + observaciones : ""}`
-      : `⚠ ${observaciones || "La IA no pudo confirmar que el documento corresponda. Revise antes de guardar."}`;
+    statusEl.innerHTML = data?.consistente
+      ? `✓ El expediente está completo.${observaciones ? " <span class='muted'>" + escapeHtml(observaciones) + "</span>" : ""}`
+      : `⚠ ${faltantes.length ? "Falta(n): <strong>" + faltantes.map(escapeHtml).join(", ") + "</strong>. " : ""}${observaciones ? escapeHtml(observaciones) : "Revise el PDF antes de guardar."}`;
   } catch (err) {
     console.error(err);
     statusEl.textContent = "No se pudo verificar con IA: " + (err.message || err);
@@ -1928,19 +1952,24 @@ async function submitNotificacionOrden(e, nota) {
   const file = $("fOrdenNotifArchivo").files[0];
   const fecha = $("fOrdenNotifFecha").value;
   if (!file || !fecha) return;
+  const btn = e.target.querySelector("button[type=submit]");
+  ocuparBoton(btn, true, "Registrando...");
+  try {
+    const path = `${nota.id}/expediente_firmado_${Date.now()}_${file.name}`;
+    const { error: upErr } = await supabase.storage.from("notas").upload(path, file);
+    if (upErr) { errEl.textContent = "Error al subir archivo: " + upErr.message; errEl.classList.remove("hidden"); return; }
 
-  const path = `${nota.id}/orden_notif_${Date.now()}_${file.name}`;
-  const { error: upErr } = await supabase.storage.from("notas").upload(path, file);
-  if (upErr) { errEl.textContent = "Error al subir archivo: " + upErr.message; errEl.classList.remove("hidden"); return; }
-
-  const { error } = await supabase.rpc("registrar_notificacion_orden", {
-    p_nota_id: nota.id,
-    p_fecha: fecha,
-    p_archivo_path: path,
-    p_archivo_nombre: file.name,
-  });
-  if (error) { errEl.textContent = "Error: " + error.message; errEl.classList.remove("hidden"); return; }
-  openNotaDetail(nota.id);
+    const { error } = await supabase.rpc("registrar_notificacion_orden", {
+      p_nota_id: nota.id,
+      p_fecha: fecha,
+      p_archivo_path: path,
+      p_archivo_nombre: file.name,
+    });
+    if (error) { errEl.textContent = "Error: " + error.message; errEl.classList.remove("hidden"); return; }
+    openNotaDetail(nota.id);
+  } finally {
+    ocuparBoton(btn, false);
+  }
 }
 
 async function submitSancion(e, nota) {
@@ -3495,8 +3524,8 @@ function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
     icono = "⬇"; titulo = "Genere la Orden de Sanción"; tono = "is-ready";
     detalle = "La evaluación está lista. Revise los datos y descargue la Orden.";
   } else if (orden && !notif) {
-    icono = "✍"; titulo = "Registre la notificación de la Orden";
-    detalle = "Suba el cargo firmado por el investigado y confirme la fecha de notificación.";
+    icono = "✍"; titulo = "Cargue el expediente firmado";
+    detalle = "Suba el legajo completo firmado en un PDF (la IA revisa que esté completo) y confirme la fecha de notificación.";
   } else if (orden && notif && isAdmin) {
     icono = "✓"; titulo = "Registre el expediente cerrado"; tono = "is-ready";
     detalle = "En Recepción, adjunte el expediente firmado, la HT y el Oficio para archivarlo y respaldarlo en Drive.";
