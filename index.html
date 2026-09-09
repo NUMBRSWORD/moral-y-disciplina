@@ -84,7 +84,7 @@
     <div class="view-header">
       <div>
         <h2>Seguimiento disciplinario</h2>
-        <p class="muted view-subtitle">Identifique la siguiente acción de cada nota sin abrir expediente por expediente.</p>
+        <p class="muted view-subtitle">Expedientes pendientes: identifique la siguiente acción de cada uno. Los ya resueltos pasan a la pestaña «Seguimiento».</p>
       </div>
       <div class="view-actions">
         <button id="btnFaltasLote" class="btn-secondary admin-only hidden">Faltas (PDF grupal)</button>
@@ -143,7 +143,7 @@
     <div class="view-header">
       <div>
         <h2>Seguimiento</h2>
-        <p class="muted view-subtitle">Busque, filtre por fecha o avance, exporte a Excel o pida el resumen ejecutivo con IA.</p>
+        <p class="muted view-subtitle">Expedientes resueltos (Orden notificada). Búsquelos, fíltrelos por fecha, expórtelos a Excel o pida el resumen ejecutivo con IA.</p>
       </div>
       <div class="view-actions">
         <button id="btnExportarExcel" class="btn-secondary">Exportar a Excel</button>
@@ -155,11 +155,6 @@
       <label class="inline-filter">Desde <input id="filtroDesde" type="date" /></label>
       <label class="inline-filter">Hasta <input id="filtroHasta" type="date" /></label>
       <button id="btnLimpiarFiltroFecha" class="btn-ghost">Limpiar</button>
-    </div>
-    <div id="filtroEstadoNotas" class="estado-segmented" role="tablist" aria-label="Filtrar por avance del trámite">
-      <button type="button" class="es-btn is-active" data-estado="pendientes">Pendientes</button>
-      <button type="button" class="es-btn" data-estado="concluidas">Concluidas</button>
-      <button type="button" class="es-btn" data-estado="todas">Todas</button>
     </div>
     <div id="resumenEjecutivoPanel" class="detail-card hidden" style="margin-bottom:16px">
       <div class="detail-card-header">
