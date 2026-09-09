@@ -139,8 +139,6 @@ main { max-width: 1500px; margin: 0 auto; padding: 24px 20px 60px; }
   background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
 }
 .search-panel > input[type="search"] { flex: 1 1 260px; min-width: 0; }
-#btnToggleBusqueda.has-filtro { border-color: var(--accent); color: var(--accent); }
-#btnToggleBusqueda.has-filtro::after { content: " •"; }
 
 .quick-summary {
   display: flex; align-items: center; justify-content: space-between; gap: 24px;

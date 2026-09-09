@@ -330,7 +330,7 @@ function showView(id) {
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $(id).classList.remove("hidden");
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-  const map = { "view-dashboard": "dashboard", "view-efectivos": "efectivos", "view-directivas": "directivas", "view-agenda": "agenda", "view-documentos": "documentos", "view-recepcion": "recepcion", "view-panel": "panel", "view-historial": "historial" };
+  const map = { "view-dashboard": "dashboard", "view-seguimiento": "seguimiento", "view-efectivos": "efectivos", "view-directivas": "directivas", "view-agenda": "agenda", "view-documentos": "documentos", "view-recepcion": "recepcion", "view-panel": "panel", "view-historial": "historial" };
   if (map[id]) {
     document.querySelector(`.tab-btn[data-view="${map[id]}"]`)?.classList.add("active");
   }
@@ -340,6 +340,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     const target = btn.dataset.view;
     if (target === "dashboard") { showView("view-dashboard"); loadNotas(); }
+    if (target === "seguimiento") { showView("view-seguimiento"); loadNotas(); }
     if (target === "efectivos") { showView("view-efectivos"); loadEfectivos(); }
     if (target === "directivas") { showView("view-directivas"); loadDirectivasView(); }
     if (target === "agenda") { showView("view-agenda"); renderAgendaNotas(); }
@@ -595,6 +596,9 @@ async function loadNotas() {
   // el navegador nunca recibe las que no le corresponden, así que aquí ya
   // no hace falta (ni conviene) repetir el filtro en JavaScript.
   state.notas = data || [];
+  renderResumenRapidoNotas();
+  renderBandejaAccionesNotas();
+  renderNotasTable(state.notas, "notasTableBody", "notasEmpty");
   aplicarFiltrosNotas();
 }
 
@@ -1017,20 +1021,22 @@ async function respaldarExpedienteCompletoEnDrive(expediente, silencioso = false
 
 $("buscarRecepcion")?.addEventListener("input", renderExpedientesRemitidos);
 
-function renderNotasTable(list) {
+function renderNotasTable(list, tbodyId = "notasTableBody", emptyId = "notasEmpty") {
   notasVisibles = list;
-  renderResumenRapidoNotas();
-  renderBandejaAccionesNotas();
-  const tbody = $("notasTableBody");
+  const tbody = $(tbodyId);
+  if (!tbody) return;
   tbody.innerHTML = "";
-  $("notasEmpty").textContent = !state.notas?.length
-    ? "No hay notas informativas registradas."
-    : filtroEstadoSeguimiento === "concluidas"
-      ? "Todavía no hay expedientes concluidos."
-      : filtroEstadoSeguimiento === "pendientes"
-        ? "No hay expedientes pendientes. Cambie a «Concluidas» o «Todas» para ver el historial."
-        : "Ningún expediente coincide con el filtro.";
-  $("notasEmpty").classList.toggle("hidden", list.length > 0);
+  const emptyEl = $(emptyId);
+  if (emptyEl) {
+    emptyEl.textContent = !state.notas?.length
+      ? "No hay notas informativas registradas."
+      : filtroEstadoSeguimiento === "concluidas"
+        ? "Todavía no hay expedientes concluidos."
+        : filtroEstadoSeguimiento === "pendientes"
+          ? "No hay expedientes pendientes. Cambie a «Concluidas» o «Todas» para ver el historial."
+          : "Ningún expediente coincide con el filtro.";
+    emptyEl.classList.toggle("hidden", list.length > 0);
+  }
   for (const n of list) {
     const tr = document.createElement("tr");
     const puedeDescargar = puedeGenerarImputacion(n, state.efectivos);
@@ -1159,8 +1165,7 @@ function aplicarFiltrosNotas() {
       || (filtroEstadoSeguimiento === "concluidas" ? notaConcluida(n) : !notaConcluida(n));
     return coincideTexto && coincideDesde && coincideHasta && coincideEstado;
   });
-  renderNotasTable(filtered);
-  actualizarIndicadorBusqueda();
+  renderNotasTable(filtered, "seguimientoTableBody", "seguimientoEmpty");
 }
 
 $("filtroEstadoNotas").addEventListener("click", (e) => {
@@ -1169,22 +1174,6 @@ $("filtroEstadoNotas").addEventListener("click", (e) => {
   filtroEstadoSeguimiento = btn.dataset.estado;
   $("filtroEstadoNotas").querySelectorAll(".es-btn").forEach((b) => b.classList.toggle("is-active", b === btn));
   aplicarFiltrosNotas();
-});
-
-// El buscador y los filtros de fecha viven en un panel plegable para que la
-// pantalla de inicio muestre solo lo pendiente. Si hay un filtro activo con el
-// panel cerrado, el botón queda marcado para que no pase desapercibido.
-function hayFiltroNotasActivo() {
-  return !!($("searchNotas").value.trim() || $("filtroDesde").value || $("filtroHasta").value);
-}
-function actualizarIndicadorBusqueda() {
-  $("btnToggleBusqueda").classList.toggle("has-filtro", hayFiltroNotasActivo());
-}
-$("btnToggleBusqueda").addEventListener("click", () => {
-  const panel = $("panelBusquedaNotas");
-  const cerrado = panel.classList.toggle("hidden");
-  $("btnToggleBusqueda").setAttribute("aria-expanded", String(!cerrado));
-  if (!cerrado) $("searchNotas").focus();
 });
 
 $("searchNotas").addEventListener("input", aplicarFiltrosNotas);
