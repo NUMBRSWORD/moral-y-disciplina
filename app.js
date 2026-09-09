@@ -1149,7 +1149,24 @@ function aplicarFiltrosNotas() {
     return coincideTexto && coincideDesde && coincideHasta;
   });
   renderNotasTable(filtered);
+  actualizarIndicadorBusqueda();
 }
+
+// El buscador y los filtros de fecha viven en un panel plegable para que la
+// pantalla de inicio muestre solo lo pendiente. Si hay un filtro activo con el
+// panel cerrado, el botón queda marcado para que no pase desapercibido.
+function hayFiltroNotasActivo() {
+  return !!($("searchNotas").value.trim() || $("filtroDesde").value || $("filtroHasta").value);
+}
+function actualizarIndicadorBusqueda() {
+  $("btnToggleBusqueda").classList.toggle("has-filtro", hayFiltroNotasActivo());
+}
+$("btnToggleBusqueda").addEventListener("click", () => {
+  const panel = $("panelBusquedaNotas");
+  const cerrado = panel.classList.toggle("hidden");
+  $("btnToggleBusqueda").setAttribute("aria-expanded", String(!cerrado));
+  if (!cerrado) $("searchNotas").focus();
+});
 
 $("searchNotas").addEventListener("input", aplicarFiltrosNotas);
 $("filtroDesde").addEventListener("change", aplicarFiltrosNotas);
@@ -1157,6 +1174,7 @@ $("filtroHasta").addEventListener("change", aplicarFiltrosNotas);
 $("btnLimpiarFiltroFecha").addEventListener("click", () => {
   $("filtroDesde").value = "";
   $("filtroHasta").value = "";
+  $("searchNotas").value = "";
   aplicarFiltrosNotas();
 });
 

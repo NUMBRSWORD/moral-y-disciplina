@@ -86,16 +86,19 @@
         <p class="muted view-subtitle">Identifique la siguiente acción de cada nota sin abrir expediente por expediente.</p>
       </div>
       <div class="view-actions">
-        <input id="searchNotas" type="search" placeholder="Buscar por nombre, apellido o N.º de nota..." />
-        <label class="inline-filter">Desde <input id="filtroDesde" type="date" /></label>
-        <label class="inline-filter">Hasta <input id="filtroHasta" type="date" /></label>
-        <button id="btnLimpiarFiltroFecha" class="btn-ghost">Limpiar fechas</button>
+        <button id="btnToggleBusqueda" type="button" class="btn-secondary" aria-expanded="false" aria-controls="panelBusquedaNotas">🔎 Buscar / filtrar</button>
         <button id="btnExportarExcel" class="btn-secondary">Exportar a Excel</button>
         <button id="btnResumenEjecutivo" class="btn-secondary">✨ Resumen ejecutivo IA</button>
         <button id="btnFaltasLote" class="btn-secondary admin-only hidden">Faltas (PDF grupal)</button>
         <button id="btnReincorporacionLote" class="btn-secondary admin-only hidden">Reincorporación (PDF grupal)</button>
         <button id="btnNuevaNota" class="btn-primary admin-only hidden">+ Nueva nota</button>
       </div>
+    </div>
+    <div id="panelBusquedaNotas" class="search-panel hidden">
+      <input id="searchNotas" type="search" placeholder="Buscar por nombre, apellido o N.º de nota..." />
+      <label class="inline-filter">Desde <input id="filtroDesde" type="date" /></label>
+      <label class="inline-filter">Hasta <input id="filtroHasta" type="date" /></label>
+      <button id="btnLimpiarFiltroFecha" class="btn-ghost">Limpiar</button>
     </div>
     <div id="notasResumenRapido" class="quick-summary" aria-live="polite"></div>
     <section id="panelMovil" class="mobile-app-panel" aria-labelledby="panelMovilTitulo">
