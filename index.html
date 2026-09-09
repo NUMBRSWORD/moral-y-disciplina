@@ -38,7 +38,8 @@
       </span>
     </div>
     <nav class="tabs">
-      <button id="tabSeguimiento" class="tab-btn active" data-view="dashboard">Seguimiento</button>
+      <button class="tab-btn active" data-view="dashboard">Expedientes</button>
+      <button id="tabSeguimiento" class="tab-btn" data-view="seguimiento">Seguimiento</button>
       <button class="tab-btn admin-only hidden" data-view="efectivos">Efectivos</button>
       <button class="tab-btn admin-only hidden" data-view="directivas">Directivas</button>
       <button class="tab-btn admin-only hidden" data-view="agenda">Agenda</button>
@@ -82,23 +83,14 @@
   <section id="view-dashboard" class="view hidden">
     <div class="view-header">
       <div>
-        <h2>Seguimiento</h2>
+        <h2>Seguimiento disciplinario</h2>
         <p class="muted view-subtitle">Identifique la siguiente acción de cada nota sin abrir expediente por expediente.</p>
       </div>
       <div class="view-actions">
-        <button id="btnToggleBusqueda" type="button" class="btn-secondary" aria-expanded="false" aria-controls="panelBusquedaNotas">🔎 Buscar / filtrar</button>
-        <button id="btnExportarExcel" class="btn-secondary">Exportar a Excel</button>
-        <button id="btnResumenEjecutivo" class="btn-secondary">✨ Resumen ejecutivo IA</button>
         <button id="btnFaltasLote" class="btn-secondary admin-only hidden">Faltas (PDF grupal)</button>
         <button id="btnReincorporacionLote" class="btn-secondary admin-only hidden">Reincorporación (PDF grupal)</button>
         <button id="btnNuevaNota" class="btn-primary admin-only hidden">+ Nueva nota</button>
       </div>
-    </div>
-    <div id="panelBusquedaNotas" class="search-panel hidden">
-      <input id="searchNotas" type="search" placeholder="Buscar por nombre, apellido o N.º de nota..." />
-      <label class="inline-filter">Desde <input id="filtroDesde" type="date" /></label>
-      <label class="inline-filter">Hasta <input id="filtroHasta" type="date" /></label>
-      <button id="btnLimpiarFiltroFecha" class="btn-ghost">Limpiar</button>
     </div>
     <div id="notasResumenRapido" class="quick-summary" aria-live="polite"></div>
     <section id="panelMovil" class="mobile-app-panel" aria-labelledby="panelMovilTitulo">
@@ -123,19 +115,6 @@
       </div>
       <div id="bandejaAccionesLista" class="action-list"></div>
     </section>
-    <div id="resumenEjecutivoPanel" class="detail-card hidden" style="margin-bottom:16px">
-      <div class="detail-card-header">
-        <h3>Resumen ejecutivo (IA)</h3>
-        <button type="button" id="btnCerrarResumenEjecutivo" class="btn-ghost">✕</button>
-      </div>
-      <p id="resumenEjecutivoStatus" class="muted small hidden"></p>
-      <p id="resumenEjecutivoContenido" style="white-space:pre-wrap"></p>
-    </div>
-    <div id="filtroEstadoNotas" class="estado-segmented" role="tablist" aria-label="Filtrar por avance del trámite">
-      <button type="button" class="es-btn is-active" data-estado="pendientes">Pendientes</button>
-      <button type="button" class="es-btn" data-estado="concluidas">Concluidas</button>
-      <button type="button" class="es-btn" data-estado="todas">Todas</button>
-    </div>
     <div class="table-wrap">
       <table>
         <thead>
@@ -156,6 +135,60 @@
         <tbody id="notasTableBody"></tbody>
       </table>
       <p id="notasEmpty" class="muted hidden">No hay notas informativas registradas.</p>
+    </div>
+  </section>
+
+  <!-- SEGUIMIENTO: BUSCAR / FILTRAR / EXPORTAR / RESUMEN IA -->
+  <section id="view-seguimiento" class="view hidden">
+    <div class="view-header">
+      <div>
+        <h2>Seguimiento</h2>
+        <p class="muted view-subtitle">Busque, filtre por fecha o avance, exporte a Excel o pida el resumen ejecutivo con IA.</p>
+      </div>
+      <div class="view-actions">
+        <button id="btnExportarExcel" class="btn-secondary">Exportar a Excel</button>
+        <button id="btnResumenEjecutivo" class="btn-secondary">✨ Resumen ejecutivo IA</button>
+      </div>
+    </div>
+    <div id="panelBusquedaNotas" class="search-panel">
+      <input id="searchNotas" type="search" placeholder="Buscar por nombre, apellido o N.º de nota..." />
+      <label class="inline-filter">Desde <input id="filtroDesde" type="date" /></label>
+      <label class="inline-filter">Hasta <input id="filtroHasta" type="date" /></label>
+      <button id="btnLimpiarFiltroFecha" class="btn-ghost">Limpiar</button>
+    </div>
+    <div id="filtroEstadoNotas" class="estado-segmented" role="tablist" aria-label="Filtrar por avance del trámite">
+      <button type="button" class="es-btn is-active" data-estado="pendientes">Pendientes</button>
+      <button type="button" class="es-btn" data-estado="concluidas">Concluidas</button>
+      <button type="button" class="es-btn" data-estado="todas">Todas</button>
+    </div>
+    <div id="resumenEjecutivoPanel" class="detail-card hidden" style="margin-bottom:16px">
+      <div class="detail-card-header">
+        <h3>Resumen ejecutivo (IA)</h3>
+        <button type="button" id="btnCerrarResumenEjecutivo" class="btn-ghost">✕</button>
+      </div>
+      <p id="resumenEjecutivoStatus" class="muted small hidden"></p>
+      <p id="resumenEjecutivoContenido" style="white-space:pre-wrap"></p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Grado</th>
+            <th>Nombres y apellidos</th>
+            <th>Fecha/hora falta</th>
+            <th>N.º nota</th>
+            <th>Oficial</th>
+            <th>Fecha/hora reinc.</th>
+            <th>N.º nota reinc.</th>
+            <th>Tiempo ausente</th>
+            <th>Código infracción</th>
+            <th>Etapa actual</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="seguimientoTableBody"></tbody>
+      </table>
+      <p id="seguimientoEmpty" class="muted hidden">No hay expedientes que coincidan.</p>
     </div>
   </section>
 
