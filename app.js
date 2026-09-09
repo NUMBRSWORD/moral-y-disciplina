@@ -1027,16 +1027,16 @@ function renderNotasTable(list) {
     const puedeDescargar = puedeGenerarImputacion(n, state.efectivos);
     const puedeActa = puedeGenerarActaNoDescargo(n, state.efectivos);
     tr.innerHTML = `
-      <td>${escapeHtml(n.grado || "")}</td>
-      <td>${escapeHtml(nombreInvestigadoVisible(n))}</td>
-      <td>${formatFechaHora(n.fecha_falta, n.hora_falta)}</td>
-      <td>${escapeHtml(n.numero_nota_falta || "")}</td>
-      <td>${escapeHtml(n.oficial_constato || "-")}</td>
-      <td>${formatFechaHora(n.fecha_reincorporacion, n.hora_reincorporacion)}</td>
-      <td>${escapeHtml(n.numero_nota_reincorporacion || "-")}</td>
-      <td>${formatearHorasFalto(n) || "-"}</td>
-      <td>${escapeHtml(n.codigo_infraccion || "")}</td>
-      <td>${progresoNotaHtml(n)}</td>
+      <td class="case-grade">${escapeHtml(n.grado || "")}</td>
+      <td class="case-person"><strong>${escapeHtml(nombreInvestigadoVisible(n))}</strong></td>
+      <td class="case-date">${formatFechaHora(n.fecha_falta, n.hora_falta)}</td>
+      <td class="case-hide">${escapeHtml(n.numero_nota_falta || "")}</td>
+      <td class="case-hide">${escapeHtml(n.oficial_constato || "-")}</td>
+      <td class="case-hide">${formatFechaHora(n.fecha_reincorporacion, n.hora_reincorporacion)}</td>
+      <td class="case-hide">${escapeHtml(n.numero_nota_reincorporacion || "-")}</td>
+      <td class="case-hide">${formatearHorasFalto(n) || "-"}</td>
+      <td class="case-code">${escapeHtml(n.codigo_infraccion || "")}</td>
+      <td class="case-progress-cell">${progresoNotaHtml(n)}</td>
       <td class="row-actions"><div class="row-actions-inner">${puedeDescargar ? `<button type="button" class="btn-secondary btn-descargar-imputacion" title="Descargar Inicio de Imputación de Infracción Leve">⬇ Imputación</button>` : ""}${puedeActa ? `<button type="button" class="btn-secondary btn-descargar-acta" title="Descargar Acta de No Recepción de Descargos">⬇ Acta No Descargo</button>` : ""} <span class="row-chevron">›</span></div></td>
     `;
     tr.addEventListener("click", () => openNotaDetail(n.id));
