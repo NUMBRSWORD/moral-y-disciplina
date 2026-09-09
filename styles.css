@@ -130,6 +130,16 @@ main { max-width: 1500px; margin: 0 auto; padding: 24px 20px 60px; }
 .view-actions > button { white-space: nowrap; }
 .view-subtitle { margin: 5px 0 0; font-size: 0.9rem; }
 
+/* Panel plegable del buscador + filtros de fecha del dashboard */
+.search-panel {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  margin: 0 0 18px; padding: 14px 16px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.search-panel > input[type="search"] { flex: 1 1 260px; min-width: 0; }
+#btnToggleBusqueda.has-filtro { border-color: var(--accent); color: var(--accent); }
+#btnToggleBusqueda.has-filtro::after { content: " •"; }
+
 .quick-summary {
   display: flex; align-items: center; justify-content: space-between; gap: 24px;
   margin: 0 0 18px; padding: 18px 20px;
@@ -632,8 +642,10 @@ kbd {
   .view-header { flex-direction: column; align-items: stretch; gap: 12px; }
   .view-header h2 { font-size: 1.28rem; }
   .view-actions { display: grid; grid-template-columns: 1fr; gap: 8px; justify-content: stretch; }
-  .view-actions > input[type="search"], .view-actions > button, .view-actions > label.inline-filter { width: 100%; min-height: 46px; }
-  .view-actions > label.inline-filter { display: flex; align-items: center; gap: 6px; }
+  .view-actions > button { width: 100%; min-height: 46px; }
+  .search-panel { flex-direction: column; align-items: stretch; padding: 14px; }
+  .search-panel > input[type="search"], .search-panel > button, .search-panel > label.inline-filter { width: 100%; min-height: 46px; }
+  .search-panel > label.inline-filter { display: flex; align-items: center; gap: 6px; }
 
   /* Resumen rápido y paneles */
   .quick-summary { align-items: flex-start; flex-direction: column; gap: 14px; padding: 15px; border-radius: 14px; }
