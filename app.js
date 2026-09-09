@@ -36,6 +36,30 @@ const CATALOGO_ASISTENTE = ["L21", "L24"]
 
 const $ = (id) => document.getElementById(id);
 
+// ---------- Iconos SVG (trazo estilo Lucide, heredan color/tamaño del texto) ----------
+const ICONOS = {
+  buscar: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>',
+  ia: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
+  descargar: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
+  nube: '<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>',
+  firmar: '<path d="M15.707 21.293a1 1 0 0 1-1.414 0l-1.586-1.586a1 1 0 0 1 0-1.414l5.586-5.586a1 1 0 0 1 1.414 0l1.586 1.586a1 1 0 0 1 0 1.414z"/><path d="m18 13-1.375-6.874a1 1 0 0 0-.746-.776L3.235 2.028a1 1 0 0 0-1.207 1.207L5.35 15.879a1 1 0 0 0 .776.746L13 18"/><path d="m2.3 2.3 7.286 7.286"/><circle cx="11" cy="11" r="2"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  flecha: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  reloj: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  alerta: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  estrella: '<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.28 21.28a.53.53 0 0 1-.77-.56l.881-5.139a2.123 2.123 0 0 0-.611-1.879L2.043 9.865a.53.53 0 0 1 .294-.904l5.166-.755a2.122 2.122 0 0 0 1.597-1.16z"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  calendario: '<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>',
+  balanza: '<path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/>',
+  credencial: '<path d="M16 10h2"/><path d="M16 14h2"/><path d="M6.17 15a3 3 0 0 1 5.66 0"/><circle cx="9" cy="11" r="2"/><rect x="2" y="5" width="20" height="14" rx="2"/>',
+  carpeta: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+};
+function svgIco(nombre) {
+  const d = ICONOS[nombre];
+  if (!d) return "";
+  return `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+}
+
 // ---------- PWA: instalable en el celular ----------
 // Registra el service worker para que la app se pueda "Agregar a pantalla de
 // inicio" y abra como aplicación, tolerando conexión intermitente. No cambia
@@ -73,17 +97,26 @@ async function obtenerRegistroSW() {
   return registroSW;
 }
 
+// El panel de alertas se colapsa a una línea cuando no hay nada que hacer
+// (alertas ya activas, o el equipo no las soporta), para que el inicio muestre
+// primero el trabajo pendiente y no un aviso de configuración permanente.
+function compactarPanelMovil(compacto) {
+  $("panelMovil")?.classList.toggle("is-compacto", compacto);
+}
+
 async function prepararAlertasMovil() {
   const boton = $("btnActivarAlertas");
   if (!boton) return;
   if (!state.session || !state.cip) {
     boton.disabled = true;
     mostrarEstadoMovil("Ingrese con su CIP para recibir solamente sus alertas.");
+    compactarPanelMovil(true);
     return;
   }
   if (!("PushManager" in window) || !("Notification" in window)) {
     boton.disabled = true;
     mostrarEstadoMovil("Este navegador no permite alertas. Use Chrome en Android (o instale la app en iPhone 16.4+).");
+    compactarPanelMovil(true);
     return;
   }
   try {
@@ -91,19 +124,23 @@ async function prepararAlertasMovil() {
     if (Notification.permission === "denied") {
       boton.disabled = true;
       mostrarEstadoMovil("Las alertas están bloqueadas en este celular. Habilítelas desde los ajustes del navegador.");
+      compactarPanelMovil(true);
       return;
     }
     const suscripcion = await registro.pushManager.getSubscription();
     if (suscripcion && Notification.permission === "granted") {
       boton.disabled = true;
       mostrarEstadoMovil("✓ Alertas activas para su CIP en este celular.");
+      compactarPanelMovil(true);
     } else {
       boton.disabled = false;
       mostrarEstadoMovil("Instale la aplicación y active las alertas para recibir avisos de sus expedientes.");
+      compactarPanelMovil(false);
     }
   } catch (error) {
     console.error(error);
     mostrarEstadoMovil("No se pudieron preparar las alertas en este dispositivo.");
+    compactarPanelMovil(false);
   }
 }
 
@@ -111,6 +148,7 @@ async function activarAlertasMovil() {
   const boton = $("btnActivarAlertas");
   if (!state.cip || !state.session) { mostrarEstadoMovil("Ingrese con su CIP para activar las alertas."); return; }
   ocuparBoton(boton, true, "Activando...");
+  let exito = false;
   try {
     const permiso = await Notification.requestPermission();
     if (permiso !== "granted") { mostrarEstadoMovil("No se activaron las alertas: debe permitirlas en el navegador."); return; }
@@ -130,11 +168,13 @@ async function activarAlertasMovil() {
     }, { onConflict: "endpoint" });
     if (error) throw error;
     mostrarEstadoMovil("✓ Alertas activas para su CIP en este celular.");
+    exito = true;
   } catch (error) {
     console.error(error);
     mostrarEstadoMovil("No se pudieron activar las alertas. Intente de nuevo en unos minutos.");
   } finally {
     ocuparBoton(boton, false);
+    if (exito) { boton.disabled = true; compactarPanelMovil(true); }
   }
 }
 
@@ -184,14 +224,14 @@ function toast(mensaje, tipo = "error", ms = 6000) {
 function ocuparBoton(btn, ocupado, textoOcupado) {
   if (!btn) return;
   if (ocupado) {
-    if (btn.dataset.textoPrevio === undefined) btn.dataset.textoPrevio = btn.textContent;
+    if (btn.dataset.htmlPrevio === undefined) btn.dataset.htmlPrevio = btn.innerHTML;
     btn.disabled = true;
     btn.classList.add("is-busy");
     if (textoOcupado) btn.textContent = textoOcupado;
   } else {
     btn.disabled = false;
     btn.classList.remove("is-busy");
-    if (btn.dataset.textoPrevio !== undefined) { btn.textContent = btn.dataset.textoPrevio; delete btn.dataset.textoPrevio; }
+    if (btn.dataset.htmlPrevio !== undefined) { btn.innerHTML = btn.dataset.htmlPrevio; delete btn.dataset.htmlPrevio; }
   }
 }
 
@@ -842,24 +882,24 @@ async function renderExpedientesRemitidos() {
     const esPendiente = item.estado === "remitido";
     const driveConectado = $("btnConectarDrive") && /Reconectar/.test($("btnConectarDrive").textContent || "");
     const driveEstadoHtml = item.drive_expediente_url
-      ? `<span class="drive-estado ok">☁ Copiado a Drive${item.drive_sync_at ? ` · ${formatDate(String(item.drive_sync_at).slice(0, 10))}` : ""}</span>`
+      ? `<span class="drive-estado ok">${svgIco("nube")}Copiado a Drive${item.drive_sync_at ? ` · ${formatDate(String(item.drive_sync_at).slice(0, 10))}` : ""}</span>`
       : item.drive_error
-        ? `<span class="drive-estado error">☁ Error al respaldar: ${escapeHtml(item.drive_error)}</span>`
-        : `<span class="drive-estado pend">☁ Aún no respaldado en Drive</span>`;
+        ? `<span class="drive-estado error">${svgIco("nube")}Error al respaldar: ${escapeHtml(item.drive_error)}</span>`
+        : `<span class="drive-estado pend">${svgIco("nube")}Aún no respaldado en Drive</span>`;
     const driveBotonHtml = driveConectado
-      ? `<button type="button" class="btn-secondary btn-respaldar-drive" data-id="${item.id}">☁ Respaldar en Drive</button>`
+      ? `<button type="button" class="btn-secondary btn-respaldar-drive" data-id="${item.id}">${svgIco("nube")}Respaldar en Drive</button>`
       : "";
     return `<article class="reception-item estado-${escapeHtml(item.estado || "remitido")}">
       <div class="reception-item-main">
         <div class="reception-title-row"><span class="reception-status">${escapeHtml(etiquetaEstadoRecepcion(item.estado))}</span><strong>${escapeHtml(item.investigado_nombre || "Investigado sin nombre")}</strong></div>
-        <div class="reception-meta"><span>📅 Falta: ${formatDate(item.fecha_falta)}</span><span>⚖ ${escapeHtml(item.codigo_infraccion || "-")}</span><span>🪪 CIP investigado: ${escapeHtml(item.investigado_cip || "-")}</span></div>
+        <div class="reception-meta"><span>${svgIco("calendario")}Falta: ${formatDate(item.fecha_falta)}</span><span>${svgIco("balanza")}${escapeHtml(item.codigo_infraccion || "-")}</span><span>${svgIco("credencial")}CIP investigado: ${escapeHtml(item.investigado_cip || "-")}</span></div>
         <p class="muted small">Registrado por ${escapeHtml(item.remitido_por_cip ? `CIP ${item.remitido_por_cip}` : (item.remitido_por_email || "-"))} · ${formatFechaHora(String(item.remitido_at || "").slice(0, 10), String(item.remitido_at || "").slice(11, 16))}</p>
         ${item.observacion ? `<p class="reception-observation"><b>Observación:</b> ${escapeHtml(item.observacion)}</p>` : ""}
-        <p class="storage-path" title="Carpeta de archivo">📁 ${escapeHtml(item.carpeta_archivo || item.archivo_path || "")}</p>
+        <p class="storage-path" title="Carpeta de archivo">${svgIco("carpeta")}${escapeHtml(item.carpeta_archivo || item.archivo_path || "")}</p>
         ${driveEstadoHtml}
       </div>
       <div class="reception-actions"><div>${enlace}</div>${esPendiente
-        ? `<button type="button" class="btn-primary btn-recibir-expediente" data-id="${item.id}">✓ Recibir</button><button type="button" class="btn-secondary btn-observar-expediente" data-id="${item.id}">Observar</button>`
+        ? `<button type="button" class="btn-primary btn-recibir-expediente" data-id="${item.id}">${svgIco("check")}Recibir</button><button type="button" class="btn-secondary btn-observar-expediente" data-id="${item.id}">Observar</button>`
         : item.estado === "recibido" ? `<button type="button" class="btn-secondary btn-archivar-expediente" data-id="${item.id}">Archivar</button>` : ""}${driveBotonHtml}</div>
       <details class="reception-documents"><summary class="btn-secondary">HT y Oficio</summary><div class="reception-documents-body"><div><span class="muted small">HT</span>${enlaceHt}</div><div><span class="muted small">Oficio</span>${enlaceOficio}</div><form class="form-documentos-cierre" data-id="${item.id}"><label>Adjuntar HT<input type="file" class="f-ht-cierre" accept="application/pdf,image/*" /></label><label>Adjuntar Oficio<input type="file" class="f-oficio-cierre" accept="application/pdf,image/*" /></label><button type="submit" class="btn-secondary">Guardar documentos</button></form></div></details>
     </article>`;
@@ -975,10 +1015,10 @@ async function cargarEstadoRespaldoDrive() {
     const conexion = Array.isArray(data) ? data[0] : data;
     if (conexion?.conectado) {
       estado.textContent = `✓ Google Drive conectado${conexion.cuenta_google ? `: ${conexion.cuenta_google}` : ""}. Cada expediente firmado se copia a su Drive.`;
-      boton.textContent = "☁ Reconectar Drive";
+      boton.innerHTML = svgIco("nube") + "Reconectar Drive";
     } else {
       estado.textContent = "Google Drive aún no está conectado. Los expedientes ya están protegidos en Supabase.";
-      boton.textContent = "☁ Conectar Drive";
+      boton.innerHTML = svgIco("nube") + "Conectar Drive";
     }
   } catch (error) {
     console.warn("No se pudo consultar Drive:", error);
@@ -1049,7 +1089,7 @@ function renderNotasTable(list, tbodyId = "notasTableBody", emptyId = "notasEmpt
       <td class="case-hide">${formatearHorasFalto(n) || "-"}</td>
       <td class="case-code">${escapeHtml(n.codigo_infraccion || "")}</td>
       <td class="case-progress-cell">${progresoNotaHtml(n)}</td>
-      <td class="row-actions"><div class="row-actions-inner">${puedeDescargar ? `<button type="button" class="btn-secondary btn-descargar-imputacion" title="Descargar Inicio de Imputación de Infracción Leve">⬇ Imputación</button>` : ""}${puedeActa ? `<button type="button" class="btn-secondary btn-descargar-acta" title="Descargar Acta de No Recepción de Descargos">⬇ Acta No Descargo</button>` : ""} <span class="row-chevron">›</span></div></td>
+      <td class="row-actions"><div class="row-actions-inner">${puedeDescargar ? `<button type="button" class="btn-secondary btn-descargar-imputacion" title="Descargar Inicio de Imputación de Infracción Leve">${svgIco("descargar")}Imputación</button>` : ""}${puedeActa ? `<button type="button" class="btn-secondary btn-descargar-acta" title="Descargar Acta de No Recepción de Descargos">${svgIco("descargar")}Acta No Descargo</button>` : ""} <span class="row-chevron">›</span></div></td>
     `;
     tr.addEventListener("click", () => openNotaDetail(n.id));
     tr.querySelector(".btn-descargar-imputacion")?.addEventListener("click", (e) => {
@@ -1108,8 +1148,7 @@ function esResumenDescargoInsuficiente(texto) {
 }
 
 async function handleDescargarImputacion(nota, btnEl) {
-  const textoOriginal = btnEl ? btnEl.textContent : null;
-  if (btnEl) { btnEl.disabled = true; btnEl.classList.add("is-busy"); btnEl.textContent = "Generando..."; }
+  ocuparBoton(btnEl, true, "Generando...");
   try {
     const blob = await renderizarImputacionDocx(nota, state.efectivos);
     const nombreArchivo = nombreArchivoDocumento("IMPUTACION LEVE", nota);
@@ -1126,13 +1165,12 @@ async function handleDescargarImputacion(nota, btnEl) {
     console.error(err);
     alert(err.message || "No se pudo generar el documento de imputación.");
   } finally {
-    if (btnEl) { btnEl.disabled = false; btnEl.classList.remove("is-busy"); btnEl.textContent = textoOriginal; }
+    ocuparBoton(btnEl, false);
   }
 }
 
 async function handleDescargarActaNoDescargo(nota, btnEl) {
-  const textoOriginal = btnEl ? btnEl.textContent : null;
-  if (btnEl) { btnEl.disabled = true; btnEl.classList.add("is-busy"); btnEl.textContent = "Generando..."; }
+  ocuparBoton(btnEl, true, "Generando...");
   try {
     const blob = await renderizarActaNoDescargoDocx(nota, state.efectivos);
     const nombreArchivo = nombreArchivoDocumento("ACTA NO DESCARGO", nota);
@@ -1142,7 +1180,7 @@ async function handleDescargarActaNoDescargo(nota, btnEl) {
     console.error(err);
     alert(err.message || "No se pudo generar el acta de no descargo.");
   } finally {
-    if (btnEl) { btnEl.disabled = false; btnEl.classList.remove("is-busy"); btnEl.textContent = textoOriginal; }
+    ocuparBoton(btnEl, false);
   }
 }
 
@@ -1479,7 +1517,7 @@ async function renderNotaDetail(nota) {
         <h3>${escapeHtml(nombreInvestigadoVisible(nota, true))}</h3>
         ${codigoEsLeve ? `
           <button type="button" class="btn-ghost" id="btnRevisarImputacion">🔍 Revisar</button>
-          <button type="button" class="btn-secondary" id="btnDescargarImputacion" ${puedeDescargar ? "" : "disabled"}>⬇ Descargar Imputación</button>
+          <button type="button" class="btn-secondary" id="btnDescargarImputacion" ${puedeDescargar ? "" : "disabled"}>${svgIco("descargar")}Descargar Imputación</button>
         ` : ""}
       </div>
       ${siguienteAccionNotaHtml(nota, isAdmin, actaGenerada)}
@@ -1570,7 +1608,7 @@ async function renderNotaDetail(nota) {
         <p class="muted small">Plazo de descargo vence el ${formatDate(fechaLimite)}.</p>
         ${plazoVencido ? `
           <button type="button" class="btn-ghost" id="btnRevisarActa">🔍 Revisar</button>
-          ${puedeActa ? `<button type="button" class="btn-secondary" id="btnDescargarActaDetalle">⬇ Descargar Acta de No Descargo</button>` : `<p class="muted small">Venció el plazo, pero no se pudo ubicar en Efectivos al oficial o al investigado para generar el acta. Use «Revisar» para ver qué falta.</p>`}
+          ${puedeActa ? `<button type="button" class="btn-secondary" id="btnDescargarActaDetalle">${svgIco("descargar")}Descargar Acta de No Descargo</button>` : `<p class="muted small">Venció el plazo, pero no se pudo ubicar en Efectivos al oficial o al investigado para generar el acta. Use «Revisar» para ver qué falta.</p>`}
         ` : `<p class="muted small">El plazo aún está vigente, todavía no corresponde generar el acta.</p>`}
         <form id="descargoForm">
           <p class="muted small">Si el investigado sí presenta su descargo, regístrelo aquí para que ya no se genere el acta:</p>
@@ -1605,7 +1643,7 @@ async function renderNotaDetail(nota) {
           </label>
           ${nota.fecha_descargo ? `
           <div class="modal-actions" style="justify-content:flex-start; margin-bottom:10px">
-            <button type="button" class="btn-secondary" id="btnRedactarIA">✨ Analizar descargo y redactar con IA</button>
+            <button type="button" class="btn-secondary" id="btnRedactarIA">${svgIco("ia")}Analizar descargo y redactar con IA</button>
           </div>
           <p class="muted small">La IA elige el tercio y redacta el resumen del descargo y el análisis, usando las directivas internas activas como única fuente de reglas institucionales — si el descargo invoca algo que ninguna directiva regula, la IA lo dice en vez de inventarlo.</p>
           <p id="sancionIAStatus" class="muted small hidden"></p>
@@ -1640,7 +1678,7 @@ async function renderNotaDetail(nota) {
             <input type="file" id="fOrdenNotifArchivo" accept="application/pdf,image/*" required />
           </label>
           <div class="modal-actions" style="justify-content:flex-start; margin:8px 0">
-            <button type="button" class="btn-secondary" id="btnVerificarNotifIA">✨ Verificar con IA que esté completo</button>
+            <button type="button" class="btn-secondary" id="btnVerificarNotifIA">${svgIco("ia")}Verificar con IA que esté completo</button>
           </div>
           <p id="ordenNotifIAStatus" class="muted small hidden"></p>
           <label>Fecha de notificación (la completa la IA si la detecta; verifíquela)
@@ -3496,45 +3534,45 @@ function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
   const orden = !!nota.orden_sancion_generada_at;
   const notif = !!nota.orden_notificada_at;
 
-  let icono = "→";
+  let icono = "flecha";
   let titulo = "Complete los datos de la falta";
   let detalle = "Registre el código de infracción para poder continuar con el trámite.";
   let tono = "is-pending";
   if (!nota.codigo_infraccion) {
     // valores por defecto
   } else if (!leve) {
-    icono = "•"; titulo = "Falta grave o muy grave";
+    icono = "info"; titulo = "Falta grave o muy grave";
     detalle = "Este módulo automatiza los documentos de faltas leves. Continúe el trámite según el procedimiento que corresponde a este código.";
   } else if (!nota.fecha_reincorporacion) {
     titulo = "Registre la reincorporación";
     detalle = "Complete fecha, hora y N.º de nota de reincorporación para habilitar la Imputación.";
   } else if (!imputacion) {
-    icono = "⬇"; titulo = "Genere la Imputación"; tono = "is-ready";
+    icono = "descargar"; titulo = "Genere la Imputación"; tono = "is-ready";
     detalle = "Revise los datos y descargue la Imputación; su descarga fija la fecha de notificación y arranca el plazo del descargo.";
   } else if (!nota.fecha_descargo && !plazoVencido) {
-    icono = "◷"; titulo = "Espere o registre el descargo";
+    icono = "reloj"; titulo = "Espere o registre el descargo";
     detalle = `El plazo está vigente hasta el ${formatDate(fechaLimiteDescargo(nota))}. Si el investigado lo presenta antes, regístrelo aquí.`;
   } else if (plazoVencido && !actaGenerada) {
-    icono = "!"; titulo = "Genere el Acta de No Descargo"; tono = "is-urgent";
+    icono = "alerta"; titulo = "Genere el Acta de No Descargo"; tono = "is-urgent";
     detalle = "El plazo venció sin descargo registrado. Genere el acta antes de continuar con la evaluación.";
   } else if (listoDescargo && !hayEvaluacion) {
-    icono = "✦"; titulo = "Complete la evaluación"; tono = "is-ready";
+    icono = "estrella"; titulo = "Complete la evaluación"; tono = "is-ready";
     detalle = "Resuma el descargo, redacte el análisis y elija el tercio de la sanción.";
   } else if (listoDescargo && !orden) {
-    icono = "⬇"; titulo = "Genere la Orden de Sanción"; tono = "is-ready";
+    icono = "descargar"; titulo = "Genere la Orden de Sanción"; tono = "is-ready";
     detalle = "La evaluación está lista. Revise los datos y descargue la Orden.";
   } else if (orden && !notif) {
-    icono = "✍"; titulo = "Cargue el expediente firmado";
+    icono = "firmar"; titulo = "Cargue el expediente firmado";
     detalle = "Suba el legajo completo firmado en un PDF (la IA revisa que esté completo) y confirme la fecha de notificación.";
   } else if (orden && notif && isAdmin) {
-    icono = "✓"; titulo = "Registre el expediente cerrado"; tono = "is-ready";
+    icono = "check"; titulo = "Registre el expediente cerrado"; tono = "is-ready";
     detalle = "En Recepción, adjunte el expediente firmado, la HT y el Oficio para archivarlo y respaldarlo en Drive.";
   } else if (orden && notif) {
-    icono = "✓"; titulo = "Trámite concluido"; tono = "is-done";
+    icono = "check"; titulo = "Trámite concluido"; tono = "is-done";
     detalle = "La Orden fue notificada. El cierre administrativo lo realiza el administrador en Recepción.";
   }
   return `<aside class="next-action ${tono}" aria-label="Siguiente acción recomendada">
-    <span class="next-action-icon">${icono}</span>
+    <span class="next-action-icon">${svgIco(icono)}</span>
     <div><span class="eyebrow">Siguiente paso</span><strong>${escapeHtml(titulo)}</strong><p>${escapeHtml(detalle)}</p></div>
   </aside>`;
 }

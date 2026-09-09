@@ -49,7 +49,7 @@
       <button class="tab-btn admin-only hidden" data-view="historial">Historial</button>
     </nav>
     <div class="user-box">
-      <button id="btnPaletaBuscar" class="btn-ghost palette-hint" type="button" title="Buscar persona o expediente (Ctrl + K)">🔎 Buscar <kbd>Ctrl</kbd><kbd>K</kbd></button>
+      <button id="btnPaletaBuscar" class="btn-ghost palette-hint" type="button" title="Buscar persona o expediente (Ctrl + K)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>Buscar <kbd>Ctrl</kbd><kbd>K</kbd></button>
       <span id="userEmail"></span>
       <span id="userRole" class="badge"></span>
       <button id="btnLogout" class="btn-ghost">Salir</button>
@@ -93,18 +93,6 @@
       </div>
     </div>
     <div id="notasResumenRapido" class="quick-summary" aria-live="polite"></div>
-    <section id="panelMovil" class="mobile-app-panel" aria-labelledby="panelMovilTitulo">
-      <div class="mobile-app-icon" aria-hidden="true">📲</div>
-      <div class="mobile-app-copy">
-        <span class="eyebrow">Aplicación móvil</span>
-        <h3 id="panelMovilTitulo">Alertas de expedientes pendientes</h3>
-        <p id="estadoAlertasMovil" class="muted small">Instale la aplicación y active las alertas para recibir avisos de sus expedientes en el celular.</p>
-      </div>
-      <div class="mobile-app-actions">
-        <button id="btnInstalarApp" type="button" class="btn-secondary hidden">Instalar app</button>
-        <button id="btnActivarAlertas" type="button" class="btn-primary">Activar alertas</button>
-      </div>
-    </section>
     <section id="bandejaAcciones" class="action-tray hidden" aria-labelledby="bandejaAccionesTitulo">
       <div class="action-tray-header">
         <div>
@@ -136,6 +124,18 @@
       </table>
       <p id="notasEmpty" class="muted hidden">No hay notas informativas registradas.</p>
     </div>
+    <section id="panelMovil" class="mobile-app-panel" aria-labelledby="panelMovilTitulo">
+      <div class="mobile-app-icon" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg></div>
+      <div class="mobile-app-copy">
+        <span class="eyebrow">Aplicación móvil</span>
+        <h3 id="panelMovilTitulo">Alertas de expedientes pendientes</h3>
+        <p id="estadoAlertasMovil" class="muted small">Instale la aplicación y active las alertas para recibir avisos de sus expedientes en el celular.</p>
+      </div>
+      <div class="mobile-app-actions">
+        <button id="btnInstalarApp" type="button" class="btn-secondary hidden">Instalar app</button>
+        <button id="btnActivarAlertas" type="button" class="btn-primary">Activar alertas</button>
+      </div>
+    </section>
   </section>
 
   <!-- SEGUIMIENTO: BUSCAR / FILTRAR / EXPORTAR / RESUMEN IA -->
@@ -147,7 +147,7 @@
       </div>
       <div class="view-actions">
         <button id="btnExportarExcel" class="btn-secondary">Exportar a Excel</button>
-        <button id="btnResumenEjecutivo" class="btn-secondary">✨ Resumen ejecutivo IA</button>
+        <button id="btnResumenEjecutivo" class="btn-secondary"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>Resumen ejecutivo IA</button>
       </div>
     </div>
     <div id="panelBusquedaNotas" class="search-panel">
@@ -231,7 +231,7 @@
       </div>
       <div class="view-actions">
         <input id="buscarRecepcion" type="search" placeholder="Buscar por nombre, CIP o código..." />
-        <button id="btnConectarDrive" type="button" class="btn-secondary">☁ Conectar Drive</button>
+        <button id="btnConectarDrive" type="button" class="btn-secondary"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>Conectar Drive</button>
         <button id="btnRegistrarExpedienteRecibido" type="button" class="btn-primary">+ Registrar expediente recibido</button>
       </div>
     </div>
@@ -585,7 +585,7 @@
 <div id="paletaBuscar" class="modal-overlay palette-overlay hidden">
   <div class="palette">
     <div class="palette-input-row">
-      <span class="palette-icon">🔎</span>
+      <span class="palette-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></span>
       <input type="text" id="paletaInput" placeholder="Nombre, apellido, CIP o DNI…" autocomplete="off" spellcheck="false" />
       <button type="button" id="paletaCerrar" class="btn-ghost">Esc</button>
     </div>
