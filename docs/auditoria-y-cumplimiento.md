@@ -26,7 +26,13 @@ Revisión de código, base de datos, seguridad, accesibilidad y operación de
 | 6 políticas RLS re-evaluaban `auth.uid()` por fila (advisor `auth_rls_initplan`) | Envueltas en `(select auth.uid())` | migración `auditoria_rls_initplan` |
 | Funciones `SECURITY DEFINER` ejecutables por `anon` (advisor 0028) | `REVOKE EXECUTE … FROM anon` en las 10 funciones de `public`; `authenticated` conserva solo lo que la app y la RLS necesitan (verificado con `has_function_privilege`) | migración `auditoria_revoke_anon_execute` + `auditoria_revoke_anon_explicito` |
 | Emojis 🌙/☀️ y 🔎/✨/☁/⬇/✍/📲 como iconografía | Set SVG (helper `svgIco`) | commits previos + este |
-| **`Ctrl+K` mostraba CIP y DNI de todo el personal a cualquier oficial** (Ley N° 29733) | El padrón completo ahora **solo lo ve el administrador**: RLS `efectivos` SELECT = `es_admin() OR cip = cip_actual()` (el oficial solo recibe su propia ficha, la única que necesita para sus documentos), y la sección "Personas" del buscador se oculta a los no-admin | migración `efectivos_solo_admin_ve_padron` + app.js |
+| **`Ctrl+K` mostraba CIP y DNI de todo el personal a cualquier oficial** (Ley N° 29733) | El padrón completo ahora **solo lo ve el administrador**: RLS `efectivos` SELECT = `es_admin() OR cip = cip_actual()` (el oficial solo recibe su propia ficha, la única que necesita para sus documentos), y la sección "Personas" del buscador se oculta a los no-admin. El CIP del investigado se guardó en cada nota (`investigado_cip`) para que la Orden de Sanción se genere sin consultar el padrón. | migración `efectivos_solo_admin_ve_padron` + `notas_denormaliza_investigado_cip` + app.js |
+
+> Nota operativa: el backfill del `investigado_cip` emparejó 92 de 111 notas por
+> nombre exacto. En las 19 restantes (nombre con otra grafía, o investigado que no
+> está en Efectivos) un oficial no-admin no podrá generar la Orden hasta que el
+> **administrador** corrija el nombre en Efectivos / en la nota, o genere él la
+> Orden (el admin siempre puede, usa el padrón completo).
 
 ### Aceptados (riesgo asumido por el responsable — dejar constancia por escrito)
 
