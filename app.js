@@ -23,6 +23,7 @@ const state = {
   currentNotaId: null,
   directivas: [],
   expedientesRemitidos: [],
+  rolesServicio: [],
   asistenteHistorial: [],
 };
 
@@ -377,7 +378,7 @@ function showView(id) {
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $(id).classList.remove("hidden");
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-  const map = { "view-dashboard": "dashboard", "view-seguimiento": "seguimiento", "view-efectivos": "efectivos", "view-directivas": "directivas", "view-agenda": "agenda", "view-documentos": "documentos", "view-recepcion": "recepcion", "view-panel": "panel", "view-historial": "historial" };
+  const map = { "view-dashboard": "dashboard", "view-seguimiento": "seguimiento", "view-efectivos": "efectivos", "view-roles": "roles", "view-directivas": "directivas", "view-agenda": "agenda", "view-documentos": "documentos", "view-recepcion": "recepcion", "view-panel": "panel", "view-historial": "historial" };
   if (map[id]) {
     document.querySelector(`.tab-btn[data-view="${map[id]}"]`)?.classList.add("active");
   }
@@ -389,6 +390,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (target === "dashboard") { showView("view-dashboard"); loadNotas(); }
     if (target === "seguimiento") { showView("view-seguimiento"); loadNotas(); }
     if (target === "efectivos") { showView("view-efectivos"); loadEfectivos(); }
+    if (target === "roles") { showView("view-roles"); loadRolesServicio(); }
     if (target === "directivas") { showView("view-directivas"); loadDirectivasView(); }
     if (target === "agenda") { showView("view-agenda"); renderAgendaNotas(); }
     if (target === "documentos") { showView("view-documentos"); loadDocumentosGenerados(); }
@@ -597,6 +599,9 @@ async function onAuthed(session) {
   // cuanto se abra el modal de Orden de Sanción o el asistente flotante,
   // sin retrasar el inicio de sesión.
   loadDirectivasView();
+  // Roles de servicio: el admin los usa desde el modal de nueva nota para
+  // resolver el puesto por fecha sin visitar la pestaña.
+  if (state.role === "admin") loadRolesServicio();
 }
 
 function onSignedOut() {
@@ -2283,6 +2288,100 @@ $("searchEfectivos").addEventListener("input", (e) => {
   renderEfectivosTable(filtered);
 });
 
+// ---------- Roles de servicio (biblioteca por día) ----------
+async function loadRolesServicio() {
+  const { data, error } = await supabase
+    .from("roles_servicio").select("*").order("fecha", { ascending: false });
+  if (error) { console.error(error); toast("No se pudieron cargar los roles de servicio: " + error.message); return; }
+  state.rolesServicio = data || [];
+  await renderRolesServicioTabla();
+}
+
+function rolGuardadoParaFecha(fecha) {
+  if (!fecha) return null;
+  return (state.rolesServicio || []).find((r) => {
+    const fin = r.fecha_fin || r.fecha;
+    return fecha >= r.fecha && fecha <= fin;
+  }) || null;
+}
+
+async function renderRolesServicioTabla() {
+  const tbody = $("rolesTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  $("rolesEmpty").classList.toggle("hidden", state.rolesServicio.length > 0);
+  for (const r of state.rolesServicio) {
+    const link = await fileLinkHtml("notas", r.archivo_path, r.archivo_nombre);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${formatDate(r.fecha)}${r.fecha_fin && r.fecha_fin !== r.fecha ? ` a ${formatDate(r.fecha_fin)}` : ""}</td>
+      <td>${link}</td>
+      <td class="small muted">${formatDate(String(r.created_at || "").slice(0, 10))}</td>
+      <td class="row-actions"><button type="button" class="btn-danger btn-borrar-rol" data-id="${r.id}" data-path="${escapeHtml(r.archivo_path)}">Eliminar</button></td>
+    `;
+    tbody.appendChild(tr);
+  }
+  tbody.querySelectorAll(".btn-borrar-rol").forEach((b) => b.addEventListener("click", () => eliminarRolServicio(b.dataset.id, b.dataset.path)));
+}
+
+async function eliminarRolServicio(id, path) {
+  if (!confirm("¿Eliminar este rol de servicio?")) return;
+  const { error } = await supabase.from("roles_servicio").delete().eq("id", id);
+  if (error) { toast("No se pudo eliminar: " + error.message); return; }
+  if (path) { try { await supabase.storage.from("notas").remove([path]); } catch (_) {} }
+  loadRolesServicio();
+}
+
+$("rolForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errEl = $("rolFormError");
+  const statusEl = $("rolFormStatus");
+  errEl.classList.add("hidden");
+  statusEl.classList.remove("hidden");
+  const fecha = $("rolFecha").value;
+  const file = $("rolArchivo").files[0];
+  if (!fecha || !file) { errEl.textContent = "Elija la fecha y el archivo del rol."; errEl.classList.remove("hidden"); statusEl.classList.add("hidden"); return; }
+  const btn = e.target.querySelector("button[type=submit]");
+  ocuparBoton(btn, true, "Subiendo...");
+  try {
+    statusEl.textContent = "Leyendo el rol...";
+    const esPdf = file.type === "application/pdf";
+    const texto = esPdf
+      ? await extractPdfText(file, (m) => { statusEl.textContent = m; })
+      : await extractImagenTextoConOcr(file, (m) => { statusEl.textContent = m; });
+    // Deja que la IA confirme el periodo del encabezado (por si el usuario
+    // eligió mal la fecha); si falla, se queda con la fecha elegida.
+    let fechaFin = null;
+    try {
+      const meta = await extraerPuestoRolIA(texto, "(verificación de fecha)", fecha);
+      if (meta?.fecha_rol_inicio && meta.fecha_rol_inicio !== fecha) {
+        statusEl.textContent = `⚠ El encabezado del rol dice ${formatDate(meta.fecha_rol_inicio)}. Se guardará con la fecha que usted eligió (${formatDate(fecha)}); corríjala si no coincide.`;
+      }
+      fechaFin = meta?.fecha_rol_fin || null;
+    } catch (_) { /* opcional */ }
+
+    const path = `roles_servicio/${fecha}_${Date.now()}_${segmentoRuta(file.name, "rol.pdf")}`;
+    const { error: upErr } = await supabase.storage.from("notas").upload(path, file, { upsert: false });
+    if (upErr) throw upErr;
+    const { error } = await supabase.from("roles_servicio").upsert({
+      fecha, fecha_fin: fechaFin, archivo_path: path, archivo_nombre: file.name,
+      texto_extraido: texto, subido_por: state.session.user.id, updated_at: new Date().toISOString(),
+    }, { onConflict: "fecha" });
+    if (error) throw error;
+    e.target.reset();
+    statusEl.textContent = "✓ Rol guardado.";
+    setTimeout(() => statusEl.classList.add("hidden"), 2500);
+    await loadRolesServicio();
+  } catch (err) {
+    console.error(err);
+    errEl.textContent = "No se pudo subir el rol: " + (err.message || err);
+    errEl.classList.remove("hidden");
+    statusEl.classList.add("hidden");
+  } finally {
+    ocuparBoton(btn, false);
+  }
+});
+
 // Alta manual de un efectivo al padrón (solo admin; la RLS ya lo exige).
 function cerrarModalEfectivo() { $("modalNuevoEfectivo").classList.add("hidden"); }
 $("btnNuevoEfectivo")?.addEventListener("click", () => {
@@ -2604,6 +2703,62 @@ async function extraerPuestoRolIA(texto, persona, fecha) {
   return data;
 }
 
+// Igual que autocompletarPuestoDesdeRol pero usando el rol ya guardado en la
+// biblioteca para la fecha de la falta (no hace falta volver a subir el PDF).
+async function resolverPuestoDesdeRolGuardado() {
+  if ($("fArchivoRol").files[0]) return; // si subió un archivo manual, ese manda
+  const statusEl = $("rolAutoStatus");
+  const fechaFalta = $("fFechaFalta").value;
+  const persona = `${$("fApellidos").value.trim()} ${$("fNombres").value.trim()}`.trim();
+  if (!fechaFalta || !persona) return;
+  const rol = rolGuardadoParaFecha(fechaFalta);
+  if (!rol) {
+    statusEl.classList.remove("hidden");
+    statusEl.textContent = `No hay rol de servicio guardado para el ${formatDate(fechaFalta)}. Súbalo en la pestaña «Roles» o adjunte uno aquí.`;
+    return;
+  }
+  if (!rol.texto_extraido) return;
+  statusEl.classList.remove("hidden");
+  statusEl.textContent = "Buscando el puesto en el rol guardado...";
+  try {
+    const r = await extraerPuestoRolIA(rol.texto_extraido, persona, fechaFalta);
+    aplicarResultadoRolIA(r, fechaFalta);
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "No se pudo consultar el rol guardado: " + (err.message || err);
+  }
+}
+
+// Vuelca el resultado de la IA del rol en el campo de puesto + avisos.
+function aplicarResultadoRolIA(r, fechaFalta) {
+  const statusEl = $("rolAutoStatus");
+  const ini = r?.fecha_rol_inicio || null;
+  const fin = r?.fecha_rol_fin || ini;
+  if (ini && (fechaFalta < ini || fechaFalta > fin)) {
+    $("fPuestoRol").value = "";
+    const rango = fin && fin !== ini ? `${formatDate(ini)} a ${formatDate(fin)}` : formatDate(ini);
+    statusEl.textContent = `⚠ Ese rol es del ${rango} y la falta es del ${formatDate(fechaFalta)}. Use el rol de servicio de ese día.`;
+    return;
+  }
+  const SIT = {
+    falto: "⚠ Figura en «FALTOS AL SERVICIO» del rol.",
+    descanso_medico: "⚠ Figura con DESCANSO MÉDICO — ¿corresponde imputar?",
+    vacaciones: "⚠ Figura de VACACIONES — la ausencia podría estar justificada.",
+    permiso: "⚠ Figura con PERMISO — la ausencia podría estar justificada.",
+    franco: "⚠ Figura de FRANCO.",
+    suspension: "⚠ Figura con SUSPENSIÓN TEMPORAL DEL SERVICIO.",
+  };
+  if (r?.puesto) {
+    $("fPuestoRol").value = r.puesto;
+    statusEl.textContent = `✓ Puesto detectado (rol del ${formatDate(ini || fechaFalta)}): ${r.puesto}. Verifíquelo.`;
+  } else if (r?.encontrado && r?.situacion && SIT[r.situacion]) {
+    $("fPuestoRol").value = "";
+    statusEl.textContent = `${SIT[r.situacion]}${r.detalle_novedad ? " (" + r.detalle_novedad + ")" : ""}`;
+  } else {
+    statusEl.textContent = "No se ubicó a esta persona en el rol de ese día. Escriba el puesto a mano si corresponde.";
+  }
+}
+
 async function autocompletarPuestoDesdeRol(file) {
   if (!file) return;
   const statusEl = $("rolAutoStatus");
@@ -2619,40 +2774,10 @@ async function autocompletarPuestoDesdeRol(file) {
       : await extractImagenTextoConOcr(file, (m) => { statusEl.textContent = m; });
     statusEl.textContent = "Buscando el puesto en el rol con IA...";
     const r = await extraerPuestoRolIA(texto, persona, fechaFalta);
-
-    // El rol es de un día concreto. Si el que se subió no cubre la fecha de la
-    // falta, NO se usa nada de él (ni el puesto ni la situación): un rol de otro
-    // día diría que la persona está de vacaciones/servicio cuando el día de la
-    // falta era distinto.
-    const ini = r?.fecha_rol_inicio || null;
-    const fin = r?.fecha_rol_fin || ini;
-    if (ini && (fechaFalta < ini || fechaFalta > fin)) {
-      $("fPuestoRol").value = "";
-      const rango = fin && fin !== ini ? `${formatDate(ini)} a ${formatDate(fin)}` : formatDate(ini);
-      statusEl.textContent = `⚠ Este rol es del ${rango} y la falta es del ${formatDate(fechaFalta)}. Suba el rol de servicio de ese día — no se tomó nada de este.`;
-      return;
-    }
-    if (!ini) {
+    if (!r?.fecha_rol_inicio) {
       statusEl.textContent = "⚠ No se pudo leer la fecha del rol. Verifique usted que sea el del día de la falta.";
     }
-
-    const SIT = {
-      falto: "⚠ Figura en «FALTOS AL SERVICIO» del rol.",
-      descanso_medico: "⚠ Figura con DESCANSO MÉDICO — ¿corresponde imputar?",
-      vacaciones: "⚠ Figura de VACACIONES — la ausencia podría estar justificada.",
-      permiso: "⚠ Figura con PERMISO — la ausencia podría estar justificada.",
-      franco: "⚠ Figura de FRANCO.",
-      suspension: "⚠ Figura con SUSPENSIÓN TEMPORAL DEL SERVICIO.",
-    };
-    if (r?.puesto) {
-      $("fPuestoRol").value = r.puesto;
-      statusEl.textContent = `✓ Puesto detectado (rol del ${formatDate(ini || fechaFalta)}): ${r.puesto}. Verifíquelo.`;
-    } else if (r?.encontrado && r?.situacion && SIT[r.situacion]) {
-      $("fPuestoRol").value = "";
-      statusEl.textContent = `${SIT[r.situacion]}${r.detalle_novedad ? " (" + r.detalle_novedad + ")" : ""}`;
-    } else {
-      statusEl.textContent = "No se ubicó a esta persona en el rol de ese día. Escriba el puesto a mano si corresponde.";
-    }
+    aplicarResultadoRolIA(r, fechaFalta);
   } catch (err) {
     console.error(err);
     statusEl.textContent = "No se pudo leer el rol de servicio: " + (err.message || err);
@@ -2932,6 +3057,10 @@ $("fArchivoNota").addEventListener("change", (e) => {
 $("fArchivoRol").addEventListener("change", (e) => {
   autocompletarPuestoDesdeRol(e.target.files[0]);
 });
+// Al fijar la fecha de la falta (o cambiar de investigado), si NO se adjuntó un
+// rol manual, se usa el rol de esa fecha ya guardado en la biblioteca.
+$("fFechaFalta").addEventListener("change", () => { void resolverPuestoDesdeRolGuardado(); });
+$("fApellidos").addEventListener("blur", () => { void resolverPuestoDesdeRolGuardado(); });
 
 $("notaForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -3385,7 +3514,20 @@ $("btnGuardarFaltasLote").addEventListener("click", async (e) => {
     if (!upErr) archivosSubidos.set(r.file, { path, nombre: r.file.name });
   }
 
-  const payloads = registros.map((r) => {
+  // Puesto según el rol guardado de cada fecha (best-effort; si no hay rol o la
+  // IA no ubica a la persona, queda null y se puede completar luego en el detalle).
+  const puestosRol = await Promise.all(registros.map(async (r) => {
+    const rol = rolGuardadoParaFecha(r.fecha_falta);
+    if (!rol?.texto_extraido) return null;
+    try {
+      const ia = await extraerPuestoRolIA(rol.texto_extraido, `${r.apellidos} ${r.nombres}`, r.fecha_falta);
+      const ini = ia?.fecha_rol_inicio, fin = ia?.fecha_rol_fin || ini;
+      if (ini && (r.fecha_falta < ini || r.fecha_falta > fin)) return null;
+      return ia?.puesto || null;
+    } catch { return null; }
+  }));
+
+  const payloads = registros.map((r, i) => {
     const ef = ubicarInvestigadoEnEfectivos(r, state.efectivos);
     return {
       grado: r.grado,
@@ -3401,6 +3543,7 @@ $("btnGuardarFaltasLote").addEventListener("click", async (e) => {
       oficial_constato_cip: buscarOficialConstato(r.oficial_constato, state.efectivos)?.cip || null,
       investigado_cip: ef?.cip || null,
       investigado_dni: ef?.dni || null,
+      puesto_rol: puestosRol[i],
       created_by: state.session.user.id,
     };
   });
