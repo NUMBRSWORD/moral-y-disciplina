@@ -2610,13 +2610,32 @@ async function autocompletarPuestoDesdeRol(file) {
   statusEl.classList.remove("hidden");
   const persona = `${$("fApellidos").value.trim()} ${$("fNombres").value.trim()}`.trim();
   if (!persona) { statusEl.textContent = "Complete primero los apellidos y nombres del investigado."; return; }
+  const fechaFalta = $("fFechaFalta").value;
+  if (!fechaFalta) { statusEl.textContent = "Complete primero la fecha de la falta: el rol debe ser el de ESE día."; return; }
   try {
     const esPdf = file.type === "application/pdf";
     const texto = esPdf
       ? await extractPdfText(file, (m) => { statusEl.textContent = m; })
       : await extractImagenTextoConOcr(file, (m) => { statusEl.textContent = m; });
     statusEl.textContent = "Buscando el puesto en el rol con IA...";
-    const r = await extraerPuestoRolIA(texto, persona, $("fFechaFalta").value || null);
+    const r = await extraerPuestoRolIA(texto, persona, fechaFalta);
+
+    // El rol es de un día concreto. Si el que se subió no cubre la fecha de la
+    // falta, NO se usa nada de él (ni el puesto ni la situación): un rol de otro
+    // día diría que la persona está de vacaciones/servicio cuando el día de la
+    // falta era distinto.
+    const ini = r?.fecha_rol_inicio || null;
+    const fin = r?.fecha_rol_fin || ini;
+    if (ini && (fechaFalta < ini || fechaFalta > fin)) {
+      $("fPuestoRol").value = "";
+      const rango = fin && fin !== ini ? `${formatDate(ini)} a ${formatDate(fin)}` : formatDate(ini);
+      statusEl.textContent = `⚠ Este rol es del ${rango} y la falta es del ${formatDate(fechaFalta)}. Suba el rol de servicio de ese día — no se tomó nada de este.`;
+      return;
+    }
+    if (!ini) {
+      statusEl.textContent = "⚠ No se pudo leer la fecha del rol. Verifique usted que sea el del día de la falta.";
+    }
+
     const SIT = {
       falto: "⚠ Figura en «FALTOS AL SERVICIO» del rol.",
       descanso_medico: "⚠ Figura con DESCANSO MÉDICO — ¿corresponde imputar?",
@@ -2627,12 +2646,12 @@ async function autocompletarPuestoDesdeRol(file) {
     };
     if (r?.puesto) {
       $("fPuestoRol").value = r.puesto;
-      statusEl.textContent = `✓ Puesto detectado: ${r.puesto}. Verifíquelo.`;
+      statusEl.textContent = `✓ Puesto detectado (rol del ${formatDate(ini || fechaFalta)}): ${r.puesto}. Verifíquelo.`;
     } else if (r?.encontrado && r?.situacion && SIT[r.situacion]) {
       $("fPuestoRol").value = "";
       statusEl.textContent = `${SIT[r.situacion]}${r.detalle_novedad ? " (" + r.detalle_novedad + ")" : ""}`;
     } else {
-      statusEl.textContent = "No se ubicó a esta persona en el rol. Escriba el puesto a mano si corresponde.";
+      statusEl.textContent = "No se ubicó a esta persona en el rol de ese día. Escriba el puesto a mano si corresponde.";
     }
   } catch (err) {
     console.error(err);
