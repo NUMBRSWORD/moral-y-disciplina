@@ -1,6 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs";
-import * as XLSX from "https://esm.sh/xlsx@0.18.5";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, VAPID_PUBLIC_KEY } from "./config.js";
 import saveAs from "https://esm.sh/file-saver@2.0.5";
 import { renderizarImputacionDocx, construirDatosImputacion, puedeGenerarImputacion, buscarOficialConstato, tokens } from "./lib/imputacion.js";
@@ -9,7 +8,6 @@ import { renderizarOrdenSancionDocx, construirDatosOrdenSancion, puedeGenerarOrd
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva, subirArchivoDirectiva } from "./lib/directivas.js";
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible } from "./lib/utils.js";
-import { Chart } from "https://esm.sh/chart.js@4.4.4/auto";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
 
@@ -36,6 +34,11 @@ const CATALOGO_ASISTENTE = ["L21", "L24"]
 
 const $ = (id) => document.getElementById(id);
 
+// Todo <button> sin type explícito dentro de un <form> actúa como "submit" y
+// puede enviar el formulario sin querer. Los que deben enviar ya declaran
+// type="submit"; al resto se le fija type="button".
+document.querySelectorAll("button:not([type])").forEach((b) => b.setAttribute("type", "button"));
+
 // ---------- Iconos SVG (trazo estilo Lucide, heredan color/tamaño del texto) ----------
 const ICONOS = {
   buscar: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>',
@@ -53,6 +56,8 @@ const ICONOS = {
   balanza: '<path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/>',
   credencial: '<path d="M16 10h2"/><path d="M16 14h2"/><path d="M6.17 15a3 3 0 0 1 5.66 0"/><circle cx="9" cy="11" r="2"/><rect x="2" y="5" width="20" height="14" rx="2"/>',
   carpeta: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  luna: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  sol: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
 };
 function svgIco(nombre) {
   const d = ICONOS[nombre];
@@ -349,8 +354,10 @@ function activarAutoguardadoSancion(nota) {
 // guardada, así que aquí solo hace falta sincronizar el ícono y el clic.
 function actualizarIconoTema() {
   const claro = document.documentElement.getAttribute("data-theme") === "light";
-  $("btnTemaToggle").textContent = claro ? "☀️" : "🌙";
-  $("btnTemaToggle").title = claro ? "Cambiar a tema oscuro" : "Cambiar a tema claro";
+  $("btnTemaToggle").innerHTML = svgIco(claro ? "sol" : "luna");
+  const texto = claro ? "Cambiar a tema oscuro" : "Cambiar a tema claro";
+  $("btnTemaToggle").title = texto;
+  $("btnTemaToggle").setAttribute("aria-label", texto);
 }
 actualizarIconoTema();
 $("btnTemaToggle").addEventListener("click", () => {
@@ -1163,7 +1170,7 @@ async function handleDescargarImputacion(nota, btnEl) {
     }
   } catch (err) {
     console.error(err);
-    alert(err.message || "No se pudo generar el documento de imputación.");
+    toast(err.message || "No se pudo generar el documento de imputación.");
   } finally {
     ocuparBoton(btnEl, false);
   }
@@ -1178,7 +1185,7 @@ async function handleDescargarActaNoDescargo(nota, btnEl) {
     registrarVersionDocumento(nota.id, "acta_no_descargo", blob, nombreArchivo);
   } catch (err) {
     console.error(err);
-    alert(err.message || "No se pudo generar el acta de no descargo.");
+    toast(err.message || "No se pudo generar el acta de no descargo.");
   } finally {
     ocuparBoton(btnEl, false);
   }
@@ -1273,8 +1280,17 @@ $("btnCerrarResumenEjecutivo").addEventListener("click", () => {
   $("resumenEjecutivoPanel").classList.add("hidden");
 });
 
-$("btnExportarExcel").addEventListener("click", () => {
-  if (!notasVisibles.length) { alert("No hay notas para exportar (revise el buscador)."); return; }
+$("btnExportarExcel").addEventListener("click", async (e) => {
+  if (!notasVisibles.length) { toast("No hay expedientes para exportar (revise los filtros).", "info"); return; }
+  const btn = e.currentTarget;
+  ocuparBoton(btn, true, "Generando...");
+  let XLSX;
+  try {
+    XLSX = await import("https://esm.sh/xlsx@0.18.5");
+  } catch (err) {
+    console.error(err); toast("No se pudo cargar el generador de Excel. Revise la conexión.");
+    ocuparBoton(btn, false); return;
+  }
   const filas = notasVisibles.map((n) => ({
     "Grado": n.grado || "",
     "Nombres y apellidos": nombreInvestigadoVisible(n),
@@ -1293,6 +1309,7 @@ $("btnExportarExcel").addEventListener("click", () => {
   XLSX.utils.book_append_sheet(libro, hoja, "Notas informativas");
   const fecha = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(libro, `notas_informativas_${fecha}.xlsx`);
+  ocuparBoton(btn, false);
 });
 
 // ---------- Revisar antes de generar (control de calidad + vista previa) ----------
@@ -1539,7 +1556,7 @@ async function renderNotaDetail(nota) {
                 <input type="text" id="fCodigoInfraccionEdit" value="${escapeHtml(nota.codigo_infraccion || "")}" placeholder="Pendiente" />
                 <button type="submit" class="btn-secondary">Guardar</button>
               </form>
-              <p id="codigoInfraccionMsg" class="error small hidden"></p>
+              <p id="codigoInfraccionMsg" class="error small hidden" role="alert"></p>
             ` : escapeHtml(nota.codigo_infraccion || "Pendiente")}
           </div>
         </div>
@@ -1574,7 +1591,7 @@ async function renderNotaDetail(nota) {
           </label>
           <label>Archivo de reincorporación<input type="file" id="rArchivo" accept="application/pdf,image/*" /></label>
           <p id="reincAutoStatus" class="muted small hidden"></p>
-          <p id="reincError" class="error hidden"></p>
+          <p id="reincError" class="error hidden" role="alert"></p>
           <button type="submit" class="btn-primary">Registrar reincorporación</button>
         </form>` : ""}
       `}
@@ -1590,7 +1607,7 @@ async function renderNotaDetail(nota) {
             <input type="date" id="fNotificacion" value="${nota.imputacion_generada_at ? nota.imputacion_generada_at.slice(0, 10) : ""}" required />
             <button type="submit" class="btn-secondary">Guardar</button>
           </form>
-          <p id="notificacionMsg" class="error small hidden"></p>
+          <p id="notificacionMsg" class="error small hidden" role="alert"></p>
         </div>
       </div>
       ${!nota.imputacion_generada_at ? `
@@ -1617,7 +1634,7 @@ async function renderNotaDetail(nota) {
             <label>N.º de documento<input type="text" id="dNumero" /></label>
           </div>
           <label>Archivo del descargo<input type="file" id="dArchivo" /></label>
-          <p id="descargoError" class="error hidden"></p>
+          <p id="descargoError" class="error hidden" role="alert"></p>
           <button type="submit" class="btn-secondary">Registrar descargo recibido</button>
         </form>
       `}
@@ -1652,7 +1669,7 @@ async function renderNotaDetail(nota) {
             <button type="button" class="btn-secondary" id="btnTextoEstandarSinDescargo">Poner texto estándar (sin descargo)</button>
           </div>
           <p class="muted small">Sin descargo: elija el tercio arriba y el texto se completa solo; o use el botón para ponerlo/reemplazarlo. Puede editarlo antes de generar.</p>`}
-          <p id="sancionError" class="error hidden"></p>
+          <p id="sancionError" class="error hidden" role="alert"></p>
           <div class="modal-actions" style="justify-content:flex-start">
             <button type="button" class="btn-ghost" id="btnRevisarOrden">🔍 Revisar antes de generar</button>
             <button type="submit" class="btn-primary">Guardar y descargar Orden de Sanción</button>
@@ -1684,7 +1701,7 @@ async function renderNotaDetail(nota) {
           <label>Fecha de notificación (la completa la IA si la detecta; verifíquela)
             <input type="date" id="fOrdenNotifFecha" required />
           </label>
-          <p id="ordenNotifError" class="error hidden"></p>
+          <p id="ordenNotifError" class="error hidden" role="alert"></p>
           <button type="submit" class="btn-primary">Registrar</button>
         </form>
       `}
@@ -1710,7 +1727,7 @@ async function renderNotaDetail(nota) {
           </div>
           <label>Días de sanción<input type="number" id="eDias" min="0" /></label>
           <label>Archivo del expediente<input type="file" id="eArchivo" /></label>
-          <p id="expError" class="error hidden"></p>
+          <p id="expError" class="error hidden" role="alert"></p>
           <button type="submit" class="btn-primary">Registrar expediente</button>
         </form>
       `}
@@ -2122,7 +2139,7 @@ async function submitCodigoInfraccion(e, notaId) {
 async function eliminarNota(id) {
   if (!confirm("¿Eliminar esta nota informativa? Esta acción no se puede deshacer.")) return;
   const { error } = await supabase.from("notas_informativas").delete().eq("id", id);
-  if (error) { alert("No se pudo eliminar: " + error.message); return; }
+  if (error) { toast("No se pudo eliminar: " + error.message); return; }
   showView("view-dashboard");
   loadNotas();
 }
@@ -3349,7 +3366,7 @@ function renderDirectivasList(list) {
         await eliminarDirectiva(supabase, id);
         loadDirectivasView();
       } catch (err) {
-        alert("No se pudo eliminar: " + (err.message || err));
+        toast("No se pudo eliminar: " + (err.message || err));
       }
     });
   });
@@ -3613,13 +3630,27 @@ function colorTema(varName) {
 
 const MESES_CORTO_PANEL = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
-function renderPanel() {
+// Chart.js solo se descarga la primera vez que se abre el Panel (no en cada
+// carga de la app). Se cachea la promesa para no repetir la descarga.
+let _chartMod = null;
+function cargarChart() {
+  if (!_chartMod) _chartMod = import("https://esm.sh/chart.js@4.4.4/auto").then((m) => m.Chart || m.default);
+  return _chartMod;
+}
+
+async function renderPanel() {
   const notas = state.notas;
   $("panelEmpty").classList.toggle("hidden", notas.length > 0);
   $("panelContenido").classList.toggle("hidden", notas.length === 0);
   Object.values(chartsPanel).forEach((c) => c.destroy());
   chartsPanel = {};
   if (!notas.length) return;
+  let Chart;
+  try {
+    Chart = await cargarChart();
+  } catch (err) {
+    console.error(err); toast("No se pudieron cargar los gráficos. Revise la conexión."); return;
+  }
 
   const text = colorTema("--text");
   const textMuted = colorTema("--text-muted");
