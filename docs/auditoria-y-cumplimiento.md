@@ -26,14 +26,10 @@ Revisión de código, base de datos, seguridad, accesibilidad y operación de
 | 6 políticas RLS re-evaluaban `auth.uid()` por fila (advisor `auth_rls_initplan`) | Envueltas en `(select auth.uid())` | migración `auditoria_rls_initplan` |
 | Funciones `SECURITY DEFINER` ejecutables por `anon` (advisor 0028) | `REVOKE EXECUTE … FROM anon` en las 10 funciones de `public`; `authenticated` conserva solo lo que la app y la RLS necesitan (verificado con `has_function_privilege`) | migración `auditoria_revoke_anon_execute` + `auditoria_revoke_anon_explicito` |
 | Emojis 🌙/☀️ y 🔎/✨/☁/⬇/✍/📲 como iconografía | Set SVG (helper `svgIco`) | commits previos + este |
+| **`Ctrl+K` mostraba CIP y DNI de todo el personal a cualquier oficial** (Ley N° 29733) | El padrón completo ahora **solo lo ve el administrador**: RLS `efectivos` SELECT = `es_admin() OR cip = cip_actual()` (el oficial solo recibe su propia ficha, la única que necesita para sus documentos), y la sección "Personas" del buscador se oculta a los no-admin | migración `efectivos_solo_admin_ve_padron` + app.js |
 
 ### Aceptados (riesgo asumido por el responsable — dejar constancia por escrito)
 
-- **`Ctrl+K` muestra CIP y DNI de todo el personal a cualquier oficial.** Es una
-  decisión operativa del comisario para agilizar la búsqueda. Para una auditoría
-  formal de protección de datos (Ley N° 29733) debe existir un **acta firmada**
-  que lo autorice como tratamiento necesario y proporcional, con la lista de
-  usuarios con acceso.
 - **Funciones RPC ejecutables por usuarios autenticados (advisor 0029).** Es el
   diseño: cada RPC se autoprotege con `es_admin() OR oficial_constato_cip =
   cip_actual()`. No se revoca porque el cliente las necesita.
@@ -69,9 +65,10 @@ Revisión de código, base de datos, seguridad, accesibilidad y operación de
 >    - **Administrador** (jefe de la unidad o quien designe): acceso total.
 >    - **Oficial instructor**: solo los expedientes donde figura como oficial
 >      que constató la falta.
->    - La **búsqueda rápida (Ctrl+K)** muestra CIP y DNI de todo el personal a
->      cualquier usuario autenticado. Se autoriza como medida necesaria para la
->      identificación durante el trámite. Usuarios con acceso: __________________.
+>    - El **padrón de personal** (nombres, grado, CIP, DNI de todos) solo es
+>      accesible para los usuarios con rol administrador. Un oficial no-admin
+>      solo ve su propia ficha y sus propios expedientes.
+>      Administradores designados: __________________________________________.
 > 5. **Conservación.** Los expedientes y archivos generados se conservan por
 >    ______ años desde el cierre (sugerido: el plazo de prescripción del régimen
 >    disciplinario + 1 año). Vencido el plazo se anonimizan o eliminan.
