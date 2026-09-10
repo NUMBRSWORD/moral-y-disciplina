@@ -485,6 +485,7 @@ label.checkbox-row input { width: auto; margin: 0; }
 }
 .tema-toggle:hover { border-color: var(--accent); }
 .tema-toggle:active { transform: scale(0.93); }
+.tema-toggle .ico { width: 18px; height: 18px; }
 
 /* Identidad / marca de uso interno */
 .brand-titles { display: flex; flex-direction: column; line-height: 1.2; }

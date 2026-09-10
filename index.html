@@ -14,10 +14,12 @@
 <link rel="apple-touch-icon" href="icon.svg" />
 <link rel="stylesheet" href="styles.css" />
 <script>
-  // Aplica el tema guardado ANTES de pintar la página, para que no se vea
-  // un parpadeo del tema oscuro por defecto al cargar con "claro" elegido.
+  // Aplica el tema ANTES de pintar la página para que no haya parpadeo.
+  // Prioridad: elección guardada del usuario > preferencia del sistema
+  // operativo (prefers-color-scheme) > oscuro por defecto.
   (function () {
     var t = localStorage.getItem("tema");
+    if (!t && window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) t = "light";
     if (t === "light") document.documentElement.setAttribute("data-theme", "light");
   })();
 </script>
@@ -26,7 +28,7 @@
 
 <a href="#main" class="skip-link">Saltar al contenido principal</a>
 
-<button id="btnTemaToggle" class="tema-toggle" type="button" title="Cambiar tema claro/oscuro">🌙</button>
+<button id="btnTemaToggle" class="tema-toggle" type="button" aria-label="Cambiar tema claro/oscuro" title="Cambiar tema claro/oscuro"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
 
 <header id="topbar" class="hidden">
   <div class="topbar-inner">
@@ -74,7 +76,7 @@
       <label>Clave
         <input type="password" id="loginPassword" required autocomplete="current-password" />
       </label>
-      <p id="loginError" class="error hidden"></p>
+      <p id="loginError" class="error hidden" role="alert"></p>
       <button type="submit" class="btn-primary">Ingresar</button>
     </form>
   </section>
@@ -250,7 +252,7 @@
         <label>Observación de recepción (opcional)
           <textarea id="fObservacionExpedienteRecibido" rows="2" placeholder="Ej.: recibido físicamente y digitalizado."></textarea>
         </label>
-        <p id="registroRecepcionError" class="error hidden"></p>
+        <p id="registroRecepcionError" class="error hidden" role="alert"></p>
         <button type="submit" class="btn-primary">Registrar expediente</button>
       </form>
     </section>
@@ -429,7 +431,7 @@
         <div id="multiplesEfectivosList"></div>
       </div>
 
-      <p id="notaFormError" class="error hidden"></p>
+      <p id="notaFormError" class="error hidden" role="alert"></p>
       <div class="modal-actions">
         <button type="button" id="btnCancelarNota" class="btn-ghost">Cancelar</button>
         <button type="submit" class="btn-primary">Guardar nota</button>
@@ -452,7 +454,7 @@
       <p class="muted small">Se crea una nota por cada efectivo detectado. El código de infracción se completa después, en cada expediente. No se vuelven a crear las faltas que ya estén registradas.</p>
       <p id="flStatus" class="muted small hidden"></p>
       <div id="flLista"></div>
-      <p id="flError" class="error hidden"></p>
+      <p id="flError" class="error hidden" role="alert"></p>
       <div class="modal-actions">
         <button type="button" id="btnCancelarFaltasLote" class="btn-ghost">Cancelar</button>
         <button type="button" id="btnGuardarFaltasLote" class="btn-primary">Registrar faltas</button>
@@ -474,7 +476,7 @@
       </label>
       <p id="rlStatus" class="muted small hidden"></p>
       <div id="rlLista"></div>
-      <p id="rlError" class="error hidden"></p>
+      <p id="rlError" class="error hidden" role="alert"></p>
       <div class="modal-actions">
         <button type="button" id="btnCancelarReincLote" class="btn-ghost">Cancelar</button>
         <button type="button" id="btnGuardarReincLote" class="btn-primary">Registrar reincorporación</button>
@@ -507,7 +509,7 @@
           <input type="text" id="efDni" inputmode="numeric" required />
         </label>
       </div>
-      <p id="efectivoFormError" class="error hidden"></p>
+      <p id="efectivoFormError" class="error hidden" role="alert"></p>
       <div class="modal-actions">
         <button type="button" id="btnCancelarEfectivo" class="btn-ghost">Cancelar</button>
         <button type="submit" class="btn-primary">Guardar efectivo</button>
@@ -539,7 +541,7 @@
         <textarea id="dvContenido" rows="10" required placeholder="Pegue aquí el texto de la directiva, o suba un archivo arriba para extraerlo automáticamente y luego revíselo."></textarea>
       </label>
       <label class="checkbox-row"><input type="checkbox" id="dvActiva" checked /> Activa (la IA la usa como contexto)</label>
-      <p id="directivaError" class="error hidden"></p>
+      <p id="directivaError" class="error hidden" role="alert"></p>
       <div class="modal-actions">
         <button type="button" id="btnCancelarDirectiva" class="btn-ghost">Cancelar</button>
         <button type="submit" class="btn-primary">Guardar directiva</button>
