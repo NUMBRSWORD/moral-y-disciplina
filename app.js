@@ -1570,6 +1570,18 @@ async function renderNotaDetail(nota) {
           </div>
         </div>
         <div class="detail-field"><div class="label">Oficial que constató</div><div class="value">${escapeHtml(nota.oficial_constato || "-")}</div></div>
+        <div class="detail-field">
+          <div class="label">Puesto / servicio según el rol</div>
+          <div class="value">
+            ${isAdmin ? `
+              <form id="puestoRolForm" class="inline-edit">
+                <input type="text" id="fPuestoRolEdit" value="${escapeHtml(nota.puesto_rol || "")}" placeholder="Sin registrar" />
+                <button type="submit" class="btn-secondary">Guardar</button>
+              </form>
+              <p id="puestoRolMsg" class="error small hidden" role="alert"></p>
+            ` : escapeHtml(nota.puesto_rol || "-")}
+          </div>
+        </div>
         <div class="detail-field"><div class="label">Archivo de la nota</div><div class="value">${notaArchivo}</div></div>
       </div>
       ${isAdmin ? `<button class="btn-danger" id="btnEliminarNota">Eliminar nota</button>` : ""}
@@ -1826,6 +1838,7 @@ async function renderNotaDetail(nota) {
   if (isAdmin) {
     $("btnEliminarNota")?.addEventListener("click", () => eliminarNota(nota.id));
     $("codigoInfraccionForm")?.addEventListener("submit", (e) => submitCodigoInfraccion(e, nota.id));
+    $("puestoRolForm")?.addEventListener("submit", (e) => submitPuestoRol(e, nota.id));
     $("reincForm")?.addEventListener("submit", (e) => submitReincorporacion(e, nota.id));
     $("rArchivo")?.addEventListener("change", (e) => autocompletarReincorporacion(e.target.files[0]));
     $("expForm")?.addEventListener("submit", (e) => submitExpediente(e, nota.id));
@@ -2145,6 +2158,16 @@ async function submitCodigoInfraccion(e, notaId) {
   openNotaDetail(notaId);
 }
 
+async function submitPuestoRol(e, notaId) {
+  e.preventDefault();
+  const msgEl = $("puestoRolMsg");
+  msgEl.classList.add("hidden");
+  const puesto_rol = $("fPuestoRolEdit").value.trim() || null;
+  const { error } = await supabase.from("notas_informativas").update({ puesto_rol }).eq("id", notaId);
+  if (error) { msgEl.textContent = "Error: " + error.message; msgEl.classList.remove("hidden"); return; }
+  openNotaDetail(notaId);
+}
+
 async function eliminarNota(id) {
   if (!confirm("¿Eliminar esta nota informativa? Esta acción no se puede deshacer.")) return;
   const { error } = await supabase.from("notas_informativas").delete().eq("id", id);
@@ -2316,6 +2339,7 @@ $("btnNuevaNota").addEventListener("click", () => {
   $("lookupResult").classList.add("hidden");
   $("notaFormError").classList.add("hidden");
   $("pdfAutoStatus").classList.add("hidden");
+  $("rolAutoStatus").classList.add("hidden");
   pdfCandidates = [];
   renderCandidatesChecklist();
   // Quien registra la nota suele ser el mismo oficial que constató --
@@ -2567,6 +2591,53 @@ async function extraerDatosNotaIA(texto, tipo) {
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
   return data;
+}
+
+// A partir del texto del rol de servicio y del nombre del investigado, la IA
+// devuelve el puesto/servicio que tenía asignado ese día.
+async function extraerPuestoRolIA(texto, persona, fecha) {
+  const { data, error } = await supabase.functions.invoke("extraer-nota-informativa", {
+    body: { tipo: "rol_servicio", texto, persona, fecha },
+  });
+  if (error) throw new Error(await mensajeErrorFuncion(error));
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+async function autocompletarPuestoDesdeRol(file) {
+  if (!file) return;
+  const statusEl = $("rolAutoStatus");
+  statusEl.classList.remove("hidden");
+  const persona = `${$("fApellidos").value.trim()} ${$("fNombres").value.trim()}`.trim();
+  if (!persona) { statusEl.textContent = "Complete primero los apellidos y nombres del investigado."; return; }
+  try {
+    const esPdf = file.type === "application/pdf";
+    const texto = esPdf
+      ? await extractPdfText(file, (m) => { statusEl.textContent = m; })
+      : await extractImagenTextoConOcr(file, (m) => { statusEl.textContent = m; });
+    statusEl.textContent = "Buscando el puesto en el rol con IA...";
+    const r = await extraerPuestoRolIA(texto, persona, $("fFechaFalta").value || null);
+    const SIT = {
+      falto: "⚠ Figura en «FALTOS AL SERVICIO» del rol.",
+      descanso_medico: "⚠ Figura con DESCANSO MÉDICO — ¿corresponde imputar?",
+      vacaciones: "⚠ Figura de VACACIONES — la ausencia podría estar justificada.",
+      permiso: "⚠ Figura con PERMISO — la ausencia podría estar justificada.",
+      franco: "⚠ Figura de FRANCO.",
+      suspension: "⚠ Figura con SUSPENSIÓN TEMPORAL DEL SERVICIO.",
+    };
+    if (r?.puesto) {
+      $("fPuestoRol").value = r.puesto;
+      statusEl.textContent = `✓ Puesto detectado: ${r.puesto}. Verifíquelo.`;
+    } else if (r?.encontrado && r?.situacion && SIT[r.situacion]) {
+      $("fPuestoRol").value = "";
+      statusEl.textContent = `${SIT[r.situacion]}${r.detalle_novedad ? " (" + r.detalle_novedad + ")" : ""}`;
+    } else {
+      statusEl.textContent = "No se ubicó a esta persona en el rol. Escriba el puesto a mano si corresponde.";
+    }
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "No se pudo leer el rol de servicio: " + (err.message || err);
+  }
 }
 
 function normalizarResultadoFaltaIA(ia) {
@@ -2839,6 +2910,9 @@ $("btnBuscarEfectivo").addEventListener("click", async () => {
 $("fArchivoNota").addEventListener("change", (e) => {
   autocompletarDesdeArchivo(e.target.files[0]);
 });
+$("fArchivoRol").addEventListener("change", (e) => {
+  autocompletarPuestoDesdeRol(e.target.files[0]);
+});
 
 $("notaForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -2880,9 +2954,10 @@ $("notaForm").addEventListener("submit", async (e) => {
   // El CIP/DNI del investigado se guarda ya en la nota, con el padrón que solo
   // el admin (quien crea las notas) tiene cargado. Así la Orden de Sanción se
   // puede generar después sin volver a consultar el padrón completo.
+  const puestoRol = $("fPuestoRol").value.trim() || null;
   const payloads = personas.map((p) => {
     const ef = ubicarInvestigadoEnEfectivos(p, state.efectivos);
-    return { ...compartido, ...p, investigado_cip: ef?.cip || null, investigado_dni: ef?.dni || null };
+    return { ...compartido, ...p, investigado_cip: ef?.cip || null, investigado_dni: ef?.dni || null, puesto_rol: puestoRol };
   });
 
   const btn = e.target.querySelector("button[type=submit]");
