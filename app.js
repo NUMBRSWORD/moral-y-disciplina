@@ -401,12 +401,12 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 $("btnVolverDashboard").addEventListener("click", () => { showView("view-dashboard"); loadNotas(); });
 
 // ---------- Paleta de búsqueda global (Ctrl + K) ----------
-// Reemplaza tener Efectivos como pestaña siempre visible: cualquiera puede
-// buscar una persona por nombre/apellido/CIP/DNI (si escribe solo un apellido
-// salen todas las personas que lo tienen) y saltar a un expediente, sin
-// recorrer pestañas. Trabaja sobre lo ya cargado en memoria (state.efectivos
-// es el padrón completo; state.notas ya viene filtrado por RLS a lo que este
+// Salta rápido a un expediente sin recorrer pestañas. Trabaja sobre lo ya
+// cargado en memoria (state.notas ya viene filtrado por RLS a lo que este
 // usuario puede ver), así que no dispara consultas nuevas.
+// El padrón de personal (sección "Personas", con CIP/DNI de todos) SOLO se
+// muestra al administrador; el oficial solo ve sus propios expedientes. La RLS
+// de la tabla `efectivos` además impide que un no-admin reciba el padrón.
 const paleta = {
   overlay: $("paletaBuscar"),
   input: $("paletaInput"),
@@ -417,6 +417,11 @@ const paleta = {
 
 function abrirPaleta() {
   if (!state.session) return;
+  // El padrón de personal (con DNI/CIP de todos) solo lo consulta el admin;
+  // el oficial solo busca entre SUS expedientes.
+  paleta.input.placeholder = state.role === "admin"
+    ? "Nombre, apellido, CIP o DNI…"
+    : "Nombre o N.º de nota de sus expedientes…";
   paleta.overlay.classList.remove("hidden");
   paleta.input.value = "";
   renderPaleta("");
@@ -439,12 +444,16 @@ function renderPaleta(raw) {
   paleta.items = [];
   paleta.activo = -1;
 
+  const esAdmin = state.role === "admin";
+
   if (!qTokens.length && qDigits.length < 3) {
-    paleta.resultados.innerHTML = `<p class="palette-empty">Escriba un nombre, apellido, CIP o DNI.</p>`;
+    paleta.resultados.innerHTML = `<p class="palette-empty">${esAdmin ? "Escriba un nombre, apellido, CIP o DNI." : "Escriba un nombre o el N.º de nota de uno de sus expedientes."}</p>`;
     return;
   }
 
-  const efectivos = (state.efectivos || []).filter((ef) => {
+  // El padrón de personal (Personas) solo lo consulta el administrador. El
+  // oficial solo busca entre sus expedientes.
+  const efectivos = !esAdmin ? [] : (state.efectivos || []).filter((ef) => {
     const textoTokens = tokens(`${ef.apellidos_nombres || ""} ${ef.grado || ""}`);
     const porNombre = qTokens.length && coincidePorTokens(qTokens, textoTokens);
     const porDoc = qDigits.length >= 3 &&
@@ -2868,7 +2877,13 @@ $("notaForm").addEventListener("submit", async (e) => {
     });
   }
 
-  const payloads = personas.map((p) => ({ ...compartido, ...p }));
+  // El CIP/DNI del investigado se guarda ya en la nota, con el padrón que solo
+  // el admin (quien crea las notas) tiene cargado. Así la Orden de Sanción se
+  // puede generar después sin volver a consultar el padrón completo.
+  const payloads = personas.map((p) => {
+    const ef = ubicarInvestigadoEnEfectivos(p, state.efectivos);
+    return { ...compartido, ...p, investigado_cip: ef?.cip || null, investigado_dni: ef?.dni || null };
+  });
 
   const btn = e.target.querySelector("button[type=submit]");
   ocuparBoton(btn, true, "Guardando...");
@@ -3276,20 +3291,25 @@ $("btnGuardarFaltasLote").addEventListener("click", async (e) => {
     if (!upErr) archivosSubidos.set(r.file, { path, nombre: r.file.name });
   }
 
-  const payloads = registros.map((r) => ({
-    grado: r.grado,
-    apellidos: r.apellidos,
-    nombres: r.nombres,
-    fecha_falta: r.fecha_falta,
-    hora_falta: r.hora_falta,
-    numero_nota_falta: r.numero_nota_falta,
-    codigo_infraccion: "",
-    oficial_constato: r.oficial_constato,
-    // Igual que en la creación individual: es lo que usa la RLS para decidir
-    // qué notas ve cada oficial.
-    oficial_constato_cip: buscarOficialConstato(r.oficial_constato, state.efectivos)?.cip || null,
-    created_by: state.session.user.id,
-  }));
+  const payloads = registros.map((r) => {
+    const ef = ubicarInvestigadoEnEfectivos(r, state.efectivos);
+    return {
+      grado: r.grado,
+      apellidos: r.apellidos,
+      nombres: r.nombres,
+      fecha_falta: r.fecha_falta,
+      hora_falta: r.hora_falta,
+      numero_nota_falta: r.numero_nota_falta,
+      codigo_infraccion: "",
+      oficial_constato: r.oficial_constato,
+      // Igual que en la creación individual: es lo que usa la RLS para decidir
+      // qué notas ve cada oficial.
+      oficial_constato_cip: buscarOficialConstato(r.oficial_constato, state.efectivos)?.cip || null,
+      investigado_cip: ef?.cip || null,
+      investigado_dni: ef?.dni || null,
+      created_by: state.session.user.id,
+    };
+  });
 
   const { data: inserted, error } = await supabase
     .from("notas_informativas")
