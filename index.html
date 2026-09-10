@@ -43,6 +43,7 @@
       <button class="tab-btn active" data-view="dashboard">Expedientes</button>
       <button id="tabSeguimiento" class="tab-btn" data-view="seguimiento">Seguimiento</button>
       <button class="tab-btn admin-only hidden" data-view="efectivos">Efectivos</button>
+      <button class="tab-btn admin-only hidden" data-view="roles">Roles</button>
       <button class="tab-btn admin-only hidden" data-view="directivas">Directivas</button>
       <button class="tab-btn admin-only hidden" data-view="agenda">Agenda</button>
       <button class="tab-btn admin-only hidden" data-view="documentos">Documentos</button>
@@ -289,6 +290,45 @@
         <tbody id="efectivosTableBody"></tbody>
       </table>
       <p id="efectivosEmpty" class="muted hidden">Sin resultados.</p>
+    </div>
+  </section>
+
+  <!-- ROLES DE SERVICIO -->
+  <section id="view-roles" class="view hidden">
+    <div class="view-header">
+      <div>
+        <h2>Roles de servicio</h2>
+        <p class="muted view-subtitle">Suba el rol de cada día. Al registrar una falta, la app toma el puesto del investigado del rol de esa fecha, sin volver a subir el archivo.</p>
+      </div>
+    </div>
+    <section class="detail-card">
+      <form id="rolForm" class="grid-2">
+        <label>Fecha del rol (día en que arranca el servicio)
+          <input type="date" id="rolFecha" required />
+        </label>
+        <label>Archivo del rol (PDF/imagen)
+          <input type="file" id="rolArchivo" accept="application/pdf,image/*" required />
+        </label>
+        <p id="rolFormError" class="error hidden" role="alert"></p>
+        <div class="modal-actions" style="justify-content:flex-start; grid-column:1/-1; margin:0">
+          <button type="submit" class="btn-primary">Subir rol</button>
+        </div>
+        <p id="rolFormStatus" class="muted small hidden" style="grid-column:1/-1"></p>
+      </form>
+    </section>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Archivo</th>
+            <th>Subido</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rolesTableBody"></tbody>
+      </table>
+      <p id="rolesEmpty" class="muted hidden">Todavía no hay roles de servicio cargados.</p>
     </div>
   </section>
 
