@@ -361,6 +361,33 @@
     <p id="panelEmpty" class="muted hidden">Todavía no hay notas informativas para mostrar métricas.</p>
     <div id="panelContenido">
       <div class="panel-stats" id="panelStats"></div>
+
+      <section class="detail-card" id="resumenMensualCard">
+        <div class="detail-card-header">
+          <div>
+            <h3>Resumen mensual</h3>
+            <span class="muted small">Faltas del mes, por código de infracción y personal reiterativo</span>
+          </div>
+          <select id="resumenMesSelect"></select>
+        </div>
+        <div class="panel-stats" id="resumenMensualStats"></div>
+        <p class="eyebrow">Por código de infracción</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Código</th><th>Cantidad</th></tr></thead>
+            <tbody id="resumenCodigoBody"></tbody>
+          </table>
+        </div>
+        <p class="eyebrow" style="margin-top:20px">Reiterativos — más de 3 faltas en el mes <span class="muted small" style="text-transform:none; letter-spacing:0; font-weight:400">(sin nombre)</span></p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Caso</th><th>Grado</th><th>Faltas</th><th>Códigos del mes</th></tr></thead>
+            <tbody id="resumenReiterativosBody"></tbody>
+          </table>
+        </div>
+        <p id="resumenReiterativosEmpty" class="muted small hidden">Nadie superó las 3 faltas este mes.</p>
+      </section>
+
       <div class="panel-charts">
         <div class="detail-card panel-chart-card">
           <h3>Casos por estado del trámite</h3>

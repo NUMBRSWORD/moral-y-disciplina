@@ -296,6 +296,13 @@ tbody tr:last-child td { border-bottom: none; }
 .pill-warning { background: rgba(217, 154, 43, 0.16); color: #e5ad53; }
 .pill-danger { background: var(--danger-soft); color: var(--danger); }
 .pill-neutral { background: rgba(147, 163, 179, 0.15); color: var(--text-muted); }
+
+/* Resumen mensual (panel): código de infracción y reiterativos anónimos */
+#resumenCodigoBody tr.total td { font-weight: 700; background: var(--bg-elev); }
+#resumenReiterativosBody .case-title { color: var(--accent); font-weight: 700; white-space: nowrap; }
+#resumenReiterativosBody .codes-cell { display: flex; flex-wrap: wrap; gap: 6px; }
+#resumenMesSelect { min-width: 160px; }
+
 .case-progress { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 168px; }
 .case-progress-steps { display: flex; align-items: center; }
 .case-progress-steps span { position: relative; display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid var(--border); border-radius: 50%; color: var(--text-muted); font-size: 0.64rem; font-weight: 700; background: var(--bg-card); }
