@@ -3887,6 +3887,88 @@ function colorTema(varName) {
 
 const MESES_CORTO_PANEL = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
+function etiquetaMesPanel(ym) {
+  const [y, m] = ym.split("-");
+  const nombre = MESES_CORTO_PANEL[Number(m) - 1] || m;
+  return `${nombre.charAt(0).toUpperCase()}${nombre.slice(1)} ${y}`;
+}
+
+function mesesConDatos(notas) {
+  const set = new Set();
+  notas.forEach((n) => { if (n.fecha_falta) set.add(n.fecha_falta.slice(0, 7)); });
+  return [...set].sort().reverse();
+}
+
+// Resumen mensual: por código de infracción, y quién es reiterativo (más de 3
+// faltas en el mes) SIN mostrar nombre -- solo grado y el detalle de códigos,
+// pensado para poder compartirse sin exponer identidades.
+function calcularResumenMensual(ym) {
+  const notas = (state.notas || []).filter((n) => (n.fecha_falta || "").slice(0, 7) === ym);
+  const codigoCounts = {};
+  const porPersona = new Map();
+  notas.forEach((n) => {
+    const codigo = (n.codigo_infraccion || "").trim() || "Sin código";
+    codigoCounts[codigo] = (codigoCounts[codigo] || 0) + 1;
+    const key = normalizarNombre(n.apellidos, n.nombres);
+    if (!porPersona.has(key)) porPersona.set(key, { grado: n.grado || "", codigos: [] });
+    const p = porPersona.get(key);
+    p.codigos.push(codigo);
+    if (n.grado) p.grado = n.grado;
+  });
+  const personas = [...porPersona.values()];
+  const masDe3 = personas
+    .filter((p) => p.codigos.length > 3)
+    .sort((a, b) => b.codigos.length - a.codigos.length)
+    .map((p) => {
+      const conteo = {};
+      p.codigos.forEach((c) => { conteo[c] = (conteo[c] || 0) + 1; });
+      return { grado: p.grado, faltas: p.codigos.length, conteo };
+    });
+  return {
+    total: notas.length,
+    efectivosDistintos: personas.length,
+    reiterativos: personas.filter((p) => p.codigos.length > 1).length,
+    codigoCounts,
+    masDe3,
+  };
+}
+
+function renderResumenMensual(ym) {
+  if (!ym) return;
+  const r = calcularResumenMensual(ym);
+  $("resumenMensualStats").innerHTML = `
+    <div class="stat-tile"><div class="stat-value">${r.total}</div><div class="stat-label">Faltas registradas</div></div>
+    <div class="stat-tile"><div class="stat-value">${r.efectivosDistintos}</div><div class="stat-label">Efectivos distintos</div></div>
+    <div class="stat-tile"><div class="stat-value">${r.reiterativos}</div><div class="stat-label">Reiterativos (2+)</div></div>
+    <div class="stat-tile"><div class="stat-value">${r.masDe3.length}</div><div class="stat-label">Con más de 3 faltas</div></div>
+  `;
+  const codigosOrdenados = Object.entries(r.codigoCounts).sort((a, b) => b[1] - a[1]);
+  $("resumenCodigoBody").innerHTML = codigosOrdenados.length
+    ? codigosOrdenados.map(([c, n]) => `<tr><td><span class="pill pill-yes">${escapeHtml(c)}</span></td><td>${n}</td></tr>`).join("") +
+      `<tr class="total"><td>Total</td><td>${r.total}</td></tr>`
+    : `<tr><td colspan="2" class="muted small">Sin faltas registradas este mes.</td></tr>`;
+
+  $("resumenReiterativosEmpty").classList.toggle("hidden", r.masDe3.length > 0);
+  $("resumenReiterativosBody").innerHTML = r.masDe3.map((p, i) => `
+    <tr>
+      <td class="case-title">Reiterativo N.° ${i + 1}</td>
+      <td><span class="badge">${escapeHtml(p.grado || "-")}</span></td>
+      <td>${p.faltas}</td>
+      <td><div class="codes-cell">${Object.entries(p.conteo).map(([c, n]) => `<span class="pill pill-yes">${escapeHtml(c)} ×${n}</span>`).join("")}</div></td>
+    </tr>`).join("");
+}
+
+function inicializarResumenMensual(notas) {
+  const meses = mesesConDatos(notas);
+  const sel = $("resumenMesSelect");
+  if (!meses.length) { sel.innerHTML = ""; return; }
+  const previo = sel.value;
+  sel.innerHTML = meses.map((m) => `<option value="${m}">${etiquetaMesPanel(m)}</option>`).join("");
+  sel.value = meses.includes(previo) ? previo : meses[0];
+  renderResumenMensual(sel.value);
+}
+$("resumenMesSelect")?.addEventListener("change", (e) => renderResumenMensual(e.target.value));
+
 // Chart.js solo se descarga la primera vez que se abre el Panel (no en cada
 // carga de la app). Se cachea la promesa para no repetir la descarga.
 let _chartMod = null;
@@ -3902,6 +3984,7 @@ async function renderPanel() {
   Object.values(chartsPanel).forEach((c) => c.destroy());
   chartsPanel = {};
   if (!notas.length) return;
+  inicializarResumenMensual(notas);
   let Chart;
   try {
     Chart = await cargarChart();
