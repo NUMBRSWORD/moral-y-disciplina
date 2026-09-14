@@ -86,3 +86,9 @@ Revisión de código, base de datos, seguridad, accesibilidad y operación de
 ---
 
 ## Recuperación de acceso — ver `docs/recuperacion-de-acceso.md`
+
+## Cumplimiento de la Ley N.° 31814 (uso de IA) — ver `docs/cumplimiento-ley-ia.md`
+
+Auditoría separada de las 6 funciones de IA de la app contra el Reglamento de la Ley de
+IA (DS N.° 115-2025-PCM): clasificación de riesgo, evaluación de impacto y plantilla de
+política institucional de IA.
