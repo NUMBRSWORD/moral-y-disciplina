@@ -45,18 +45,27 @@ Revisión de código, base de datos, seguridad, accesibilidad y operación de
 - **RLS activo sin políticas en `google_drive_conexion` / `google_drive_oauth_estados`**:
   intencional — solo las Edge Functions (service_role) las leen; el `refresh_token`
   nunca llega al navegador.
+- **Un solo administrador (punto único de fallo).** Decisión consciente del
+  responsable (2026-09-14): hoy no hay una segunda persona a quien darle ese nivel de
+  acceso (padrón completo con DNI/CIP, generación de sanciones) — el sistema lo
+  construye y administra una sola persona, sin equipo de TI detrás. Se evaluó crear al
+  Comisario como segundo admin (ya va a tener cuenta de todas formas, para firmar en
+  **Cumplimiento**) y se decidió no hacerlo por ahora. Mitigación adoptada en su lugar:
+  la recuperación depende enteramente de la cuenta `hanshidalgo98@gmail.com`
+  (dueña del proyecto Supabase) — **debe tener verificación en dos pasos activada y
+  datos de recuperación al día**; sin eso, este riesgo aceptado se vuelve más grave de
+  lo necesario. Procedimiento para revertir esta decisión más adelante, si cambia:
+  `docs/recuperacion-de-acceso.md`.
 
 ### Pendiente — acción del usuario (no se puede hacer desde el código)
 
 1. **Supabase → Authentication → Providers/Policies: activar "Leaked password
    protection"** (bloquea claves aparecidas en filtraciones conocidas). 1 clic.
-2. **Segundo administrador.** Hoy hay un solo CIP admin → punto único de fallo.
-   Ver `docs/recuperacion-de-acceso.md`.
-3. **Definir el plazo de conservación** (punto 5 de la política abajo) y
-   **firmarla** — ahora se hace dentro de la app, pestaña **Cumplimiento**
-   (ver nota al final de esta sección). El Comisario y otros mandos necesitan
-   antes una cuenta (CIP o correo) para poder entrar a firmar — ver
-   `docs/recuperacion-de-acceso.md`.
+2. **Firmar la política de datos (ya con plazo de conservación: 5 años) y la
+   de IA** — se hace dentro de la app, pestaña **Cumplimiento** (ver nota al
+   final de esta sección). Hoy **nadie la ha firmado todavía**, ni siquiera el
+   admin. El Comisario y otros mandos necesitan antes una cuenta (CIP o
+   correo) para poder entrar a firmar — ver `docs/recuperacion-de-acceso.md`.
 
 ---
 
@@ -88,8 +97,8 @@ Revisión de código, base de datos, seguridad, accesibilidad y operación de
 >      solo ve su propia ficha y sus propios expedientes.
 >      Administradores designados: __________________________________________.
 > 5. **Conservación.** Los expedientes y archivos generados se conservan por
->    ______ años desde el cierre (sugerido: el plazo de prescripción del régimen
->    disciplinario + 1 año). Vencido el plazo se anonimizan o eliminan.
+>    **5 años** desde el cierre del expediente. Vencido el plazo se anonimizan
+>    o eliminan.
 > 6. **Respaldo.** Supabase (base de datos y archivos) + copia en Google Drive
 >    de la cuenta institucional. Copia manual en JSON disponible desde Ajustes.
 > 7. **Responsable del tratamiento.** _____________________  Firma: ___________
