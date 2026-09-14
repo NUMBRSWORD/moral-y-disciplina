@@ -50,11 +50,11 @@ Revisión de código, base de datos, seguridad, accesibilidad y operación de
   acceso (padrón completo con DNI/CIP, generación de sanciones) — el sistema lo
   construye y administra una sola persona, sin equipo de TI detrás. Se evaluó crear al
   Comisario como segundo admin (ya va a tener cuenta de todas formas, para firmar en
-  **Cumplimiento**) y se decidió no hacerlo por ahora. Mitigación adoptada en su lugar:
-  la recuperación depende enteramente de la cuenta `hanshidalgo98@gmail.com`
-  (dueña del proyecto Supabase) — **debe tener verificación en dos pasos activada y
-  datos de recuperación al día**; sin eso, este riesgo aceptado se vuelve más grave de
-  lo necesario. Procedimiento para revertir esta decisión más adelante, si cambia:
+  **Cumplimiento**) y se decidió no hacerlo por ahora. Toda la recuperación depende
+  entonces, en última instancia, de una sola cuenta: `hanshidalgo98@gmail.com` (dueña
+  del proyecto Supabase). Se recomendó activarle verificación en dos pasos; el
+  responsable decidió no hacerlo por ahora. Riesgo asumido con conocimiento de causa.
+  Procedimiento para revertir esta decisión más adelante, si cambia:
   `docs/recuperacion-de-acceso.md`.
 
 ### Pendiente — acción del usuario (no se puede hacer desde el código)
