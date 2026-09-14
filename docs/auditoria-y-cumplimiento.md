@@ -59,8 +59,12 @@ Revisión de código, base de datos, seguridad, accesibilidad y operación de
 
 ### Pendiente — acción del usuario (no se puede hacer desde el código)
 
-1. **Supabase → Authentication → Providers/Policies: activar "Leaked password
-   protection"** (bloquea claves aparecidas en filtraciones conocidas). 1 clic.
+1. **"Leaked password protection"** (bloquea claves ya filtradas, vía
+   HaveIBeenPwned) — **no es un simple clic**: se intentó activar (2026-09-14) y el
+   interruptor no queda guardado porque esta función **requiere el plan Pro de
+   Supabase** (la organización `ALQUILER DE CASA` está en plan Free). Queda
+   **pendiente**, condicionado a decidir si vale la pena pagar el upgrade — no es
+   negligencia, es una función de pago que hoy no se ha contratado.
 2. **Firmar la política de datos (ya con plazo de conservación: 5 años) y la
    de IA** — se hace dentro de la app, pestaña **Cumplimiento** (ver nota al
    final de esta sección). Hoy **nadie la ha firmado todavía**, ni siquiera el
