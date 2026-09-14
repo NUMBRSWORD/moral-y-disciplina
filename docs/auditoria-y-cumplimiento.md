@@ -52,8 +52,8 @@ Revisión de código, base de datos, seguridad, accesibilidad y operación de
   Comisario como segundo admin (ya va a tener cuenta de todas formas, para firmar en
   **Cumplimiento**) y se decidió no hacerlo por ahora. Toda la recuperación depende
   entonces, en última instancia, de una sola cuenta: `hanshidalgo98@gmail.com` (dueña
-  del proyecto Supabase) — por eso el responsable decidió activarle verificación en dos
-  pasos, con códigos de respaldo guardados aparte (ver `docs/recuperacion-de-acceso.md`).
+  del proyecto Supabase) — por eso se le activó verificación en dos pasos (2026-09-14),
+  con códigos de respaldo guardados aparte (ver `docs/recuperacion-de-acceso.md`).
   Procedimiento para revertir la decisión del segundo admin más adelante, si cambia:
   `docs/recuperacion-de-acceso.md`.
 
