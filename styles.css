@@ -424,6 +424,14 @@ label.checkbox-row input { width: auto; margin: 0; }
 .directiva-actions { display: flex; gap: 8px; margin-top: 8px; }
 .pill-inactive { background: rgba(147, 163, 179, 0.15); color: var(--text-muted); }
 
+/* Cumplimiento: documentos institucionales y firmas */
+.cumplimiento-card .directiva-contenido { max-height: 260px; }
+.firmas-lista { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.firmas-titulo { margin: 0 0 8px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); }
+.firma-item { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; font-size: 0.85rem; }
+.firma-item .ico { flex-shrink: 0; margin-top: 2px; color: var(--accent); }
+.firma-form { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; max-width: 420px; }
+
 /* Asistente flotante */
 .asistente-fab {
   position: fixed; bottom: 24px; right: 24px; z-index: 60;

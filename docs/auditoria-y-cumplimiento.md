@@ -52,12 +52,24 @@ Revisión de código, base de datos, seguridad, accesibilidad y operación de
    protection"** (bloquea claves aparecidas en filtraciones conocidas). 1 clic.
 2. **Segundo administrador.** Hoy hay un solo CIP admin → punto único de fallo.
    Ver `docs/recuperacion-de-acceso.md`.
-3. **Acta de protección de datos y retención.** Ver la plantilla al final de
-   este documento.
+3. **Definir el plazo de conservación** (punto 5 de la política abajo) y
+   **firmarla** — ahora se hace dentro de la app, pestaña **Cumplimiento**
+   (ver nota al final de esta sección). El Comisario y otros mandos necesitan
+   antes una cuenta (CIP o correo) para poder entrar a firmar — ver
+   `docs/recuperacion-de-acceso.md`.
 
 ---
 
-## Política de datos personales y retención (plantilla para firmar)
+## Política de datos personales y retención
+
+> **Esta política ya no se firma en papel.** El mismo texto vive dentro de la
+> app (pestaña **Cumplimiento**, visible para cualquier usuario con sesión) y
+> cada firmante entra con su propia cuenta y hace clic en "Firmar" — queda
+> registrado quién, con qué cargo, cuándo y sobre qué versión exacta del
+> texto firmó (tabla `firmas_documentos`). Editar el contenido (por ejemplo,
+> para fijar el plazo de conservación del punto 5) sube la versión y pide que
+> cada firmante vuelva a firmar. El texto de abajo es la referencia histórica
+> de la versión inicial.
 
 > **CPNP Ventanilla — Módulo Moral y Disciplina (infracciones leves)**
 >

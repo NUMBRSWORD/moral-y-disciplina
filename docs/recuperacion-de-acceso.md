@@ -16,6 +16,15 @@ documentado cómo se recupera el acceso.
 - Los oficiales inician sesión con su **CIP** (el sistema le agrega
   `@moralydisciplina.local` por dentro); la clave la fija el administrador.
 
+## Crear una cuenta para firmar documentos (Comisario u otro mando, sin ser admin)
+
+Para firmar la política de datos o la política de IA (pestaña **Cumplimiento**)
+no hace falta ser administrador — cualquier cuenta que pueda iniciar sesión
+sirve. Es más corto que crear un admin: solo el paso 1 de abajo
+(**Authentication → Users → Add user**, con *Auto Confirm User* marcado). La
+fila en `profiles` se crea sola con `role = 'viewer'`, que ya alcanza para
+entrar y firmar — no hace falta el paso 2.
+
 ## Crear un segundo administrador
 
 1. **Supabase → Authentication → Users → Add user**

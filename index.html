@@ -42,6 +42,7 @@
     <nav class="tabs">
       <button class="tab-btn active" data-view="dashboard">Expedientes</button>
       <button id="tabSeguimiento" class="tab-btn" data-view="seguimiento">Seguimiento</button>
+      <button class="tab-btn" data-view="cumplimiento">Cumplimiento</button>
       <button class="tab-btn admin-only hidden" data-view="efectivos">Efectivos</button>
       <button class="tab-btn admin-only hidden" data-view="roles">Roles</button>
       <button class="tab-btn admin-only hidden" data-view="directivas">Directivas</button>
@@ -353,6 +354,16 @@
     <p id="directivasEmpty" class="muted hidden">No hay directivas registradas todavía.</p>
   </section>
 
+  <!-- CUMPLIMIENTO: POLITICAS INSTITUCIONALES Y FIRMA ELECTRONICA -->
+  <section id="view-cumplimiento" class="view hidden">
+    <div class="view-header">
+      <h2>Cumplimiento</h2>
+    </div>
+    <p class="muted small">Políticas institucionales vigentes de este módulo. Revíselas y firme con su propia cuenta para dejar constancia de que las conoce — la firma queda registrada con su nombre, cargo, fecha y la versión exacta del texto que firmó.</p>
+    <div id="cumplimientoLista"></div>
+    <p id="cumplimientoEmpty" class="muted hidden">No hay documentos institucionales registrados todavía.</p>
+  </section>
+
   <!-- PANEL DE METRICAS -->
   <section id="view-panel" class="view hidden">
     <div class="view-header">
@@ -619,6 +630,28 @@
       <div class="modal-actions">
         <button type="button" id="btnCancelarDirectiva" class="btn-ghost">Cancelar</button>
         <button type="submit" class="btn-primary">Guardar directiva</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL EDITAR CONTENIDO DE DOCUMENTO INSTITUCIONAL (admin) -->
+<div id="modalDocumentoInstitucional" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="documentoInstitucionalModalTitulo">Editar contenido</h3>
+      <button id="btnCerrarModalDocumentoInstitucional" class="btn-ghost">✕</button>
+    </div>
+    <form id="documentoInstitucionalForm" class="modal-body">
+      <input type="hidden" id="diId" />
+      <p class="muted small">Al guardar, este documento pasa a una versión nueva y las firmas anteriores quedan registradas contra el texto que realmente firmaron — cada firmante deberá volver a firmar la versión nueva.</p>
+      <label>Contenido
+        <textarea id="diContenido" rows="14" required></textarea>
+      </label>
+      <p id="documentoInstitucionalError" class="error hidden" role="alert"></p>
+      <div class="modal-actions">
+        <button type="button" id="btnCancelarDocumentoInstitucional" class="btn-ghost">Cancelar</button>
+        <button type="submit" class="btn-primary">Guardar nueva versión</button>
       </div>
     </form>
   </div>
