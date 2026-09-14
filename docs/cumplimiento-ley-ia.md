@@ -64,7 +64,7 @@ Mientras se resuelve, esta app ya cumple las salvaguardas de riesgo alto que imp
 |---|---|---|
 | **No hay explicación en lenguaje simple para el investigado** sobre qué parte del "Análisis y Evaluación" fue redactada con apoyo de IA | 25.2/25.3 | Evaluar una línea fija al pie de la Orden de Sanción o en el expediente digital ("el análisis fue redactado con apoyo de IA y revisado por el funcionario firmante"). Pendiente de decisión del usuario — no es solo técnico, afecta la redacción del documento oficial |
 | **"IA transparente" del backlog** (qué archivo/puntos detectó `redactar-analisis`) sigue sin construirse | 25.1/25.3 | Ya estaba en el backlog de mejoras por UX; ahora tiene además respaldo normativo — subir su prioridad |
-| **No hay Política institucional de uso de IA formalizada** | 28.1 | Ver plantilla abajo; falta que la firme el Comisario |
+| **No hay Política institucional de uso de IA formalizada** | 28.1 | El texto ya está publicado dentro de la app (pestaña **Cumplimiento**) con firma electrónica simple. Falta que el Comisario y demás mandos tengan cuenta (ver `docs/recuperacion-de-acceso.md`) y la firmen ahí |
 | **No se han hecho auditorías de seguridad periódicas** (solo la de esta sesión, una vez) | 29.c | Agendar una revisión de este documento + `docs/auditoria-y-cumplimiento.md` cada 6-12 meses, no solo cuando algo falla |
 | **Evaluación de impacto (art. 30)** no se había hecho antes de lanzar `redactar-analisis` (la función ya está en producción) | 30 | Completada recién ahora, ver §5 — quedó documentada aunque tarde; para la **próxima** función de IA, hacerla ANTES de lanzar |
 | **Plazo del art. 25 + Cap. I Título VI para el Poder Ejecutivo ya venció** (≈10-set-2026) | Disp. Compl. Primera | La Política institucional (§28.1) y la transparencia algorítmica (art. 25) ya no son "para más adelante" — el plazo pasó. Priorizar la firma de la política institucional |
@@ -126,7 +126,13 @@ riesgo.
 
 ---
 
-## Política institucional de uso de IA (plantilla para firmar — art. 28.1)
+## Política institucional de uso de IA (art. 28.1)
+
+> **Esta política ya no se firma en papel.** El mismo texto vive dentro de la
+> app (pestaña **Cumplimiento**) y cada firmante entra con su propia cuenta y
+> hace clic en "Firmar" — queda registrado quién, con qué cargo, cuándo y
+> sobre qué versión exacta del texto firmó. El texto de abajo es la
+> referencia histórica de la versión inicial.
 
 > **CPNP Ventanilla — Módulo Moral y Disciplina**
 >

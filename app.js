@@ -7,6 +7,7 @@ import { renderizarActaNoDescargoDocx, construirDatosActaNoDescargo, puedeGenera
 import { renderizarOrdenSancionDocx, construirDatosOrdenSancion, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva, subirArchivoDirectiva } from "./lib/directivas.js";
+import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocumento, actualizarContenidoDocumentoInstitucional } from "./lib/cumplimiento.js";
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible } from "./lib/utils.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
@@ -22,6 +23,8 @@ const state = {
   efectivos: [],
   currentNotaId: null,
   directivas: [],
+  cumplimientoDocs: [],
+  cumplimientoFirmas: [],
   expedientesRemitidos: [],
   rolesServicio: [],
   asistenteHistorial: [],
@@ -378,7 +381,7 @@ function showView(id) {
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $(id).classList.remove("hidden");
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-  const map = { "view-dashboard": "dashboard", "view-seguimiento": "seguimiento", "view-efectivos": "efectivos", "view-roles": "roles", "view-directivas": "directivas", "view-agenda": "agenda", "view-documentos": "documentos", "view-recepcion": "recepcion", "view-panel": "panel", "view-historial": "historial" };
+  const map = { "view-dashboard": "dashboard", "view-seguimiento": "seguimiento", "view-cumplimiento": "cumplimiento", "view-efectivos": "efectivos", "view-roles": "roles", "view-directivas": "directivas", "view-agenda": "agenda", "view-documentos": "documentos", "view-recepcion": "recepcion", "view-panel": "panel", "view-historial": "historial" };
   if (map[id]) {
     document.querySelector(`.tab-btn[data-view="${map[id]}"]`)?.classList.add("active");
   }
@@ -389,6 +392,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     const target = btn.dataset.view;
     if (target === "dashboard") { showView("view-dashboard"); loadNotas(); }
     if (target === "seguimiento") { showView("view-seguimiento"); loadNotas(); }
+    if (target === "cumplimiento") { showView("view-cumplimiento"); loadCumplimientoView(); }
     if (target === "efectivos") { showView("view-efectivos"); loadEfectivos(); }
     if (target === "roles") { showView("view-roles"); loadRolesServicio(); }
     if (target === "directivas") { showView("view-directivas"); loadDirectivasView(); }
@@ -3695,6 +3699,156 @@ $("directivaForm")?.addEventListener("submit", async (e) => {
     }
     closeModalDirectiva();
     loadDirectivasView();
+  } catch (err) {
+    console.error(err);
+    errEl.textContent = "Error: " + (err.message || err);
+    errEl.classList.remove("hidden");
+  } finally {
+    ocuparBoton(submitBtn, false);
+  }
+});
+
+// ---------- Cumplimiento: documentos institucionales y firma electrónica ----------
+// Firma electrónica simple: el firmante ya está autenticado (con su CIP o su
+// correo, como cualquier ingreso a la app); al hacer clic en "Firmar" queda un
+// registro inalterable de quién, con qué cargo, cuándo, y sobre qué versión
+// exacta del texto. Si el admin edita el contenido, sube la versión y cada
+// firmante debe volver a firmar — una firma vieja nunca se reinterpreta como
+// válida para un texto que esa persona no llegó a leer.
+function fechaHoraFirma(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}/${mm}/${d.getFullYear()} ${hh}:${mi}`;
+}
+
+async function loadCumplimientoView() {
+  try {
+    [state.cumplimientoDocs, state.cumplimientoFirmas] = await Promise.all([
+      listarDocumentosInstitucionales(supabase),
+      listarFirmasDocumentos(supabase),
+    ]);
+  } catch (err) {
+    console.error(err);
+    state.cumplimientoDocs = [];
+    state.cumplimientoFirmas = [];
+  }
+  renderCumplimientoLista();
+}
+
+function renderCumplimientoLista() {
+  const container = $("cumplimientoLista");
+  if (!container) return;
+  const list = state.cumplimientoDocs;
+  $("cumplimientoEmpty").classList.toggle("hidden", list.length > 0);
+  const isAdmin = state.role === "admin";
+  const miId = state.session?.user?.id;
+
+  container.innerHTML = list.map((d) => {
+    const firmasDoc = state.cumplimientoFirmas.filter((f) => f.documento_id === d.id);
+    const firmasVigentes = firmasDoc.filter((f) => f.documento_version === d.version);
+    const firmasObsoletas = firmasDoc.length - firmasVigentes.length;
+    const miFirma = firmasVigentes.find((f) => f.firmante_id === miId);
+
+    return `
+    <div class="directiva-card cumplimiento-card" data-id="${d.id}" data-version="${d.version}">
+      <div class="directiva-card-header">
+        <h3>${escapeHtml(d.titulo)}</h3>
+        <span class="pill ${miFirma ? "pill-yes" : "pill-warning"}">${miFirma ? "Firmado por usted" : "Pendiente de su firma"}</span>
+      </div>
+      <div class="directiva-contenido">${escapeHtml(d.contenido)}</div>
+      ${isAdmin ? `<div class="directiva-actions"><button type="button" class="btn-secondary btn-editar-documento-institucional">Editar contenido</button></div>` : ""}
+      <div class="firmas-lista">
+        <h4 class="firmas-titulo">Firmas registradas — versión ${d.version}</h4>
+        ${firmasVigentes.length ? firmasVigentes.map((f) => `
+          <div class="firma-item">${svgIco("check")}<span><strong>${escapeHtml(f.firmante_nombre)}</strong>${f.firmante_grado ? ` — ${escapeHtml(f.firmante_grado)}` : ""} · ${escapeHtml(f.firmante_cargo)}<br><span class="muted small">${fechaHoraFirma(f.firmado_at)}</span></span></div>
+        `).join("") : `<p class="muted small">Nadie ha firmado esta versión todavía.</p>`}
+        ${firmasObsoletas > 0 ? `<p class="muted small">${firmasObsoletas} firma(s) de una versión anterior del texto, ya no vigente.</p>` : ""}
+      </div>
+      ${miFirma ? "" : `
+        <form class="firma-form" data-documento-id="${d.id}" data-version="${d.version}">
+          <label>Grado <input type="text" class="firma-grado-input" placeholder="Ej. Comandante PNP" /></label>
+          <label>Nombre y apellidos <input type="text" class="firma-nombre-input" required placeholder="Ej. REYES MEDINA, Juan Carlos" /></label>
+          <label>Cargo <input type="text" class="firma-cargo-input" required placeholder="Ej. Comisario PNP Ventanilla" /></label>
+          <p class="firma-error error hidden" role="alert"></p>
+          <button type="submit" class="btn-primary">${svgIco("firmar")}Firmar</button>
+        </form>
+      `}
+    </div>
+  `;
+  }).join("");
+
+  if (isAdmin) {
+    container.querySelectorAll(".btn-editar-documento-institucional").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        const id = e.currentTarget.closest(".cumplimiento-card").dataset.id;
+        const doc = state.cumplimientoDocs.find((d) => String(d.id) === id);
+        if (doc) abrirModalDocumentoInstitucional(doc);
+      });
+    });
+  }
+
+  container.querySelectorAll(".firma-form").forEach((form) => {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = form.querySelector(".firma-error");
+      errEl.classList.add("hidden");
+      const documentoId = form.dataset.documentoId;
+      const version = Number(form.dataset.version);
+      const grado = form.querySelector(".firma-grado-input").value.trim();
+      const nombre = form.querySelector(".firma-nombre-input").value.trim();
+      const cargo = form.querySelector(".firma-cargo-input").value.trim();
+      if (!nombre || !cargo) return;
+
+      const submitBtn = form.querySelector("button[type=submit]");
+      ocuparBoton(submitBtn, true, "Firmando...");
+      try {
+        await firmarDocumento(supabase, { documentoId, version, firmanteId: state.session.user.id, nombre, grado, cargo });
+        toast("Firma registrada.", "ok");
+        await loadCumplimientoView();
+      } catch (err) {
+        console.error(err);
+        errEl.textContent = "Error: " + (err.message || err);
+        errEl.classList.remove("hidden");
+        ocuparBoton(submitBtn, false);
+      }
+    });
+  });
+}
+
+function abrirModalDocumentoInstitucional(doc) {
+  $("documentoInstitucionalForm").reset();
+  $("diId").value = doc.id;
+  $("diContenido").value = doc.contenido;
+  $("documentoInstitucionalError").classList.add("hidden");
+  $("documentoInstitucionalModalTitulo").textContent = `Editar: ${doc.titulo}`;
+  $("modalDocumentoInstitucional").classList.remove("hidden");
+}
+function closeModalDocumentoInstitucional() { $("modalDocumentoInstitucional").classList.add("hidden"); }
+
+$("btnCerrarModalDocumentoInstitucional")?.addEventListener("click", closeModalDocumentoInstitucional);
+$("btnCancelarDocumentoInstitucional")?.addEventListener("click", closeModalDocumentoInstitucional);
+
+$("documentoInstitucionalForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errEl = $("documentoInstitucionalError");
+  errEl.classList.add("hidden");
+  const id = $("diId").value;
+  const contenido = $("diContenido").value.trim();
+  if (!contenido) return;
+  const doc = state.cumplimientoDocs.find((d) => String(d.id) === id);
+  if (!doc) return;
+
+  const submitBtn = e.target.querySelector("button[type=submit]");
+  ocuparBoton(submitBtn, true, "Guardando...");
+  try {
+    await actualizarContenidoDocumentoInstitucional(supabase, { id, contenido, version: doc.version, userId: state.session.user.id });
+    closeModalDocumentoInstitucional();
+    toast("Nueva versión guardada. Cada firmante deberá volver a firmar.", "ok");
+    await loadCumplimientoView();
   } catch (err) {
     console.error(err);
     errEl.textContent = "Error: " + (err.message || err);
