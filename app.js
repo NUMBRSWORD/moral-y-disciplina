@@ -2552,12 +2552,19 @@ async function transcribirPaginasConIA(paginas, onEstado) {
 // la primera línea, pero no el cuerpo del descargo. No basta con "¿hay algo
 // de texto?"; se mide si hay texto ÚTIL por página y si solo predominan
 // datos de trámite (encabezado sin argumentos de defensa).
-function textoPdfPareceIncompleto(textosPorPagina) {
+// "soloCabecera" (¿parece portada de trámite sin argumento de defensa?) solo
+// tiene sentido para descargos: una nota de reincorporación, de falta, o un
+// rol de servicio jamás van a "alegar" ni "sostener" nada aunque estén
+// perfectamente completos, así que ese chequeo solo se activa cuando lo pide
+// quien lee específicamente un descargo (verificarSoloCabecera=true) — si no,
+// dispara falsos positivos en cualquier documento puramente factual/administrativo.
+function textoPdfPareceIncompleto(textosPorPagina, verificarSoloCabecera = false) {
   const paginas = textosPorPagina.map((t) => String(t || "").replace(/\s+/g, " ").trim());
   const texto = paginas.join(" ");
   const letras = (texto.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g) || []).length;
   const paginasConPocoTexto = paginas.filter((p) => (p.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g) || []).length < 140).length;
-  const soloCabecera = /\b(administrado|sumilla|referencia|interpone descargo|notificaci[oó]n de presunta infracci[oó]n)\b/i.test(texto)
+  const soloCabecera = verificarSoloCabecera
+    && /\b(administrado|sumilla|referencia|interpone descargo|notificaci[oó]n de presunta infracci[oó]n)\b/i.test(texto)
     && !/\b(alega|sostiene|manifiesta|señala|argumenta|solicita|pide|niega|reconoce|justifica|porque|adjunta|acredita|prueba)\b/i.test(texto);
   return letras < Math.max(450, paginas.length * 180)
     || paginasConPocoTexto / Math.max(paginas.length, 1) >= 0.6
@@ -2586,7 +2593,7 @@ async function transcribirPdfConVisionIA(pdf, onEstado) {
   return textos.join("\n\n");
 }
 
-async function extractPdfText(file, onEstado) {
+async function extractPdfText(file, onEstado, { verificarSoloCabecera = false } = {}) {
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
   const textosPorPagina = [];
@@ -2595,14 +2602,21 @@ async function extractPdfText(file, onEstado) {
     const content = await page.getTextContent();
     textosPorPagina.push(content.items.map((it) => it.str).join(" "));
   }
-  let text = textosPorPagina.join("\n");
+  const textoBase = textosPorPagina.join("\n");
   // También se activa cuando el OCR interno del PDF quedó incompleto: así la
-  // IA con visión lee el documento real, no solo el encabezado.
-  if (textoPdfPareceIncompleto(textosPorPagina)) {
+  // IA con visión lee el documento real, no solo el encabezado. Si esa
+  // revisión con IA falla (red, función caída), no se descarta el texto ya
+  // extraído del PDF: es real y usable, aunque el heurístico haya sospechado.
+  if (textoPdfPareceIncompleto(textosPorPagina, verificarSoloCabecera)) {
     onEstado?.("El texto interno del PDF parece incompleto. Revisando todas las páginas con IA...");
-    text = await transcribirPdfConVisionIA(pdf, onEstado);
+    try {
+      return await transcribirPdfConVisionIA(pdf, onEstado);
+    } catch (err) {
+      console.error("La revisión con IA con visión falló; se usa el texto ya extraído del PDF:", err);
+      onEstado?.("No se pudo revisar con IA; se usa el texto ya extraído del PDF.");
+    }
   }
-  return text;
+  return textoBase;
 }
 
 async function extractImagenTextoConOcr(blob, onEstado) {
@@ -2622,7 +2636,7 @@ async function extraerTextoDescargo(nota, onEstado) {
   const esPdf = /\.pdf$/i.test(nombre) || blob.type === "application/pdf";
   const esImagen = /\.(jpe?g|png|webp|bmp)$/i.test(nombre) || blob.type.startsWith("image/");
   try {
-    if (esPdf) return await extractPdfText(blob, onEstado);
+    if (esPdf) return await extractPdfText(blob, onEstado, { verificarSoloCabecera: true });
     if (esImagen) return await extractImagenTextoConOcr(blob, onEstado);
   } catch (err) {
     console.error("No se pudo leer el archivo de descargo:", err);
