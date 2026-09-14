@@ -52,9 +52,9 @@ Revisión de código, base de datos, seguridad, accesibilidad y operación de
   Comisario como segundo admin (ya va a tener cuenta de todas formas, para firmar en
   **Cumplimiento**) y se decidió no hacerlo por ahora. Toda la recuperación depende
   entonces, en última instancia, de una sola cuenta: `hanshidalgo98@gmail.com` (dueña
-  del proyecto Supabase). Se recomendó activarle verificación en dos pasos; el
-  responsable decidió no hacerlo por ahora. Riesgo asumido con conocimiento de causa.
-  Procedimiento para revertir esta decisión más adelante, si cambia:
+  del proyecto Supabase) — por eso el responsable decidió activarle verificación en dos
+  pasos, con códigos de respaldo guardados aparte (ver `docs/recuperacion-de-acceso.md`).
+  Procedimiento para revertir la decisión del segundo admin más adelante, si cambia:
   `docs/recuperacion-de-acceso.md`.
 
 ### Pendiente — acción del usuario (no se puede hacer desde el código)

@@ -57,6 +57,16 @@ entrar y firmar — no hace falta el paso 2.
   *Owner/Administrator* de la organización en **Supabase → Organization →
   Team**.
 
+  **Activar verificación en dos pasos en `hanshidalgo98@gmail.com`:**
+  1. `myaccount.google.com` → **Seguridad** → **Verificación en 2 pasos** → Activar.
+  2. Confirmar la clave actual, luego agregar el número de celular (código por SMS)
+     o, mejor, una app autenticadora (Google Authenticator / similar).
+  3. **Importante — guardar los códigos de respaldo (backup codes)** que Google
+     ofrece al terminar, en un lugar aparte del celular (impresos, o en el JSON de
+     respaldo manual). Si el celular se pierde o se daña sin esos códigos, el 2FA
+     puede terminar bloqueando el acceso en vez de protegerlo — justo el escenario
+     que se quiere evitar.
+
 ## Respaldo de datos (por si hay que reconstruir)
 
 - **Automático:** Supabase guarda backups del proyecto.
