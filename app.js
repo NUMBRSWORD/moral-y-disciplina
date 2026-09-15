@@ -704,6 +704,18 @@ function diasHastaFecha(fecha) {
 function obtenerAccionesPrioritariasNotas() {
   return (state.notas || []).flatMap((nota) => {
     const nombre = nombreInvestigadoVisible(nota, true) || "Nota sin nombre";
+    if (esGraveConTextoLegal(nota)) {
+      // Sin esta rama, un caso grave/muy grave caía en "!nota.fecha_reincorporacion"
+      // más abajo y la bandeja le decía a Hans que cargue la reincorporación
+      // para continuar -- ya no es cierto, el Informe Administrativo se puede
+      // generar con la ausencia todavía en curso.
+      return [{
+        nota, nombre, prioridad: 0.5, tipo: "Generar Informe Administrativo", clase: "is-urgent",
+        detalle: nota.fecha_reincorporacion
+          ? "La ausencia ya se cerró. Complete las firmas y descargue el Informe Administrativo."
+          : "La ausencia sigue en curso -- ya puede generar el Informe Administrativo \"a la fecha\", sin esperar la reincorporación.",
+      }];
+    }
     if (nota.orden_sancion_generada_at && !nota.orden_notificada_at) {
       return [{ nota, nombre, prioridad: 0, tipo: "Cargar expediente firmado", detalle: "La Orden ya se generó; suba el legajo completo firmado y registre la fecha de notificación.", clase: "is-urgent" }];
     }
@@ -4333,8 +4345,21 @@ function notaConcluida(n) {
   return !!n.orden_notificada_at;
 }
 
+// Grave/Muy Grave (con texto legal ya cargado en INFRACCIONES_GRAVES): el
+// trámite de esta app es corto y distinto al de leves -- Falta -> (con o sin
+// reincorporación) -> Informe Administrativo -- así que las 3 funciones de
+// abajo (estado, color, mini-stepper) necesitan su propia rama; si no,
+// mostraban "Reincorporación pendiente" para siempre y un stepper de 5 pasos
+// (Imputación/Descargo/Sanción) que un caso así nunca completa.
+function esGraveConTextoLegal(n) {
+  const leve = /^L/i.test((n.codigo_infraccion || "").trim());
+  const codigo = (n.codigo_infraccion || "").trim().toUpperCase().replace(/\s+/g, "");
+  return !leve && !!INFRACCIONES_GRAVES[codigo];
+}
+
 function estadoDeNota(n) {
   if (notaConcluida(n)) return "Concluida";
+  if (esGraveConTextoLegal(n)) return n.fecha_reincorporacion ? "Informe Administrativo (cerrado)" : "Informe Administrativo (en curso)";
   if (!n.fecha_reincorporacion) return "Reincorporación pendiente";
   if (!n.imputacion_generada_at) return "Notificación pendiente";
   if (n.orden_sancion_generada_at) return "Sanción generada";
@@ -4345,6 +4370,7 @@ function estadoDeNota(n) {
 
 function claseEstadoNota(n) {
   if (notaConcluida(n)) return "pill-yes";
+  if (esGraveConTextoLegal(n)) return "pill-warning";
   if (n.orden_sancion_generada_at) return "pill-yes";
   if (n.fecha_descargo) return "pill-info";
   if (n.fecha_reincorporacion && n.imputacion_generada_at && plazoDescargoVencido(n)) return "pill-danger";
@@ -4354,6 +4380,12 @@ function claseEstadoNota(n) {
 
 function progresoNotaHtml(n) {
   const concluida = notaConcluida(n);
+  if (esGraveConTextoLegal(n) && !concluida) {
+    return `<div class="case-progress" title="${escapeHtml(estadoDeNota(n))}">
+      <div class="case-progress-steps"><span class="is-done">1</span><span class="is-current">2</span></div>
+      <span class="pill ${claseEstadoNota(n)}">${escapeHtml(estadoDeNota(n))}</span>
+    </div>`;
+  }
   const paso = n.orden_sancion_generada_at ? 5 : n.fecha_descargo ? 4 : n.imputacion_generada_at ? 3 : n.fecha_reincorporacion ? 2 : 1;
   const etiquetas = ["Falta", "Reinc.", "Imput.", "Descargo", "Sanción"];
   return `<div class="case-progress ${concluida ? "is-concluida" : ""}" title="${escapeHtml(estadoDeNota(n))}">
@@ -4380,8 +4412,16 @@ function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
   if (!nota.codigo_infraccion) {
     // valores por defecto
   } else if (!leve) {
-    icono = "info"; titulo = "Falta grave o muy grave";
-    detalle = "Este módulo automatiza los documentos de faltas leves. Continúe el trámite según el procedimiento que corresponde a este código.";
+    const codigoNormalizado = (nota.codigo_infraccion || "").trim().toUpperCase().replace(/\s+/g, "");
+    if (INFRACCIONES_GRAVES[codigoNormalizado]) {
+      icono = "descargar"; titulo = "Genere el Informe Administrativo"; tono = "is-ready";
+      detalle = nota.fecha_reincorporacion
+        ? "Complete las firmas y descargue el Informe Administrativo (.zip) que documenta el caso y lo remite al órgano disciplinario competente."
+        : "La ausencia sigue en curso, pero ya puede generar el Informe Administrativo \"a la fecha\": no hace falta esperar la reincorporación.";
+    } else {
+      icono = "info"; titulo = "Falta grave o muy grave";
+      detalle = "Todavía no hay texto legal verificado en la app para este código, así que el Informe Administrativo no está disponible aquí. Continúe el trámite según el procedimiento que corresponde.";
+    }
   } else if (!nota.fecha_reincorporacion) {
     titulo = "Registre la reincorporación";
     detalle = "Complete fecha, hora y N.º de nota de reincorporación para habilitar la Imputación.";
@@ -4420,6 +4460,30 @@ function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
 // vencido / no disponible todavía -- para que el oficial vea de un vistazo
 // qué sigue sin abrir cada sección.
 function cronologiaNotaHtml(nota) {
+  const LABEL = { completo: "Completo", pendiente: "Pendiente", vencido: "Vencido", nd: "No disponible" };
+  const ICON = { completo: "✓", pendiente: "•", vencido: "!", nd: "–" };
+  const render = (etapas) => `<ol class="tramite-etapas">${etapas.map((e) => `
+    <li class="tramite-etapa te-${e.estado}">
+      <span class="te-icon">${ICON[e.estado]}</span>
+      <span class="te-nombre">${escapeHtml(e.titulo)}${e.fecha && e.estado === "completo" ? ` <span class="muted small">— ${formatDate(String(e.fecha).slice(0, 10))}</span>` : ""}</span>
+      <span class="te-estado">${LABEL[e.estado]}</span>
+    </li>`).join("")}</ol>`;
+
+  const leve = /^L/i.test((nota.codigo_infraccion || "").trim());
+  const codigoNormalizado = (nota.codigo_infraccion || "").trim().toUpperCase().replace(/\s+/g, "");
+  if (!leve && INFRACCIONES_GRAVES[codigoNormalizado]) {
+    // Grave o Muy Grave: el trámite de esta app termina en el Informe
+    // Administrativo (documenta y REMITE el caso a otra instancia), no en
+    // la cadena Imputación → Orden de Sanción, que es solo para leves. Sin
+    // esta rama, las etapas de abajo quedaban en "No disponible" para
+    // siempre y no mencionaban la acción que sí aplica aquí.
+    return render([
+      { titulo: "Hecho registrado", fecha: nota.created_at, estado: "completo" },
+      { titulo: "Reincorporación", fecha: nota.fecha_reincorporacion, estado: nota.fecha_reincorporacion ? "completo" : "pendiente" },
+      { titulo: "Informe Administrativo (remitido a otra instancia)", fecha: null, estado: "pendiente" },
+    ]);
+  }
+
   const exp = (nota.expedientes && nota.expedientes[0]) || null;
   const vencidoDescargo = !!nota.imputacion_generada_at && !nota.fecha_descargo && plazoDescargoVencido(nota);
   const hayEvaluacion = !!(nota.sancion_analisis && String(nota.sancion_analisis).trim()) || !!nota.orden_sancion_generada_at;
@@ -4427,7 +4491,7 @@ function cronologiaNotaHtml(nota) {
   const cerrado = !!(nota.orden_notificada_at || (exp && (exp.numero_oficio || exp.numero_ht)));
 
   const nd = "nd";
-  const etapas = [
+  return render([
     { titulo: "Hecho registrado", fecha: nota.created_at, estado: "completo" },
     { titulo: "Reincorporación", fecha: nota.fecha_reincorporacion, estado: nota.fecha_reincorporacion ? "completo" : "pendiente" },
     { titulo: "Imputación / notificación", fecha: nota.imputacion_generada_at, estado: nota.imputacion_generada_at ? "completo" : (nota.fecha_reincorporacion ? "pendiente" : nd) },
@@ -4435,15 +4499,7 @@ function cronologiaNotaHtml(nota) {
     { titulo: "Evaluación del descargo", fecha: null, estado: !listoDescargo ? nd : (hayEvaluacion ? "completo" : "pendiente") },
     { titulo: "Orden de Sanción", fecha: nota.orden_sancion_generada_at, estado: nota.orden_sancion_generada_at ? "completo" : (listoDescargo ? "pendiente" : nd) },
     { titulo: "Cierre (notificación / expediente)", fecha: nota.orden_notificada_at, estado: cerrado ? "completo" : (nota.orden_sancion_generada_at ? "pendiente" : nd) },
-  ];
-  const LABEL = { completo: "Completo", pendiente: "Pendiente", vencido: "Vencido", nd: "No disponible" };
-  const ICON = { completo: "✓", pendiente: "•", vencido: "!", nd: "–" };
-  return `<ol class="tramite-etapas">${etapas.map((e) => `
-    <li class="tramite-etapa te-${e.estado}">
-      <span class="te-icon">${ICON[e.estado]}</span>
-      <span class="te-nombre">${escapeHtml(e.titulo)}${e.fecha && e.estado === "completo" ? ` <span class="muted small">— ${formatDate(String(e.fecha).slice(0, 10))}</span>` : ""}</span>
-      <span class="te-estado">${LABEL[e.estado]}</span>
-    </li>`).join("")}</ol>`;
+  ]);
 }
 
 function colorTema(varName) {
