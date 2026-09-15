@@ -92,6 +92,7 @@
       </div>
       <div class="view-actions">
         <button id="btnFaltasLote" class="btn-secondary admin-only hidden">Faltas (PDF grupal)</button>
+        <button id="btnContinuanFaltosLote" class="btn-secondary admin-only hidden">Continúan faltos (PDF)</button>
         <button id="btnReincorporacionLote" class="btn-secondary admin-only hidden">Reincorporación (PDF grupal)</button>
         <button id="btnNuevaNota" class="btn-primary admin-only hidden">+ Nueva nota</button>
       </div>
@@ -566,6 +567,29 @@
       <div class="modal-actions">
         <button type="button" id="btnCancelarReincLote" class="btn-ghost">Cancelar</button>
         <button type="button" id="btnGuardarReincLote" class="btn-primary">Registrar reincorporación</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL CONTINUAN FALTOS EN LOTE -->
+<div id="modalContinuanFaltosLote" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Continúan faltos</h3>
+      <button id="btnCerrarModalContinuanFaltos" class="btn-ghost">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="muted small">Para la nota de "sigue faltando" de un día intermedio — de alguien que YA tiene un expediente abierto. No crea una nota nueva ni cambia la fecha de la falta original; solo deja constancia de esta confirmación (fecha, N.º de nota, quien pasó revista) para el Informe Administrativo si la ausencia llega a escalar.</p>
+      <label>Archivo(s) — puede seleccionar varios a la vez, uno por efectivo o uno grupal
+        <input type="file" id="cfArchivo" accept="application/pdf" multiple />
+      </label>
+      <p id="cfStatus" class="muted small hidden"></p>
+      <div id="cfLista"></div>
+      <p id="cfError" class="error hidden" role="alert"></p>
+      <div class="modal-actions">
+        <button type="button" id="btnCancelarContinuanFaltosLote" class="btn-ghost">Cancelar</button>
+        <button type="button" id="btnGuardarContinuanFaltosLote" class="btn-primary">Registrar seguimiento</button>
       </div>
     </div>
   </div>

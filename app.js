@@ -3445,6 +3445,155 @@ $("btnGuardarReincLote").addEventListener("click", async (e) => {
   }
 });
 
+// ---------- Continúan faltos (nota de "sigue faltando" de un día intermedio) ----------
+// A diferencia de "Faltas (PDF grupal)" (que crea una nota nueva) y de
+// "Reincorporación" (que la cierra), esta opción es explícita para el caso de
+// en medio: la persona YA tiene una nota abierta y este PDF solo confirma que
+// sigue faltando. No crea ni cierra nada — solo agrega una entrada a
+// `seguimiento_faltas` de la nota abierta, para que el Informe Administrativo
+// pueda citar el N.º de nota real de ese día si la ausencia llega a escalar.
+let continuanFaltosLoteFilas = [];
+
+function renderContinuanFaltosLoteList() {
+  const el = $("cfLista");
+  if (!continuanFaltosLoteFilas.length) { el.innerHTML = ""; return; }
+  el.innerHTML = continuanFaltosLoteFilas.map((f) => {
+    const nombreLinea = f.candidate
+      ? escapeHtml(nombreInvestigadoVisible(f.candidate, true))
+      : "No se detectó un efectivo en este archivo";
+    const pill = f.nota
+      ? `<span class="pill pill-yes">Expediente abierto encontrado — falta desde ${formatDate(f.nota.fecha_falta)} · N.º ${escapeHtml(f.nota.numero_nota_falta || "-")}</span>`
+      : `<span class="pill pill-no">No se encontró un expediente abierto para esta persona — no se puede registrar</span>`;
+    return `
+      <div class="multi-efectivo-row">
+        <label class="checkbox-row"><input type="checkbox" class="cfCheck" ${f.nota ? "checked" : "disabled"} /></label>
+        <div class="value" style="flex:1">
+          <div>${nombreLinea} <span class="muted small">(${escapeHtml(f.file.name)})</span></div>
+          <div style="display:flex; gap:8px; margin-top:6px">
+            <input type="date" class="cfFechaRow" value="${escapeHtml(f.fecha)}" style="flex:1" />
+            <input type="text" class="cfNumeroRow" value="${escapeHtml(f.numero_nota)}" placeholder="N.º de nota" style="flex:1" />
+            <input type="text" class="cfOficialRow" value="${escapeHtml(f.oficial_constato)}" placeholder="Quién pasó revista" style="flex:1" />
+          </div>
+          ${pill}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+$("btnContinuanFaltosLote")?.addEventListener("click", () => {
+  $("cfArchivo").value = "";
+  $("cfStatus").classList.add("hidden");
+  $("cfError").classList.add("hidden");
+  continuanFaltosLoteFilas = [];
+  renderContinuanFaltosLoteList();
+  $("modalContinuanFaltosLote").classList.remove("hidden");
+});
+$("btnCerrarModalContinuanFaltos")?.addEventListener("click", closeContinuanFaltosLoteModal);
+$("btnCancelarContinuanFaltosLote")?.addEventListener("click", closeContinuanFaltosLoteModal);
+function closeContinuanFaltosLoteModal() { $("modalContinuanFaltosLote").classList.add("hidden"); }
+
+$("cfArchivo")?.addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  const statusEl = $("cfStatus");
+  continuanFaltosLoteFilas = [];
+  renderContinuanFaltosLoteList();
+  if (!files.length) { statusEl.classList.add("hidden"); return; }
+  statusEl.textContent = `Leyendo ${files.length} archivo(s)...`;
+  statusEl.classList.remove("hidden");
+  try {
+    const filas = [];
+    for (const file of files) {
+      if (file.type !== "application/pdf") continue;
+      const text = await extractPdfText(file, (msg) => { statusEl.textContent = `${file.name}: ${msg}`; });
+      const norm = text.replace(/\s+/g, " ");
+      let doc, candidates;
+      try {
+        statusEl.textContent = `${file.name}: interpretando el contenido con IA...`;
+        doc = normalizarResultadoFaltaIA(await extraerDatosNotaIA(text, "falta"));
+        candidates = doc.candidates;
+      } catch (iaErr) {
+        console.error("Extracción por IA falló, se usa el reconocimiento por patrones como respaldo:", iaErr);
+        doc = parseNotaInformativa(text);
+        candidates = (doc.candidates && doc.candidates.length)
+          ? doc.candidates
+          : extractPersonCandidates(norm).map((c) => ({ grado: c.grado, ...splitApellidosNombres(c.nombreCompleto) }));
+      }
+      const base = {
+        file,
+        fecha: doc.fecha_falta || "",
+        numero_nota: doc.numero_nota_falta || "",
+        oficial_constato: doc.oficial_constato || "",
+      };
+      const lista = (candidates && candidates.length)
+        ? candidates
+        : [{ grado: doc.grado || "", apellidos: doc.apellidos || "", nombres: doc.nombres || "" }];
+      for (const c of lista) {
+        const candidate = { grado: (c.grado || "").trim(), apellidos: (c.apellidos || "").trim(), nombres: (c.nombres || "").trim() };
+        const nota = candidate.apellidos ? buscarNotaPendiente(null, candidate) : null;
+        filas.push({ ...base, candidate: candidate.apellidos ? candidate : null, nota });
+      }
+    }
+    continuanFaltosLoteFilas = filas;
+    renderContinuanFaltosLoteList();
+    const encontrados = filas.filter((f) => f.nota).length;
+    statusEl.textContent = `Se procesaron ${files.length} archivo(s): ${encontrados} de ${filas.length} coinciden con un expediente abierto. Verifique antes de guardar.`;
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "No se pudieron leer algunos archivos automáticamente.";
+  }
+});
+
+$("btnGuardarContinuanFaltosLote")?.addEventListener("click", async (e) => {
+  const errEl = $("cfError");
+  errEl.classList.add("hidden");
+  const btnLote = e.currentTarget;
+
+  const rows = [...document.querySelectorAll("#cfLista .multi-efectivo-row")];
+  const seleccionados = rows
+    .map((row, i) => ({ row, fila: continuanFaltosLoteFilas[i] }))
+    .filter(({ row, fila }) => row.querySelector(".cfCheck").checked && fila?.nota);
+
+  if (!seleccionados.length) {
+    errEl.textContent = "No hay expedientes coincidentes seleccionados para registrar.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  for (const { row, fila } of seleccionados) {
+    const fecha = row.querySelector(".cfFechaRow").value;
+    const numero = row.querySelector(".cfNumeroRow").value.trim();
+    if (!fecha || !numero) {
+      errEl.textContent = `Complete fecha y N.º de nota para ${nombreInvestigadoVisible(fila.nota)}.`;
+      errEl.classList.remove("hidden");
+      return;
+    }
+  }
+
+  ocuparBoton(btnLote, true, "Guardando...");
+  try {
+    let ultimoError = null;
+    for (const { row, fila } of seleccionados) {
+      const fecha = row.querySelector(".cfFechaRow").value;
+      const numero = row.querySelector(".cfNumeroRow").value.trim();
+      const oficial = row.querySelector(".cfOficialRow").value.trim();
+      const entradas = [...(fila.nota.seguimiento_faltas || []), { fecha, numero_nota: numero, oficial_constato: oficial || null }];
+      const { error } = await supabase.from("notas_informativas").update({ seguimiento_faltas: entradas }).eq("id", fila.nota.id);
+      if (error) ultimoError = error;
+    }
+    if (ultimoError) {
+      errEl.textContent = "Algunos expedientes no se pudieron actualizar: " + ultimoError.message;
+      errEl.classList.remove("hidden");
+    } else {
+      toast(`Seguimiento registrado en ${seleccionados.length} expediente(s).`, "ok");
+    }
+    continuanFaltosLoteFilas = [];
+    closeContinuanFaltosLoteModal();
+    loadNotas();
+  } finally {
+    ocuparBoton(btnLote, false);
+  }
+});
+
 // ---------- Faltas desde PDF (uno o varios archivos), en lote ----------
 // Equivalente a la reincorporación en lote, pero para el inicio del trámite:
 // cada PDF de nota de falta -- uno por efectivo o uno grupal con varios --
