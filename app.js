@@ -1736,7 +1736,7 @@ async function renderNotaDetail(nota) {
           <p id="informeAdminError" class="error hidden" role="alert"></p>
           <button type="submit" class="btn-primary">${svgIco("descargar")}Generar Informe Administrativo (.zip)</button>
         </form>
-      ` : `<p class="muted small">Para generar el informe, complete primero la fecha/hora/N.º de nota de la falta y de la reincorporación.</p>`}
+      ` : `<p class="muted small">Para generar el informe, complete primero la fecha/hora/N.º de nota de la falta (y, si ya se registró la reincorporación, que esté completa). No es obligatorio esperar a la reincorporación: si la ausencia sigue en curso, el informe la documenta "a la fecha de elaboración".</p>`}
     </div>
     ` : ""}
 
@@ -2181,7 +2181,11 @@ async function generarPaqueteInformeZip(nota, firmantes) {
   }
   await agregar(nota.archivo_reincorporacion_path, `Reincorporacion ${nota.fecha_reincorporacion} - ${nota.archivo_reincorporacion_nombre || "nota.pdf"}`, "Notas Informativas");
 
-  for (const fecha of diasDeAusencia(nota.fecha_falta, nota.fecha_reincorporacion)) {
+  // Sin reincorporación todavía, se cierra el rango con hoy (igual que hace
+  // construirDatosInformeAdministrativo) para no dejar de adjuntar los roles
+  // de servicio ya guardados de los días transcurridos.
+  const fechaCierreZip = nota.fecha_reincorporacion || new Date().toISOString().slice(0, 10);
+  for (const fecha of diasDeAusencia(nota.fecha_falta, fechaCierreZip)) {
     const rol = (state.rolesServicio || []).find((r) => r.fecha === fecha);
     if (rol) await agregar(rol.archivo_path, `Rol ${fecha} - ${rol.archivo_nombre || "rol.pdf"}`, "Roles de Servicio");
   }
