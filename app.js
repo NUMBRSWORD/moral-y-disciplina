@@ -3275,14 +3275,26 @@ function extraerNumeroReferencia(text) {
 // correcto para Reincorporación), "Continúan faltos" también debe poder
 // registrarse sobre un expediente que YA se cerró mientras tanto (Hans puede
 // subir el seguimiento de un día intermedio después de haber cerrado el caso
-// con la reincorporación). Si el REF. coincide con exactamente un N.º de nota
-// de falta en todo el historial, se usa ese — abierto o cerrado, no importa,
-// porque el REF. ya identifica el expediente sin ambigüedad. Si no hay REF. o
-// no matchea único, se cae al comportamiento de siempre (solo pendientes).
+// con la reincorporación). Si el REF. coincide con un N.º de nota de falta
+// en todo el historial (abierto o cerrado), se usa ese — pero una nota de
+// falta grupal reporta a VARIAS personas bajo el mismo N.º (una fila por
+// efectivo), así que si el número solo no alcanza para desambiguar, se
+// desambigua por nombre DENTRO de ese grupo (nunca contra todo el
+// historial, para no pegar el seguimiento al tocayo de otro expediente). Si
+// no hay REF. o nada de esto resuelve, se cae al comportamiento de siempre
+// (solo pendientes, por nombre).
 function buscarNotaPorSeguimiento(numeroFaltaRef, candidate) {
   if (numeroFaltaRef) {
     const porNumero = state.notas.filter((n) => n.numero_nota_falta === numeroFaltaRef);
     if (porNumero.length === 1) return porNumero[0];
+    if (porNumero.length > 1 && candidate) {
+      const objetivo = normalizarNombre(candidate.apellidos, candidate.nombres);
+      const exactos = porNumero.filter((n) => normalizarNombre(n.apellidos, n.nombres) === objetivo);
+      if (exactos.length === 1) return exactos[0];
+      const apellidosCand = normalizarTexto(candidate.apellidos);
+      const porApellidos = porNumero.filter((n) => normalizarTexto(n.apellidos) === apellidosCand);
+      if (porApellidos.length === 1) return porApellidos[0];
+    }
   }
   return buscarNotaPendiente(numeroFaltaRef, candidate);
 }
