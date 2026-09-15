@@ -2169,15 +2169,21 @@ async function generarPaqueteInformeZip(nota, firmantes) {
     else faltantes.push(nombreSugerido);
   };
 
-  await agregar(nota.archivo_nota_path, nota.archivo_nota_nombre || `nota_falta_${nota.fecha_falta}.pdf`, "Notas Informativas");
+  // El nombre del anexo SIEMPRE empieza con categoría+fecha, nunca solo el
+  // nombre original del archivo: varios documentos de un mismo caso (falta,
+  // reincorporación, roles de servicio de días distintos) suelen venir del
+  // mismo lote escaneado con el mismo nombre genérico (ej. "DIVCOP 1.pdf"),
+  // y con solo ese nombre dos anexos distintos terminan pisándose entre sí
+  // dentro del .zip (el segundo sobrescribe al primero, silenciosamente).
+  await agregar(nota.archivo_nota_path, `Falta ${nota.fecha_falta} - ${nota.archivo_nota_nombre || "nota.pdf"}`, "Notas Informativas");
   for (const s of (nota.seguimiento_faltas || [])) {
-    await agregar(s.archivo_path, s.archivo_nombre || `seguimiento_${s.fecha}.pdf`, "Notas Informativas");
+    await agregar(s.archivo_path, `Continua falto ${s.fecha} - ${s.archivo_nombre || "nota.pdf"}`, "Notas Informativas");
   }
-  await agregar(nota.archivo_reincorporacion_path, nota.archivo_reincorporacion_nombre || `nota_reincorporacion_${nota.fecha_reincorporacion}.pdf`, "Notas Informativas");
+  await agregar(nota.archivo_reincorporacion_path, `Reincorporacion ${nota.fecha_reincorporacion} - ${nota.archivo_reincorporacion_nombre || "nota.pdf"}`, "Notas Informativas");
 
   for (const fecha of diasDeAusencia(nota.fecha_falta, nota.fecha_reincorporacion)) {
     const rol = (state.rolesServicio || []).find((r) => r.fecha === fecha);
-    if (rol) await agregar(rol.archivo_path, rol.archivo_nombre || `rol_servicio_${fecha}.pdf`, "Roles de Servicio");
+    if (rol) await agregar(rol.archivo_path, `Rol ${fecha} - ${rol.archivo_nombre || "rol.pdf"}`, "Roles de Servicio");
   }
 
   // renderizarInformeAdministrativoDocx ya cargó PizZip/Docxtemplater; este
