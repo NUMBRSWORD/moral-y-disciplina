@@ -3699,20 +3699,31 @@ $("btnGuardarContinuanFaltosLote")?.addEventListener("click", async (e) => {
       if (!upErr) archivosSubidos.set(fila.file, { path, nombre: fila.file.name });
     }
 
-    let ultimoError = null;
+    // Se acumula en memoria por nota (no se relee de la base entre vueltas):
+    // si varias filas seleccionadas apuntan al MISMO expediente (p. ej. tres
+    // "Continúan faltos" distintos de la misma persona, subidos juntos), cada
+    // una debe sumarse a lo que ya llevan las anteriores de esta misma tanda,
+    // no partir de "fila.nota.seguimiento_faltas" desactualizado -- si no, el
+    // último UPDATE pisa a los anteriores y se pierden todas las entradas
+    // menos la última (bug real encontrado 2026-09-15: así se perdieron 2 de
+    // 3 registros de un mismo efectivo).
+    const acumulado = new Map();
     for (const { row, fila } of seleccionados) {
       const fecha = row.querySelector(".cfFechaRow").value;
       const numero = row.querySelector(".cfNumeroRow").value.trim();
       const oficial = row.querySelector(".cfOficialRow").value.trim();
       const archivo = archivosSubidos.get(fila.file);
-      // Si ya había una entrada para ese mismo día (p. ej. se registró antes
-      // sin archivo y ahora se vuelve a subir con el PDF), la reemplaza en
-      // vez de duplicarla -- así queda idempotente re-subir un día.
+      const base = acumulado.get(fila.nota.id) || fila.nota.seguimiento_faltas || [];
       const entradas = [
-        ...(fila.nota.seguimiento_faltas || []).filter((s) => s.fecha !== fecha),
+        ...base.filter((s) => s.fecha !== fecha),
         { fecha, numero_nota: numero, oficial_constato: oficial || null, archivo_path: archivo?.path || null, archivo_nombre: archivo?.nombre || null },
       ];
-      const { error } = await supabase.from("notas_informativas").update({ seguimiento_faltas: entradas }).eq("id", fila.nota.id);
+      acumulado.set(fila.nota.id, entradas);
+    }
+
+    let ultimoError = null;
+    for (const [notaId, entradas] of acumulado) {
+      const { error } = await supabase.from("notas_informativas").update({ seguimiento_faltas: entradas }).eq("id", notaId);
       if (error) ultimoError = error;
     }
     if (ultimoError) {
