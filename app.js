@@ -5,6 +5,7 @@ import saveAs from "https://esm.sh/file-saver@2.0.5";
 import { renderizarImputacionDocx, construirDatosImputacion, puedeGenerarImputacion, buscarOficialConstato, tokens } from "./lib/imputacion.js";
 import { renderizarActaNoDescargoDocx, construirDatosActaNoDescargo, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
 import { renderizarOrdenSancionDocx, construirDatosOrdenSancion, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
+import { generarInformeAdministrativoDocx, puedeGenerarInformeAdministrativo } from "./lib/informeAdministrativo.js";
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva, subirArchivoDirectiva } from "./lib/directivas.js";
 import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocumento, actualizarContenidoDocumentoInstitucional } from "./lib/cumplimiento.js";
@@ -1545,6 +1546,8 @@ async function renderNotaDetail(nota) {
   const puedeSancion = puedeGenerarOrdenSancion(nota, state.efectivos);
   const opcionesSancion = opcionesTercio(nota.codigo_infraccion) || [];
   const avisoConsistencia = verificarConsistenciaCodigo(nota);
+  const puedeInformeAdmin = puedeGenerarInformeAdministrativo(nota, state.efectivos);
+  const yoMismoInforme = state.cip ? state.efectivos.find((ef) => ef.cip === state.cip) : null;
 
   $("notaDetailContent").innerHTML = `
     <div class="detail-card">
@@ -1710,6 +1713,29 @@ async function renderNotaDetail(nota) {
     </div>
     ` : ""}
 
+    ${!codigoEsLeve && isAdmin && (nota.codigo_infraccion || "").trim() ? `
+    <div class="detail-card">
+      <h3>Informe Administrativo (infracción GRAVE)</h3>
+      ${puedeInformeAdmin ? `
+        <p class="muted small">El código registrado (${escapeHtml(nota.codigo_infraccion)}) corresponde a una infracción GRAVE — fuera del alcance de esta app, que solo tramita leves hasta la Orden de Sanción. Este informe no sanciona nada aquí: documenta la ausencia y la REMITE al órgano disciplinario competente.</p>
+        <form id="informeAdminForm">
+          <p class="form-section-title" style="margin-top:0">Firmas</p>
+          <div class="grid-2">
+            <label>Grado de quien firma "ES CONFORME"<input type="text" id="iaConformeGrado" placeholder="Ej. MAY. PNP" /></label>
+            <label>Nombre de quien firma "ES CONFORME"<input type="text" id="iaConformeNombre" required placeholder="Ej. ROJAS GUINEA, Aldo Canziani" /></label>
+          </div>
+          <label>Cargo de quien firma "ES CONFORME"<input type="text" id="iaConformeCargo" placeholder="Ej. Comisario (e) CPNP Ventanilla" /></label>
+          <div class="grid-2">
+            <label>Su grado (instructor)<input type="text" id="iaInstructorGrado" value="${escapeHtml(yoMismoInforme?.grado || "")}" /></label>
+            <label>Su nombre (instructor)<input type="text" id="iaInstructorNombre" required value="${escapeHtml(yoMismoInforme?.apellidos_nombres || "")}" /></label>
+          </div>
+          <p id="informeAdminError" class="error hidden" role="alert"></p>
+          <button type="submit" class="btn-primary">${svgIco("descargar")}Generar Informe Administrativo</button>
+        </form>
+      ` : `<p class="muted small">Para generar el informe, complete primero la fecha/hora/N.º de nota de la falta y de la reincorporación.</p>`}
+    </div>
+    ` : ""}
+
     ${(isAdmin || esDuenoDeLaNota) && nota.orden_sancion_generada_at ? `
     <div class="detail-card">
       <h3>Cargo del expediente firmado</h3>
@@ -1849,6 +1875,7 @@ async function renderNotaDetail(nota) {
     $("codigoInfraccionForm")?.addEventListener("submit", (e) => submitCodigoInfraccion(e, nota.id));
     $("puestoRolForm")?.addEventListener("submit", (e) => submitPuestoRol(e, nota.id));
     $("reincForm")?.addEventListener("submit", (e) => submitReincorporacion(e, nota.id));
+    $("informeAdminForm")?.addEventListener("submit", (e) => submitInformeAdministrativo(e, nota));
     $("rArchivo")?.addEventListener("change", (e) => autocompletarReincorporacion(e.target.files[0]));
     $("expForm")?.addEventListener("submit", (e) => submitExpediente(e, nota.id));
   }
@@ -2105,6 +2132,37 @@ async function submitSancion(e, nota) {
     submitBtn.disabled = false;
     submitBtn.classList.remove("is-busy");
     submitBtn.textContent = textoOriginal;
+  }
+}
+
+// Descarga el Informe Administrativo (infracción GRAVE, G39/MG32) — solo
+// genera y descarga el .docx, sin guardar nada en la nota: es un documento de
+// referencia hacia otra instancia, no cambia el estado del trámite leve.
+async function submitInformeAdministrativo(e, nota) {
+  e.preventDefault();
+  const errEl = $("informeAdminError");
+  errEl.classList.add("hidden");
+  const firmantes = {
+    conforme: {
+      grado: $("iaConformeGrado").value.trim(),
+      nombre: $("iaConformeNombre").value.trim(),
+      cargo: $("iaConformeCargo").value.trim(),
+    },
+    instructor: {
+      grado: $("iaInstructorGrado").value.trim(),
+      nombre: $("iaInstructorNombre").value.trim(),
+    },
+  };
+  const submitBtn = e.target.querySelector("button[type=submit]");
+  ocuparBoton(submitBtn, true, "Generando...");
+  try {
+    await generarInformeAdministrativoDocx(nota, state.efectivos, state.rolesServicio, firmantes);
+  } catch (err) {
+    console.error(err);
+    errEl.textContent = "Error: " + (err.message || err);
+    errEl.classList.remove("hidden");
+  } finally {
+    ocuparBoton(submitBtn, false);
   }
 }
 
