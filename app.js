@@ -1721,15 +1721,17 @@ async function renderNotaDetail(nota) {
       ${puedeInformeAdmin ? `
         <p class="muted small">El código registrado (${escapeHtml(nota.codigo_infraccion)}) corresponde a una infracción ${escapeHtml(severidadInforme)} — fuera del alcance de esta app, que solo tramita leves hasta la Orden de Sanción. Este informe no sanciona nada aquí: documenta la ausencia y la REMITE al órgano disciplinario competente. Se descarga un <strong>.zip</strong> con el informe y, si están subidos, las Notas Informativas y los Roles de Servicio de cada día del periodo — listo para remitir.</p>
         <form id="informeAdminForm">
-          <p class="form-section-title" style="margin-top:0">Firmas</p>
+          <p class="form-section-title" style="margin-top:0">Firmas — 2 personas: quien da la conformidad, y usted como instructor</p>
+          <p class="muted small" style="margin-bottom:6px"><strong>1. Quien firma "ES CONFORME"</strong> (Comisario u otro mando — una sola persona, estos 3 campos son sus datos)</p>
           <div class="grid-2">
-            <label>Grado de quien firma "ES CONFORME"<input type="text" id="iaConformeGrado" placeholder="Ej. MAY. PNP" /></label>
-            <label>Nombre de quien firma "ES CONFORME"<input type="text" id="iaConformeNombre" required placeholder="Ej. ROJAS GUINEA, Aldo Canziani" /></label>
+            <label>Grado<input type="text" id="iaConformeGrado" placeholder="Ej. MAY. PNP" /></label>
+            <label>Nombre<input type="text" id="iaConformeNombre" required placeholder="Ej. ROJAS GUINEA, Aldo Canziani" /></label>
           </div>
-          <label>Cargo de quien firma "ES CONFORME"<input type="text" id="iaConformeCargo" placeholder="Ej. Comisario (e) CPNP Ventanilla" /></label>
+          <label>Cargo<input type="text" id="iaConformeCargo" placeholder="Ej. Comisario (e) CPNP Ventanilla" /></label>
+          <p class="muted small" style="margin-bottom:6px"><strong>2. Instructor</strong> (usted)</p>
           <div class="grid-2">
-            <label>Su grado (instructor)<input type="text" id="iaInstructorGrado" value="${escapeHtml(yoMismoInforme?.grado || "")}" /></label>
-            <label>Su nombre (instructor)<input type="text" id="iaInstructorNombre" required value="${escapeHtml(yoMismoInforme?.apellidos_nombres || "")}" /></label>
+            <label>Grado<input type="text" id="iaInstructorGrado" value="${escapeHtml(yoMismoInforme?.grado || "")}" /></label>
+            <label>Nombre<input type="text" id="iaInstructorNombre" required value="${escapeHtml(yoMismoInforme?.apellidos_nombres || "")}" /></label>
           </div>
           <p id="informeAdminError" class="error hidden" role="alert"></p>
           <button type="submit" class="btn-primary">${svgIco("descargar")}Generar Informe Administrativo (.zip)</button>
