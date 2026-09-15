@@ -5,7 +5,8 @@ import saveAs from "https://esm.sh/file-saver@2.0.5";
 import { renderizarImputacionDocx, construirDatosImputacion, puedeGenerarImputacion, buscarOficialConstato, tokens } from "./lib/imputacion.js";
 import { renderizarActaNoDescargoDocx, construirDatosActaNoDescargo, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
 import { renderizarOrdenSancionDocx, construirDatosOrdenSancion, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
-import { generarInformeAdministrativoDocx, puedeGenerarInformeAdministrativo } from "./lib/informeAdministrativo.js";
+import { renderizarInformeAdministrativoDocx, puedeGenerarInformeAdministrativo, diasDeAusencia } from "./lib/informeAdministrativo.js";
+import { cargarDocxDeps } from "./lib/docxDeps.js";
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva, subirArchivoDirectiva } from "./lib/directivas.js";
 import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocumento, actualizarContenidoDocumentoInstitucional } from "./lib/cumplimiento.js";
@@ -1717,7 +1718,7 @@ async function renderNotaDetail(nota) {
     <div class="detail-card">
       <h3>Informe Administrativo (infracción GRAVE)</h3>
       ${puedeInformeAdmin ? `
-        <p class="muted small">El código registrado (${escapeHtml(nota.codigo_infraccion)}) corresponde a una infracción GRAVE — fuera del alcance de esta app, que solo tramita leves hasta la Orden de Sanción. Este informe no sanciona nada aquí: documenta la ausencia y la REMITE al órgano disciplinario competente.</p>
+        <p class="muted small">El código registrado (${escapeHtml(nota.codigo_infraccion)}) corresponde a una infracción GRAVE — fuera del alcance de esta app, que solo tramita leves hasta la Orden de Sanción. Este informe no sanciona nada aquí: documenta la ausencia y la REMITE al órgano disciplinario competente. Se descarga un <strong>.zip</strong> con el informe y, si están subidos, las Notas Informativas y los Roles de Servicio de cada día del periodo — listo para remitir.</p>
         <form id="informeAdminForm">
           <p class="form-section-title" style="margin-top:0">Firmas</p>
           <div class="grid-2">
@@ -1730,7 +1731,7 @@ async function renderNotaDetail(nota) {
             <label>Su nombre (instructor)<input type="text" id="iaInstructorNombre" required value="${escapeHtml(yoMismoInforme?.apellidos_nombres || "")}" /></label>
           </div>
           <p id="informeAdminError" class="error hidden" role="alert"></p>
-          <button type="submit" class="btn-primary">${svgIco("descargar")}Generar Informe Administrativo</button>
+          <button type="submit" class="btn-primary">${svgIco("descargar")}Generar Informe Administrativo (.zip)</button>
         </form>
       ` : `<p class="muted small">Para generar el informe, complete primero la fecha/hora/N.º de nota de la falta y de la reincorporación.</p>`}
     </div>
@@ -2138,6 +2139,60 @@ async function submitSancion(e, nota) {
 // Descarga el Informe Administrativo (infracción GRAVE, G39/MG32) — solo
 // genera y descarga el .docx, sin guardar nada en la nota: es un documento de
 // referencia hacia otra instancia, no cambia el estado del trámite leve.
+// Descarga un archivo del bucket "notas" como Blob; null si no hay path o si
+// falla (un anexo faltante no debe tumbar el paquete completo — se arma con
+// lo que sí se pudo conseguir y se avisa cuáles faltaron).
+async function descargarArchivoStorage(path) {
+  if (!path) return null;
+  const { data, error } = await supabase.storage.from("notas").download(path);
+  if (error || !data) return null;
+  return data;
+}
+
+// Arma el ZIP completo del Informe Administrativo: el .docx recién generado
+// + todas las Notas Informativas de la ausencia (falta original, cada
+// "Continúan faltos" que tenga archivo, y la de reincorporación) + los Roles
+// de Servicio guardados de cada día del periodo — listo para remitir al
+// órgano disciplinario sin tener que ir a buscar cada PDF por separado.
+async function generarPaqueteInformeZip(nota, firmantes) {
+  const informeBlob = await renderizarInformeAdministrativoDocx(nota, state.efectivos, state.rolesServicio, firmantes);
+
+  const anexos = [];
+  const faltantes = [];
+  const agregar = async (path, nombreSugerido, carpeta) => {
+    if (!path) return;
+    const blob = await descargarArchivoStorage(path);
+    if (blob) anexos.push({ nombre: `${carpeta}/${nombreSugerido}`, blob });
+    else faltantes.push(nombreSugerido);
+  };
+
+  await agregar(nota.archivo_nota_path, nota.archivo_nota_nombre || `nota_falta_${nota.fecha_falta}.pdf`, "Notas Informativas");
+  for (const s of (nota.seguimiento_faltas || [])) {
+    await agregar(s.archivo_path, s.archivo_nombre || `seguimiento_${s.fecha}.pdf`, "Notas Informativas");
+  }
+  await agregar(nota.archivo_reincorporacion_path, nota.archivo_reincorporacion_nombre || `nota_reincorporacion_${nota.fecha_reincorporacion}.pdf`, "Notas Informativas");
+
+  for (const fecha of diasDeAusencia(nota.fecha_falta, nota.fecha_reincorporacion)) {
+    const rol = (state.rolesServicio || []).find((r) => r.fecha === fecha);
+    if (rol) await agregar(rol.archivo_path, rol.archivo_nombre || `rol_servicio_${fecha}.pdf`, "Roles de Servicio");
+  }
+
+  // renderizarInformeAdministrativoDocx ya cargó PizZip/Docxtemplater; este
+  // segundo llamado a cargarDocxDeps() reusa esa misma carga en caché, no
+  // vuelve a pedirla por red.
+  const { PizZip } = await cargarDocxDeps();
+  const zip = new PizZip();
+  const nombreBase = `${(nota.grado || "").trim()} ${nombreCompletoVisible(nota.apellidos, nota.nombres)}`.replace(/\s+/g, " ").trim();
+  // PizZip no acepta un Blob directo (lanza "Unsupported data given") — hay
+  // que pasarle el ArrayBuffer ya leído.
+  zip.file(`INFORME ADMINISTRATIVO - ${nombreBase}.docx`, await informeBlob.arrayBuffer());
+  for (const a of anexos) zip.file(a.nombre, await a.blob.arrayBuffer());
+  const zipBlob = zip.generate({ type: "blob", mimeType: "application/zip" });
+  saveAs(zipBlob, `Informe ${nombreBase} - ${(nota.codigo_infraccion || "").trim()}.zip`.replace(/\s+/g, " ").trim());
+
+  return { anexosIncluidos: anexos.length, faltantes };
+}
+
 async function submitInformeAdministrativo(e, nota) {
   e.preventDefault();
   const errEl = $("informeAdminError");
@@ -2156,7 +2211,12 @@ async function submitInformeAdministrativo(e, nota) {
   const submitBtn = e.target.querySelector("button[type=submit]");
   ocuparBoton(submitBtn, true, "Generando...");
   try {
-    await generarInformeAdministrativoDocx(nota, state.efectivos, state.rolesServicio, firmantes);
+    const { anexosIncluidos, faltantes } = await generarPaqueteInformeZip(nota, firmantes);
+    if (faltantes.length) {
+      toast(`ZIP generado con ${anexosIncluidos} anexo(s). No se pudo incluir: ${faltantes.join(", ")} (verifique que el archivo se haya subido).`, "info", 9000);
+    } else {
+      toast(`ZIP generado con el informe y ${anexosIncluidos} anexo(s).`, "ok");
+    }
   } catch (err) {
     console.error(err);
     errEl.textContent = "Error: " + (err.message || err);
@@ -3625,12 +3685,27 @@ $("btnGuardarContinuanFaltosLote")?.addEventListener("click", async (e) => {
 
   ocuparBoton(btnLote, true, "Guardando...");
   try {
+    // Cada PDF se sube una sola vez (puede cubrir a varias personas del mismo
+    // grupo) y el path se guarda en la entrada de seguimiento de cada quien,
+    // para que el Informe Administrativo pueda incluirlo en el ZIP de anexos.
+    const archivosSubidos = new Map();
+    for (const { fila } of seleccionados) {
+      if (archivosSubidos.has(fila.file)) continue;
+      const path = `seguimiento/${Date.now()}_${fila.file.name}`;
+      const { error: upErr } = await supabase.storage.from("notas").upload(path, fila.file);
+      if (!upErr) archivosSubidos.set(fila.file, { path, nombre: fila.file.name });
+    }
+
     let ultimoError = null;
     for (const { row, fila } of seleccionados) {
       const fecha = row.querySelector(".cfFechaRow").value;
       const numero = row.querySelector(".cfNumeroRow").value.trim();
       const oficial = row.querySelector(".cfOficialRow").value.trim();
-      const entradas = [...(fila.nota.seguimiento_faltas || []), { fecha, numero_nota: numero, oficial_constato: oficial || null }];
+      const archivo = archivosSubidos.get(fila.file);
+      const entradas = [...(fila.nota.seguimiento_faltas || []), {
+        fecha, numero_nota: numero, oficial_constato: oficial || null,
+        archivo_path: archivo?.path || null, archivo_nombre: archivo?.nombre || null,
+      }];
       const { error } = await supabase.from("notas_informativas").update({ seguimiento_faltas: entradas }).eq("id", fila.nota.id);
       if (error) ultimoError = error;
     }
