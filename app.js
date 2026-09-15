@@ -2737,6 +2737,18 @@ function extractPersonCandidates(norm) {
     return bullets.map((m) => ({ grado: m[1].trim(), nombreCompleto: m[2].trim() }));
   }
 
+  // Nota de "sigue faltando" (Continúan faltos): el investigado real aparece
+  // recién después de "constató que", NO en el "da cuenta que" inicial (ese
+  // suele nombrar a quien pasó revista ese día, no a quien falta) — p. ej.
+  // "...da cuenta que, la ALFZ. PNP SOLANO NUÑEZ..., al pasar lista...,
+  // constató que el S3 PNP MEJIA GERMANI Jhony Jimy, Continúan falto...".
+  // Se ancla en "constató que" y se exige que el texto realmente hable de
+  // una ausencia que continúa, para no disparar en otro tipo de nota.
+  if (/continú[a-z]*\s+falt/i.test(norm)) {
+    const mConstato = norm.match(/constat[oó]\s+que\s+(?:el|la|los|las)?\s*([A-Z0-9./]{1,8})\s+PNP\.?\s+([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+){0,4}?)(?=\s*,|\s+y\s+|\s*$)/i);
+    if (mConstato) return [{ grado: mConstato[1].trim(), nombreCompleto: mConstato[2].trim() }];
+  }
+
   // "el Comisario ... da cuenta que el/la GRADO PNP NOMBRE, GRADO PNP NOMBRE, ...
   // y GRADO PNP NOMBRE se <verbo>". Formato más estable entre notas de falta y
   // de reincorporación: a diferencia del ASUNTO (que a veces omite "PNP"), este
