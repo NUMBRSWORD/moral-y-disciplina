@@ -3705,10 +3705,13 @@ $("btnGuardarContinuanFaltosLote")?.addEventListener("click", async (e) => {
       const numero = row.querySelector(".cfNumeroRow").value.trim();
       const oficial = row.querySelector(".cfOficialRow").value.trim();
       const archivo = archivosSubidos.get(fila.file);
-      const entradas = [...(fila.nota.seguimiento_faltas || []), {
-        fecha, numero_nota: numero, oficial_constato: oficial || null,
-        archivo_path: archivo?.path || null, archivo_nombre: archivo?.nombre || null,
-      }];
+      // Si ya había una entrada para ese mismo día (p. ej. se registró antes
+      // sin archivo y ahora se vuelve a subir con el PDF), la reemplaza en
+      // vez de duplicarla -- así queda idempotente re-subir un día.
+      const entradas = [
+        ...(fila.nota.seguimiento_faltas || []).filter((s) => s.fecha !== fecha),
+        { fecha, numero_nota: numero, oficial_constato: oficial || null, archivo_path: archivo?.path || null, archivo_nombre: archivo?.nombre || null },
+      ];
       const { error } = await supabase.from("notas_informativas").update({ seguimiento_faltas: entradas }).eq("id", fila.nota.id);
       if (error) ultimoError = error;
     }
