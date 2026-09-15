@@ -5,7 +5,7 @@ import saveAs from "https://esm.sh/file-saver@2.0.5";
 import { renderizarImputacionDocx, construirDatosImputacion, puedeGenerarImputacion, buscarOficialConstato, tokens } from "./lib/imputacion.js";
 import { renderizarActaNoDescargoDocx, construirDatosActaNoDescargo, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
 import { renderizarOrdenSancionDocx, construirDatosOrdenSancion, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
-import { renderizarInformeAdministrativoDocx, puedeGenerarInformeAdministrativo, diasDeAusencia } from "./lib/informeAdministrativo.js";
+import { renderizarInformeAdministrativoDocx, puedeGenerarInformeAdministrativo, diasDeAusencia, INFRACCIONES_GRAVES } from "./lib/informeAdministrativo.js";
 import { cargarDocxDeps } from "./lib/docxDeps.js";
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva, subirArchivoDirectiva } from "./lib/directivas.js";
@@ -1549,6 +1549,7 @@ async function renderNotaDetail(nota) {
   const avisoConsistencia = verificarConsistenciaCodigo(nota);
   const puedeInformeAdmin = puedeGenerarInformeAdministrativo(nota, state.efectivos);
   const yoMismoInforme = state.cip ? state.efectivos.find((ef) => ef.cip === state.cip) : null;
+  const severidadInforme = INFRACCIONES_GRAVES[String(nota.codigo_infraccion || "").toUpperCase().replace(/\s+/g, "")]?.severidad || "GRAVE";
 
   $("notaDetailContent").innerHTML = `
     <div class="detail-card">
@@ -1716,9 +1717,9 @@ async function renderNotaDetail(nota) {
 
     ${!codigoEsLeve && isAdmin && (nota.codigo_infraccion || "").trim() ? `
     <div class="detail-card">
-      <h3>Informe Administrativo (infracción GRAVE)</h3>
+      <h3>Informe Administrativo (infracción ${escapeHtml(severidadInforme)})</h3>
       ${puedeInformeAdmin ? `
-        <p class="muted small">El código registrado (${escapeHtml(nota.codigo_infraccion)}) corresponde a una infracción GRAVE — fuera del alcance de esta app, que solo tramita leves hasta la Orden de Sanción. Este informe no sanciona nada aquí: documenta la ausencia y la REMITE al órgano disciplinario competente. Se descarga un <strong>.zip</strong> con el informe y, si están subidos, las Notas Informativas y los Roles de Servicio de cada día del periodo — listo para remitir.</p>
+        <p class="muted small">El código registrado (${escapeHtml(nota.codigo_infraccion)}) corresponde a una infracción ${escapeHtml(severidadInforme)} — fuera del alcance de esta app, que solo tramita leves hasta la Orden de Sanción. Este informe no sanciona nada aquí: documenta la ausencia y la REMITE al órgano disciplinario competente. Se descarga un <strong>.zip</strong> con el informe y, si están subidos, las Notas Informativas y los Roles de Servicio de cada día del periodo — listo para remitir.</p>
         <form id="informeAdminForm">
           <p class="form-section-title" style="margin-top:0">Firmas</p>
           <div class="grid-2">
@@ -2136,7 +2137,7 @@ async function submitSancion(e, nota) {
   }
 }
 
-// Descarga el Informe Administrativo (infracción GRAVE, G39/MG32) — solo
+// Descarga el Informe Administrativo (infracción GRAVE G39 o MUY GRAVE MG32) — solo
 // genera y descarga el .docx, sin guardar nada en la nota: es un documento de
 // referencia hacia otra instancia, no cambia el estado del trámite leve.
 // Descarga un archivo del bucket "notas" como Blob; null si no hay path o si
