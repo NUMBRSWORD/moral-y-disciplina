@@ -3258,6 +3258,35 @@ function normalizarNombre(apellidos, nombres) {
 // reincorporación a veces abrevia u omite el segundo nombre, o lo escribe con
 // una variante como "Patrick" vs "Patrik") por apellidos exactos únicamente,
 // que rara vez varían entre ambos documentos.
+// El REF. de una nota de "sigue faltando" apunta al N.º de la nota de falta
+// ORIGINAL — un dato mucho más confiable que el nombre para encontrar el
+// expediente correcto (sobre todo con reincidentes: la misma persona puede
+// tener varios expedientes YA CERRADOS, y adivinar por nombre podría pegar la
+// nota en el episodio equivocado). La IA de extracción solo saca este N.º
+// para tipo "reincorporacion" (así está su instrucción), así que aquí se
+// extrae por patrón directo del texto: el N.º de esta nota es la primera
+// mención de "NOTA INFORMATIVA N°", el REF. es la segunda.
+function extraerNumeroReferencia(text) {
+  const matches = [...(text || "").replace(/\s+/g, " ").matchAll(/NOTA\s+INFORMATIVA\s+N[°ºo*]?\.?\s*([0-9]+)/gi)];
+  return matches[1]?.[1] || null;
+}
+
+// A diferencia de buscarNotaPendiente (que solo mira expedientes abiertos,
+// correcto para Reincorporación), "Continúan faltos" también debe poder
+// registrarse sobre un expediente que YA se cerró mientras tanto (Hans puede
+// subir el seguimiento de un día intermedio después de haber cerrado el caso
+// con la reincorporación). Si el REF. coincide con exactamente un N.º de nota
+// de falta en todo el historial, se usa ese — abierto o cerrado, no importa,
+// porque el REF. ya identifica el expediente sin ambigüedad. Si no hay REF. o
+// no matchea único, se cae al comportamiento de siempre (solo pendientes).
+function buscarNotaPorSeguimiento(numeroFaltaRef, candidate) {
+  if (numeroFaltaRef) {
+    const porNumero = state.notas.filter((n) => n.numero_nota_falta === numeroFaltaRef);
+    if (porNumero.length === 1) return porNumero[0];
+  }
+  return buscarNotaPendiente(numeroFaltaRef, candidate);
+}
+
 function buscarNotaPendiente(numeroFaltaRef, candidate) {
   const pendientes = state.notas.filter((n) => !n.fecha_reincorporacion);
   let pool = pendientes;
@@ -3462,8 +3491,8 @@ function renderContinuanFaltosLoteList() {
       ? escapeHtml(nombreInvestigadoVisible(f.candidate, true))
       : "No se detectó un efectivo en este archivo";
     const pill = f.nota
-      ? `<span class="pill pill-yes">Expediente abierto encontrado — falta desde ${formatDate(f.nota.fecha_falta)} · N.º ${escapeHtml(f.nota.numero_nota_falta || "-")}</span>`
-      : `<span class="pill pill-no">No se encontró un expediente abierto para esta persona — no se puede registrar</span>`;
+      ? `<span class="pill pill-yes">Expediente encontrado (${f.nota.fecha_reincorporacion ? "ya reincorporado, se agrega igual al historial" : "abierto"}) — falta desde ${formatDate(f.nota.fecha_falta)} · N.º ${escapeHtml(f.nota.numero_nota_falta || "-")}</span>`
+      : `<span class="pill pill-no">No se encontró un expediente que corresponda a esta persona — no se puede registrar</span>`;
     return `
       <div class="multi-efectivo-row">
         <label class="checkbox-row"><input type="checkbox" class="cfCheck" ${f.nota ? "checked" : "disabled"} /></label>
@@ -3519,6 +3548,7 @@ $("cfArchivo")?.addEventListener("change", async (e) => {
           ? doc.candidates
           : extractPersonCandidates(norm).map((c) => ({ grado: c.grado, ...splitApellidosNombres(c.nombreCompleto) }));
       }
+      const numeroRef = extraerNumeroReferencia(text);
       const base = {
         file,
         fecha: doc.fecha_falta || "",
@@ -3530,7 +3560,7 @@ $("cfArchivo")?.addEventListener("change", async (e) => {
         : [{ grado: doc.grado || "", apellidos: doc.apellidos || "", nombres: doc.nombres || "" }];
       for (const c of lista) {
         const candidate = { grado: (c.grado || "").trim(), apellidos: (c.apellidos || "").trim(), nombres: (c.nombres || "").trim() };
-        const nota = candidate.apellidos ? buscarNotaPendiente(null, candidate) : null;
+        const nota = buscarNotaPorSeguimiento(numeroRef, candidate.apellidos ? candidate : null);
         filas.push({ ...base, candidate: candidate.apellidos ? candidate : null, nota });
       }
     }
