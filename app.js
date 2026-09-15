@@ -2443,6 +2443,7 @@ $("btnNuevaNota").addEventListener("click", () => {
   $("notaFormError").classList.add("hidden");
   $("pdfAutoStatus").classList.add("hidden");
   $("rolAutoStatus").classList.add("hidden");
+  $("faltaAbiertaWarning").classList.add("hidden");
   pdfCandidates = [];
   renderCandidatesChecklist();
   // Quien registra la nota suele ser el mismo oficial que constató --
@@ -2464,6 +2465,28 @@ $("fOficialConstato").addEventListener("input", () => {
 $("btnCerrarModal").addEventListener("click", closeModal);
 $("btnCancelarNota").addEventListener("click", closeModal);
 function closeModal() { $("modalNuevaNota").classList.add("hidden"); }
+
+// Avisa si la persona que se está por registrar ya tiene una nota abierta
+// (sigue faltando, no se ha reincorporado): registrarla de nuevo aquí
+// fragmentaría la misma ausencia en dos notas y el código de infracción
+// (L21/L24/G39/MG32) saldría mal cuando por fin regrese. No bloquea el
+// guardado — el oficial puede tener una razón real para crearla igual — solo
+// avisa con lo que ya se sabe.
+function verificarFaltaAbierta() {
+  const warnEl = $("faltaAbiertaWarning");
+  const apellidos = $("fApellidos").value.trim();
+  if (!apellidos) { warnEl.classList.add("hidden"); return; }
+  const numeroNotaFalta = $("fNumeroNotaFalta").value.trim();
+  const existente = faltaYaRegistrada(numeroNotaFalta, { apellidos, nombres: $("fNombres").value.trim() });
+  if (existente && !existente.fecha_reincorporacion) {
+    warnEl.textContent = `${nombreCompletoVisible(existente.apellidos, existente.nombres)} ya tiene una nota abierta desde el ${formatDate(existente.fecha_falta)}${existente.numero_nota_falta ? ` (N.º ${existente.numero_nota_falta})` : ""}, todavía sin reincorporarse. Si sigue faltando, esta es la MISMA ausencia — no cree una nota nueva; regístrele la reincorporación cuando corresponda y el código de infracción se ajusta solo según el tiempo total ausente.`;
+    warnEl.classList.remove("hidden");
+  } else {
+    warnEl.classList.add("hidden");
+  }
+}
+$("fApellidos").addEventListener("blur", verificarFaltaAbierta);
+$("fNombres").addEventListener("blur", verificarFaltaAbierta);
 
 function splitApellidosNombres(full) {
   const txt = (full || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
@@ -3371,10 +3394,17 @@ $("btnGuardarReincLote").addEventListener("click", async (e) => {
 // después, en cada expediente (depende del tiempo ausente, que aún no se sabe).
 let faltasLoteFilas = [];
 
-// ¿Ya hay una nota para esta persona con este mismo N.º de nota de falta?
-// Evita duplicar si el mismo PDF grupal se sube dos veces o la falta ya se
-// registró a mano. Sin N.º, cualquier nota de esa persona ya cuenta como
-// posible duplicado (se marca para que el oficial decida).
+// ¿Ya hay una nota para esta persona con este mismo N.º de nota de falta, o
+// que siga abierta (todavía no se reincorpora)? Evita duplicar si el mismo
+// PDF grupal se sube dos veces, si la falta ya se registró a mano, o —el caso
+// más importante— si la persona SIGUE faltando y la unidad emite una nota
+// nueva cada día para el mismo hecho (con N.º distinto cada vez). Mientras no
+// se reincorpore, cualquier "falta" nueva de esa persona es la MISMA ausencia
+// que continúa, nunca una segunda: crear otra nota ahí perdería la fecha/hora
+// de inicio real y el código de infracción (L21/L24/G39/MG32) saldría mal
+// cuando por fin regrese. Sin N.º y ya reincorporada, cualquier nota previa de
+// esa persona igual cuenta como posible duplicado (se marca para que el
+// oficial decida).
 function faltaYaRegistrada(numeroNotaFalta, candidate) {
   if (!candidate || !candidate.apellidos) return null;
   const objetivo = normalizarNombre(candidate.apellidos, candidate.nombres);
@@ -3383,6 +3413,7 @@ function faltaYaRegistrada(numeroNotaFalta, candidate) {
     const mismoNombre = normalizarNombre(n.apellidos, n.nombres) === objetivo ||
       (!candidate.nombres && normalizarTexto(n.apellidos) === apellidosObj);
     if (!mismoNombre) return false;
+    if (!n.fecha_reincorporacion) return true;
     if (numeroNotaFalta && n.numero_nota_falta) return n.numero_nota_falta === numeroNotaFalta;
     return true;
   }) || null;
@@ -3393,8 +3424,11 @@ function renderFaltasLoteList() {
   if (!faltasLoteFilas.length) { el.innerHTML = ""; return; }
   el.innerHTML = faltasLoteFilas.map((f, i) => {
     const dup = f.duplicada;
+    const sigueFaltando = dup && !dup.fecha_reincorporacion;
     const pill = dup
-      ? `<span class="pill pill-warning">Ya existe una nota de esta persona${dup.numero_nota_falta ? ` (N.º ${escapeHtml(dup.numero_nota_falta)})` : ""} — no se creará de nuevo</span>`
+      ? sigueFaltando
+        ? `<span class="pill pill-warning">Sigue faltando desde el ${escapeHtml(formatDate(dup.fecha_falta))}${dup.numero_nota_falta ? ` (N.º ${escapeHtml(dup.numero_nota_falta)})` : ""} — no se creará una nota nueva, es la misma ausencia</span>`
+        : `<span class="pill pill-warning">Ya existe una nota de esta persona${dup.numero_nota_falta ? ` (N.º ${escapeHtml(dup.numero_nota_falta)})` : ""} — no se creará de nuevo</span>`
       : `<span class="pill pill-yes">Se creará una nota nueva</span>`;
     return `
       <div class="multi-efectivo-row" data-idx="${i}">
