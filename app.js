@@ -5,6 +5,7 @@ import saveAs from "https://esm.sh/file-saver@2.0.5";
 import { renderizarImputacionDocx, construirDatosImputacion, puedeGenerarImputacion, buscarOficialConstato, tokens } from "./lib/imputacion.js";
 import { renderizarActaNoDescargoDocx, construirDatosActaNoDescargo, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
 import { renderizarOrdenSancionDocx, construirDatosOrdenSancion, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
+import { renderizarArchivoLeveDocx, puedeGenerarArchivoLeve } from "./lib/archivoLeve.js";
 import { renderizarInformeAdministrativoDocx, puedeGenerarInformeAdministrativo, diasDeAusencia, INFRACCIONES_GRAVES } from "./lib/informeAdministrativo.js";
 import { cargarDocxDeps } from "./lib/docxDeps.js";
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
@@ -715,6 +716,11 @@ function obtenerAccionesPrioritariasNotas() {
           ? "La ausencia ya se cerró. Complete las firmas y descargue el Informe Administrativo."
           : "La ausencia sigue en curso -- ya puede generar el Informe Administrativo \"a la fecha\", sin esperar la reincorporación.",
       }];
+    }
+    if (nota.archivo_leve_generada_at) {
+      // Archivado sin sanción: caso concluido, no debe seguir sugiriendo
+      // "Preparar Orden de Sanción" solo porque fecha_descargo está presente.
+      return [];
     }
     if (nota.orden_sancion_generada_at && !nota.orden_notificada_at) {
       return [{ nota, nombre, prioridad: 0, tipo: "Cargar expediente firmado", detalle: "La Orden ya se generó; suba el legajo completo firmado y registre la fecha de notificación.", clase: "is-urgent" }];
@@ -1532,7 +1538,7 @@ async function renderNotaDetail(nota) {
     .select("*")
     .eq("nota_id", nota.id)
     .order("generado_at", { ascending: false });
-  const TIPO_DOCUMENTO_LABEL = { imputacion: "Imputación", acta_no_descargo: "Acta de No Descargo", orden_sancion: "Orden de Sanción" };
+  const TIPO_DOCUMENTO_LABEL = { imputacion: "Imputación", acta_no_descargo: "Acta de No Descargo", orden_sancion: "Orden de Sanción", archivo_leve: "Archivo del Procedimiento" };
   const versionesHtml = versionesDocs?.length
     ? (await Promise.all(versionesDocs.map(async (v) => {
         const link = await fileLinkHtml("notas", v.archivo_path, v.archivo_nombre);
@@ -1558,6 +1564,7 @@ async function renderNotaDetail(nota) {
   const fechaLimite = fechaLimiteDescargo(nota);
   const puedeSancion = puedeGenerarOrdenSancion(nota, state.efectivos);
   const opcionesSancion = opcionesTercio(nota.codigo_infraccion) || [];
+  const puedeArchivo = puedeGenerarArchivoLeve(nota, state.efectivos);
   const avisoConsistencia = verificarConsistenciaCodigo(nota);
   const puedeInformeAdmin = puedeGenerarInformeAdministrativo(nota, state.efectivos);
   const yoMismoInforme = state.cip ? state.efectivos.find((ef) => ef.cip === state.cip) : null;
@@ -1688,7 +1695,7 @@ async function renderNotaDetail(nota) {
     </div>
     ` : ""}
 
-    ${codigoEsLeve && (nota.fecha_descargo || plazoVencido) ? `
+    ${codigoEsLeve && (nota.fecha_descargo || plazoVencido) && !nota.archivo_leve_generada_at ? `
     <div class="detail-card">
       <h3>Orden de Sanción</h3>
       ${puedeSancion ? `
@@ -1724,6 +1731,24 @@ async function renderNotaDetail(nota) {
         </form>
         ${nota.orden_sancion_generada_at ? `<p class="muted small">Generada por última vez el ${formatDate(nota.orden_sancion_generada_at.slice(0, 10))}.</p>` : ""}
       ` : `<p class="muted small">Para generar la Orden de Sanción, verifique que el oficial que constató la falta y el investigado estén registrados en Efectivos.</p>`}
+    </div>
+    ` : ""}
+
+    ${codigoEsLeve && nota.fecha_descargo && !nota.orden_sancion_generada_at ? `
+    <div class="detail-card">
+      <h3>Archivo del Procedimiento (sin sanción)</h3>
+      <p class="muted small">Úselo cuando, tras evaluar el descargo, la conducta NO se adecúa a ningún código del Anexo I — cierra el caso sin sanción (Anexo IV de la Resolución IGPNP N° 29-2026-IGPNP/SEC-UNIPLA). Es la alternativa a la Orden de Sanción: solo se puede generar una de las dos.</p>
+      ${puedeArchivo ? `
+        <form id="archivoLeveForm">
+          <label>N.º de Resolución<input type="text" id="alResolucionNumero" required placeholder="Ej. N° 001-2026-COMVENT-A" value="${escapeHtml(nota.archivo_leve_resolucion_numero || "")}" /></label>
+          <label>Motivo del archivo (por qué la conducta no se adecúa a ningún código)
+            <textarea id="alMotivo" rows="5" required placeholder="Explique en sus palabras por qué, tras evaluar el descargo y los actuados, la conducta no encaja en ninguna infracción del Anexo I.">${escapeHtml(nota.archivo_leve_motivo || "")}</textarea>
+          </label>
+          <p id="archivoLeveError" class="error hidden" role="alert"></p>
+          <button type="submit" class="btn-primary">Guardar y descargar Archivo del Procedimiento</button>
+        </form>
+        ${nota.archivo_leve_generada_at ? `<p class="muted small">Generado por última vez el ${formatDate(nota.archivo_leve_generada_at.slice(0, 10))}.</p>` : ""}
+      ` : `<p class="muted small">Para generarlo, verifique que el oficial que constató la falta esté registrado en Efectivos.</p>`}
     </div>
     ` : ""}
 
@@ -1847,6 +1872,7 @@ async function renderNotaDetail(nota) {
   $("descargoForm")?.addEventListener("submit", (e) => submitDescargo(e, nota.id));
   $("btnQuitarDescargo")?.addEventListener("click", () => quitarDescargo(nota));
   $("sancionForm")?.addEventListener("submit", (e) => submitSancion(e, nota));
+  $("archivoLeveForm")?.addEventListener("submit", (e) => submitArchivoLeve(e, nota));
   $("btnRedactarIA")?.addEventListener("click", () => redactarConIA(nota));
   $("btnVerificarNotifIA")?.addEventListener("click", () => verificarNotificacionOrdenIA(nota));
   $("ordenNotifForm")?.addEventListener("submit", (e) => submitNotificacionOrden(e, nota));
@@ -2143,6 +2169,48 @@ async function submitSancion(e, nota) {
   } catch (err) {
     console.error(err);
     errEl.textContent = err.message || "No se pudo generar la Orden de Sanción.";
+    errEl.classList.remove("hidden");
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.classList.remove("is-busy");
+    submitBtn.textContent = textoOriginal;
+  }
+}
+
+// Contraparte de submitSancion: cierra el caso SIN sanción (Anexo IV) en vez
+// de con ella. Mutuamente excluyente con la Orden -- ver el guard en el HTML
+// de la tarjeta ("!nota.orden_sancion_generada_at").
+async function submitArchivoLeve(e, nota) {
+  e.preventDefault();
+  const errEl = $("archivoLeveError");
+  errEl.classList.add("hidden");
+  const resolucionNumero = $("alResolucionNumero").value.trim();
+  const motivoTexto = $("alMotivo").value.trim();
+
+  if (!resolucionNumero) { errEl.textContent = "Escriba el N.º de Resolución."; errEl.classList.remove("hidden"); return; }
+  if (!motivoTexto) { errEl.textContent = "Escriba el motivo del archivo."; errEl.classList.remove("hidden"); return; }
+
+  const submitBtn = e.target.querySelector("button[type=submit]");
+  const textoOriginal = submitBtn.textContent;
+  submitBtn.disabled = true;
+  submitBtn.classList.add("is-busy");
+  submitBtn.textContent = "Generando...";
+  try {
+    const blob = await renderizarArchivoLeveDocx(nota, state.efectivos, { motivoTexto, resolucionNumero });
+    const nombreArchivo = nombreArchivoDocumento("ARCHIVO DEL PROCEDIMIENTO", nota);
+    saveAs(blob, nombreArchivo);
+    registrarVersionDocumento(nota.id, "archivo_leve", blob, nombreArchivo);
+    const { error } = await supabase.rpc("registrar_archivo_leve", {
+      p_nota_id: nota.id,
+      p_motivo: motivoTexto,
+      p_resolucion_numero: resolucionNumero,
+    });
+    if (error) { errEl.textContent = "Se generó el documento, pero no se pudo guardar la decisión: " + error.message; errEl.classList.remove("hidden"); return; }
+    limpiarBorradoresNota(nota.id);
+    openNotaDetail(nota.id);
+  } catch (err) {
+    console.error(err);
+    errEl.textContent = err.message || "No se pudo generar el Archivo del Procedimiento.";
     errEl.classList.remove("hidden");
   } finally {
     submitBtn.disabled = false;
@@ -4342,7 +4410,7 @@ let chartsPanel = {};
 // al investigado (con su cargo firmado): en este módulo no queda nada más que
 // hacer salvo el cierre administrativo en Recepción.
 function notaConcluida(n) {
-  return !!n.orden_notificada_at;
+  return !!n.orden_notificada_at || !!n.archivo_leve_generada_at;
 }
 
 // Grave/Muy Grave (con texto legal ya cargado en INFRACCIONES_GRAVES): el
@@ -4358,6 +4426,7 @@ function esGraveConTextoLegal(n) {
 }
 
 function estadoDeNota(n) {
+  if (n.archivo_leve_generada_at) return "Archivado (sin sanción)";
   if (notaConcluida(n)) return "Concluida";
   if (esGraveConTextoLegal(n)) return n.fecha_reincorporacion ? "Informe Administrativo (cerrado)" : "Informe Administrativo (en curso)";
   if (!n.fecha_reincorporacion) return "Reincorporación pendiente";
@@ -4384,6 +4453,14 @@ function progresoNotaHtml(n) {
     return `<div class="case-progress" title="${escapeHtml(estadoDeNota(n))}">
       <div class="case-progress-steps"><span class="is-done">1</span><span class="is-current">2</span></div>
       <span class="pill ${claseEstadoNota(n)}">${escapeHtml(estadoDeNota(n))}</span>
+    </div>`;
+  }
+  if (n.archivo_leve_generada_at) {
+    // Cerrado sin pasar por Sanción -- el stepper de 5 pasos de abajo nunca
+    // llega al 5 para este caso, así que se le da su propio cierre de 3.
+    return `<div class="case-progress is-concluida" title="${escapeHtml(estadoDeNota(n))}">
+      <div class="case-progress-steps"><span class="is-done">1</span><span class="is-done">2</span><span class="is-done">3</span></div>
+      <span class="pill ${claseEstadoNota(n)}">✓ ${escapeHtml(estadoDeNota(n))}</span>
     </div>`;
   }
   const paso = n.orden_sancion_generada_at ? 5 : n.fecha_descargo ? 4 : n.imputacion_generada_at ? 3 : n.fecha_reincorporacion ? 2 : 1;
@@ -4422,6 +4499,9 @@ function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
       icono = "info"; titulo = "Falta grave o muy grave";
       detalle = "Todavía no hay texto legal verificado en la app para este código, así que el Informe Administrativo no está disponible aquí. Continúe el trámite según el procedimiento que corresponde.";
     }
+  } else if (nota.archivo_leve_generada_at) {
+    icono = "check"; titulo = "Trámite concluido (archivado)"; tono = "is-done";
+    detalle = "El caso se archivó sin sanción: la conducta no se adecuaba a ningún código del Anexo I.";
   } else if (!nota.fecha_reincorporacion) {
     titulo = "Registre la reincorporación";
     detalle = "Complete fecha, hora y N.º de nota de reincorporación para habilitar la Imputación.";
@@ -4481,6 +4561,18 @@ function cronologiaNotaHtml(nota) {
       { titulo: "Hecho registrado", fecha: nota.created_at, estado: "completo" },
       { titulo: "Reincorporación", fecha: nota.fecha_reincorporacion, estado: nota.fecha_reincorporacion ? "completo" : "pendiente" },
       { titulo: "Informe Administrativo (remitido a otra instancia)", fecha: null, estado: "pendiente" },
+    ]);
+  }
+
+  if (nota.archivo_leve_generada_at) {
+    // Cerrado sin pasar por Sanción -- sin esta rama, "Orden de Sanción" y
+    // "Cierre" quedaban en "Pendiente" para siempre en un caso ya resuelto.
+    return render([
+      { titulo: "Hecho registrado", fecha: nota.created_at, estado: "completo" },
+      { titulo: "Reincorporación", fecha: nota.fecha_reincorporacion, estado: nota.fecha_reincorporacion ? "completo" : "pendiente" },
+      { titulo: "Imputación / notificación", fecha: nota.imputacion_generada_at, estado: "completo" },
+      { titulo: "Descargo", fecha: nota.fecha_descargo, estado: "completo" },
+      { titulo: "Archivado sin sanción", fecha: nota.archivo_leve_generada_at, estado: "completo" },
     ]);
   }
 
