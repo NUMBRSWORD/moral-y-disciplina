@@ -1740,7 +1740,9 @@ async function renderNotaDetail(nota) {
       <p class="muted small">Úselo cuando, tras evaluar el descargo, la conducta NO se adecúa a ningún código del Anexo I — cierra el caso sin sanción (Anexo IV de la Resolución IGPNP N° 29-2026-IGPNP/SEC-UNIPLA). Es la alternativa a la Orden de Sanción: solo se puede generar una de las dos.</p>
       ${puedeArchivo ? `
         <form id="archivoLeveForm">
-          <label>N.º de Resolución<input type="text" id="alResolucionNumero" required placeholder="Ej. N° 001-2026-COMVENT-A" value="${escapeHtml(nota.archivo_leve_resolucion_numero || "")}" /></label>
+          <p class="muted small">${nota.archivo_leve_resolucion_numero
+            ? `N.º de Resolución asignado: <strong>${escapeHtml(nota.archivo_leve_resolucion_numero)}</strong>`
+            : "El N.º de Resolución se asigna automáticamente al generar el documento — es correlativo y nunca se repite, sin importar qué oficial lo genere."}</p>
           <label>Motivo del archivo (por qué la conducta no se adecúa a ningún código)
             <textarea id="alMotivo" rows="5" required placeholder="Explique en sus palabras por qué, tras evaluar el descargo y los actuados, la conducta no encaja en ninguna infracción del Anexo I.">${escapeHtml(nota.archivo_leve_motivo || "")}</textarea>
           </label>
@@ -2184,10 +2186,8 @@ async function submitArchivoLeve(e, nota) {
   e.preventDefault();
   const errEl = $("archivoLeveError");
   errEl.classList.add("hidden");
-  const resolucionNumero = $("alResolucionNumero").value.trim();
   const motivoTexto = $("alMotivo").value.trim();
 
-  if (!resolucionNumero) { errEl.textContent = "Escriba el N.º de Resolución."; errEl.classList.remove("hidden"); return; }
   if (!motivoTexto) { errEl.textContent = "Escriba el motivo del archivo."; errEl.classList.remove("hidden"); return; }
 
   const submitBtn = e.target.querySelector("button[type=submit]");
@@ -2196,6 +2196,13 @@ async function submitArchivoLeve(e, nota) {
   submitBtn.classList.add("is-busy");
   submitBtn.textContent = "Generando...";
   try {
+    // Se reserva primero (idempotente: si esta nota ya tiene un número
+    // asignado -por ejemplo, de un intento anterior sin terminar- devuelve
+    // el mismo en vez de consumir uno nuevo) para poder usarlo al renderizar.
+    const { data: resolucionNumero, error: errNumero } = await supabase.rpc("reservar_resolucion_archivo_leve", {
+      p_nota_id: nota.id,
+    });
+    if (errNumero) { errEl.textContent = "No se pudo asignar el N.º de Resolución: " + errNumero.message; errEl.classList.remove("hidden"); return; }
     const blob = await renderizarArchivoLeveDocx(nota, state.efectivos, { motivoTexto, resolucionNumero });
     const nombreArchivo = nombreArchivoDocumento("ARCHIVO DEL PROCEDIMIENTO", nota);
     saveAs(blob, nombreArchivo);
@@ -2203,7 +2210,6 @@ async function submitArchivoLeve(e, nota) {
     const { error } = await supabase.rpc("registrar_archivo_leve", {
       p_nota_id: nota.id,
       p_motivo: motivoTexto,
-      p_resolucion_numero: resolucionNumero,
     });
     if (error) { errEl.textContent = "Se generó el documento, pero no se pudo guardar la decisión: " + error.message; errEl.classList.remove("hidden"); return; }
     limpiarBorradoresNota(nota.id);
