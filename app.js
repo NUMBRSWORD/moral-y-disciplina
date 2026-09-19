@@ -4322,7 +4322,7 @@ function renderCumplimientoLista() {
       ${miFirma ? "" : `
         <form class="firma-form" data-documento-id="${d.id}" data-version="${d.version}">
           <label>Grado <input type="text" class="firma-grado-input" placeholder="Ej. Comandante PNP" /></label>
-          <label>Nombre y apellidos <input type="text" class="firma-nombre-input" required placeholder="Ej. REYES MEDINA, Juan Carlos" /></label>
+          <label>Nombre y apellidos <input type="text" class="firma-nombre-input" required placeholder="Ej. REYES MEDINA, Jorge Luis" /></label>
           <label>Cargo <input type="text" class="firma-cargo-input" required placeholder="Ej. Comisario PNP Ventanilla" /></label>
           <p class="firma-error error hidden" role="alert"></p>
           <button type="submit" class="btn-primary">${svgIco("firmar")}Firmar</button>

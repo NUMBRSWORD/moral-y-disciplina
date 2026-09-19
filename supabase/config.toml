@@ -1,0 +1,8 @@
+# Configuración de las Edge Functions para `supabase functions deploy`.
+# Solo se declara lo que se aparta del valor por defecto (verify_jwt = true).
+
+# Google llama a este callback tras la autorización OAuth y NO envía un JWT de
+# Supabase. Se protege con el `state` de un solo uso y con vencimiento (10 min)
+# que emite google-drive-conectar y que aquí se valida contra la base.
+[functions.google-drive-callback]
+verify_jwt = false

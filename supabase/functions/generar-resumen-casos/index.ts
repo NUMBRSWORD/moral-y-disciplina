@@ -34,23 +34,25 @@ async function haySesion(req: Request): Promise<boolean> {
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const MODEL = "claude-sonnet-5";
 
-// Reemplaza a tesseract.js (OCR genérico en el navegador) para leer PDFs
-// escaneados e imágenes: en vez de un motor de OCR ciego, le mandamos las
-// páginas como imágenes a un modelo con visión para que las transcriba. Es
-// más lento por página que tesseract, pero muchísimo más preciso en
-// documentos reales (sellos, membretes, tablas, escaneos de mala calidad) --
-// y como corre en el servidor, además libera al navegador del oficial.
-const SYSTEM_PROMPT = `Eres un transcriptor de documentos oficiales peruanos (normas, reglamentos, directivas, oficios). Se te dan una o más imágenes, cada una una página de un mismo documento, en orden.
+const SYSTEM_PROMPT = `Eres un asistente que redacta un resumen ejecutivo breve para un oficial de la Policía Nacional del Perú (PNP) sobre el estado de sus casos disciplinarios (infracciones Leves, Ley N° 30714).
 
-Tu única tarea es transcribir EXACTAMENTE el texto visible en cada imagen, en el orden en que aparecen las páginas. Reglas estrictas:
-- No resumas, no comentes, no traduzcas, no corrijas redacción ni ortografía del original.
-- Preserva la estructura: numeración de artículos, incisos, párrafos, mayúsculas de títulos.
-- Si una página tiene tablas, transcribe el contenido de cada celda en un orden legible (fila por fila), no inventes columnas que no existan.
-- Ignora elementos puramente decorativos (logos, líneas divisorias) pero SÍ transcribe sellos, membretes y pies de página si tienen texto legible.
-- Si una palabra o fragmento es completamente ilegible, márcalo como [ilegible] en vez de adivinar o inventar texto.
-- No agregues encabezados, numeración de página propia, ni ningún texto que no esté literalmente en la imagen.
+Se te da la fecha de hoy y una lista de casos con su estado actual (investigado, código de infracción, fecha del hecho, si ya fue notificada la Imputación, si el plazo de descargo (1 día hábil) ya venció o sigue en curso, si se recibió descargo, si se generó Acta de No Descargo, si se generó Orden de Sanción, y si esa orden ya fue notificada).
 
-Responde ÚNICAMENTE con un objeto JSON válido, sin texto antes ni después, con exactamente esta clave: {"texto": "..."} -- el texto de TODAS las páginas dadas, concatenado en orden, separado por un salto de línea doble entre páginas.`;
+Redacta un resumen ejecutivo en español, en prosa clara (puedes usar un par de párrafos cortos y, si ayuda a la claridad, una lista breve al final con los casos que requieren acción urgente), que incluya:
+1. Un panorama general: cuántos casos hay en total y en qué etapa se encuentra cada uno (agrupa por etapa: pendiente de notificar, plazo de descargo en curso, plazo vencido sin Acta, listo para Orden de Sanción, Orden generada pero no notificada, trámite completo).
+2. Alertas priorizadas: casos cuyo plazo de descargo está vencido y todavía no tienen Acta de No Descargo ni Orden de Sanción (son los que requieren acción más urgente), y casos con Orden de Sanción generada pero aún no notificada.
+3. Un cierre breve si todo está al día.
+
+No inventes datos que no estén en la lista dada. Sé conciso y útil, como si fuera el resumen que un asistente personal le entrega cada mañana.
+
+Responde ÚNICAMENTE con un objeto JSON válido, sin texto antes ni después, con exactamente esta clave: {"resumen": "..."}`;
+
+function buildUserMessage(input: Record<string, unknown>): string {
+  return [
+    `Fecha de hoy: ${input.fechaHoy || ""}`,
+    `Lista de casos (JSON):\n${JSON.stringify(input.casos || [])}`,
+  ].filter(Boolean).join("\n\n");
+}
 
 Deno.serve(async (req: Request) => {
   const cors = corsHeaders(req);
@@ -72,32 +74,6 @@ Deno.serve(async (req: Request) => {
 
   try {
     const input = await req.json();
-    const paginas = Array.isArray(input.paginas) ? input.paginas : [];
-    if (!paginas.length) {
-      return new Response(JSON.stringify({ error: "No se recibió ninguna página para transcribir." }), {
-        status: 400,
-        headers: { ...cors, "Content-Type": "application/json" },
-      });
-    }
-    if (paginas.length > 8) {
-      return new Response(JSON.stringify({ error: "Máximo 8 páginas por solicitud." }), {
-        status: 400,
-        headers: { ...cors, "Content-Type": "application/json" },
-      });
-    }
-
-    const content = [
-      ...paginas.map((p: { data?: string; mediaType?: string }) => ({
-        type: "image",
-        source: { type: "base64", media_type: p.mediaType || "image/jpeg", data: p.data || "" },
-      })),
-      { type: "text", text: `Transcribe estas ${paginas.length} página(s), en el orden dado.` },
-    ];
-
-    // ~900 tokens de salida por página (una página densa de texto legal
-    // ronda los 500-800 palabras) más un margen -- suficiente para el
-    // tamaño de lote que usa el cliente (hasta 8 páginas).
-    const maxTokens = Math.min(8000, 900 * paginas.length + 400);
 
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -108,9 +84,9 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: maxTokens,
+        max_tokens: 1500,
         system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content }],
+        messages: [{ role: "user", content: buildUserMessage(input) }],
       }),
     });
 
