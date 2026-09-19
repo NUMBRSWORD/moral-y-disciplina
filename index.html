@@ -56,6 +56,7 @@
       <button id="btnPaletaBuscar" class="btn-ghost palette-hint" type="button" title="Buscar expediente (Ctrl + K)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>Buscar <kbd>Ctrl</kbd><kbd>K</kbd></button>
       <span id="userEmail"></span>
       <span id="userRole" class="badge"></span>
+      <button id="btnCambiarClave" class="btn-ghost" type="button">Cambiar clave</button>
       <button id="btnLogout" class="btn-ghost">Salir</button>
     </div>
   </div>
@@ -725,6 +726,29 @@
     </div>
     <div id="paletaResultados" class="palette-results"></div>
     <p class="palette-foot muted small">Escriba un apellido para ver a todas las personas que lo tienen. <kbd>Ctrl</kbd>+<kbd>K</kbd> para abrir · <kbd>Esc</kbd> para cerrar</p>
+  </div>
+</div>
+
+<div id="modalCambiarClave" class="modal-overlay hidden">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cambiarClaveTitulo">
+    <div class="modal-header">
+      <h3 id="cambiarClaveTitulo">Cambiar clave</h3>
+      <button type="button" id="btnCerrarCambiarClave" class="btn-ghost hidden">✕</button>
+    </div>
+    <form id="cambiarClaveForm" class="modal-body">
+      <p id="cambiarClaveAviso" class="ai-box ai-box-warning hidden">Ingresó con la clave inicial (su propio CIP). Ese número figura en los documentos del sistema y cualquiera podría usarlo para entrar como usted. Elija una clave nueva para continuar.</p>
+      <label>Clave nueva (mínimo 8 caracteres, con al menos una letra)
+        <input type="password" id="ccNueva" required minlength="8" autocomplete="new-password" />
+      </label>
+      <label>Repita la clave nueva
+        <input type="password" id="ccRepite" required minlength="8" autocomplete="new-password" />
+      </label>
+      <p id="ccError" class="error hidden" role="alert"></p>
+      <div class="modal-actions">
+        <button type="button" id="btnSalirCambiarClave" class="btn-ghost">Cerrar sesión</button>
+        <button type="submit" id="btnGuardarClave" class="btn-primary">Guardar clave nueva</button>
+      </div>
+    </form>
   </div>
 </div>
 
