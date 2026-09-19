@@ -12,6 +12,7 @@ import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva, subirArchivoDirectiva } from "./lib/directivas.js";
 import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocumento, actualizarContenidoDocumentoInstitucional } from "./lib/cumplimiento.js";
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible } from "./lib/utils.js";
+import { clasificarNotaEntrante, entradasSeguimiento } from "./lib/seguimiento.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
 
@@ -1125,7 +1126,7 @@ function renderNotasTable(list, tbodyId = "notasTableBody", emptyId = "notasEmpt
     const puedeActa = puedeGenerarActaNoDescargo(n, state.efectivos);
     tr.innerHTML = `
       <td class="case-grade">${escapeHtml(n.grado || "")}</td>
-      <td class="case-person"><strong>${escapeHtml(nombreInvestigadoVisible(n))}</strong></td>
+      <td class="case-person"><strong>${escapeHtml(nombreInvestigadoVisible(n))}</strong>${continuanFaltosChipHtml(n)}</td>
       <td class="case-date">${formatFechaHora(n.fecha_falta, n.hora_falta)}</td>
       <td class="case-hide">${escapeHtml(n.numero_nota_falta || "")}</td>
       <td class="case-hide">${escapeHtml(n.oficial_constato || "-")}</td>
@@ -1546,6 +1547,17 @@ async function renderNotaDetail(nota) {
       }))).join("")
     : "";
 
+  // "Continúan faltos": las notas de los días intermedios en que siguió sin
+  // presentarse. Se guardaban en seguimiento_faltas pero no se mostraban en
+  // ninguna parte de la pantalla.
+  const seguimiento = entradasSeguimiento(nota);
+  const seguimientoHtml = seguimiento.length
+    ? (await Promise.all(seguimiento.map(async (s) => {
+        const link = await fileLinkHtml("notas", s.archivo_path, s.archivo_nombre);
+        return `<div class="detail-field"><div class="label">${escapeHtml(formatDate(s.fecha))} — N.º ${escapeHtml(s.numero_nota || "-")}</div><div class="value">${link}${s.oficial_constato ? ` <span class="muted small">(${escapeHtml(s.oficial_constato)})</span>` : ""}</div></div>`;
+      }))).join("")
+    : "";
+
   // Cierre administrativo: el PDF firmado, HT y Oficio del expediente cerrado
   // se registran en la pestaña Recepción, pero el admin también los ve aquí.
   const cerrado = nota.orden_sancion_generada_at && nota.orden_notificada_at;
@@ -1619,6 +1631,13 @@ async function renderNotaDetail(nota) {
       </div>
       ${isAdmin ? `<button class="btn-danger" id="btnEliminarNota">Eliminar nota</button>` : ""}
     </div>
+
+    ${seguimientoHtml ? `
+    <div class="detail-card">
+      <h3>Continúan faltos</h3>
+      <p class="muted small">Notas de los días en que siguió sin presentarse (${seguimiento.length} ${seguimiento.length === 1 ? "día" : "días"}).</p>
+      <div class="detail-grid">${seguimientoHtml}</div>
+    </div>` : ""}
 
     <div class="detail-card">
       <h3>Reincorporación</h3>
@@ -2694,7 +2713,17 @@ function verificarFaltaAbierta() {
   const apellidos = $("fApellidos").value.trim();
   if (!apellidos) { warnEl.classList.add("hidden"); return; }
   const numeroNotaFalta = $("fNumeroNotaFalta").value.trim();
-  const existente = faltaYaRegistrada(numeroNotaFalta, { apellidos, nombres: $("fNombres").value.trim() });
+  const nombres = $("fNombres").value.trim();
+  // Un N.º que ya está guardado como reincorporación o "Continúan faltos" de
+  // esta persona no es una falta nueva, aunque su expediente ya esté cerrado.
+  const yaRegistrado = clasificarNotaEntrante({ apellidos, nombres, numero_nota_falta: numeroNotaFalta }, state.notas);
+  if (yaRegistrado?.nota) {
+    const como = yaRegistrado.motivo === "reincorporacion" ? "la reincorporación" : "un «Continúan faltos»";
+    warnEl.textContent = `Este N.º de nota ya está registrado como ${como} del expediente N.º ${yaRegistrado.nota.numero_nota_falta || "-"} (falta del ${formatDate(yaRegistrado.nota.fecha_falta)}) de ${nombreCompletoVisible(apellidos, nombres)}. No es una falta nueva: no la cree aquí.`;
+    warnEl.classList.remove("hidden");
+    return;
+  }
+  const existente = faltaYaRegistrada(numeroNotaFalta, { apellidos, nombres });
   if (existente && !existente.fecha_reincorporacion) {
     warnEl.textContent = `${nombreCompletoVisible(existente.apellidos, existente.nombres)} ya tiene una nota abierta desde el ${formatDate(existente.fecha_falta)}${existente.numero_nota_falta ? ` (N.º ${existente.numero_nota_falta})` : ""}, todavía sin reincorporarse. Si sigue faltando, esta es la MISMA ausencia — no cree una nota nueva; regístrele la reincorporación cuando corresponda y el código de infracción se ajusta solo según el tiempo total ausente.`;
     warnEl.classList.remove("hidden");
@@ -3868,20 +3897,37 @@ function faltaYaRegistrada(numeroNotaFalta, candidate) {
   }) || null;
 }
 
+// Texto del aviso cuando una fila del lote NO es una falta nueva sino el
+// seguimiento de un expediente que ya existe (ver lib/seguimiento.js).
+function pillNoNuevaHtml(noNueva) {
+  const origen = noNueva.nota
+    ? `expediente N.º ${escapeHtml(noNueva.nota.numero_nota_falta || "-")} (falta del ${escapeHtml(formatDate(noNueva.nota.fecha_falta))})`
+    : `nota N.º ${escapeHtml(noNueva.fila.numero_nota_falta || "-")} de este mismo lote`;
+  const texto = {
+    reincorporacion: `Este N.º ya está registrado como la reincorporación del ${origen} — no es una falta nueva, no se creará una nota`,
+    seguimiento: `Este N.º ya está registrado como «Continúan faltos» del ${origen} — no es una falta nueva, no se creará una nota`,
+    continuacion: `Hace referencia (REF.) al ${origen} de esta misma persona: es su seguimiento o corrección, no una falta nueva. Regístrela en «Continúan faltos»`,
+    repetida_en_lote: `Ya viene antes en este mismo lote (${origen}) — no se creará dos veces`,
+  }[noNueva.motivo];
+  return `<span class="pill pill-warning">${texto}</span>`;
+}
+
 function renderFaltasLoteList() {
   const el = $("flLista");
   if (!faltasLoteFilas.length) { el.innerHTML = ""; return; }
   el.innerHTML = faltasLoteFilas.map((f, i) => {
     const dup = f.duplicada;
     const sigueFaltando = dup && !dup.fecha_reincorporacion;
-    const pill = dup
+    const pill = f.noNueva
+      ? pillNoNuevaHtml(f.noNueva)
+      : dup
       ? sigueFaltando
         ? `<span class="pill pill-warning">Sigue faltando desde el ${escapeHtml(formatDate(dup.fecha_falta))}${dup.numero_nota_falta ? ` (N.º ${escapeHtml(dup.numero_nota_falta)})` : ""} — no se creará una nota nueva, es la misma ausencia</span>`
         : `<span class="pill pill-warning">Ya existe una nota de esta persona${dup.numero_nota_falta ? ` (N.º ${escapeHtml(dup.numero_nota_falta)})` : ""} — no se creará de nuevo</span>`
       : `<span class="pill pill-yes">Se creará una nota nueva</span>`;
     return `
       <div class="multi-efectivo-row" data-idx="${i}">
-        <label class="checkbox-row"><input type="checkbox" class="flCheck" ${dup ? "" : "checked"} /></label>
+        <label class="checkbox-row"><input type="checkbox" class="flCheck" ${dup || f.noNueva ? "" : "checked"} /></label>
         <div class="value" style="flex:1">
           <div style="display:flex; gap:8px">
             <input type="text" class="flGrado" value="${escapeHtml(f.grado || "")}" placeholder="Grado" style="flex:1" />
@@ -3949,6 +3995,10 @@ $("flArchivo").addEventListener("change", async (e) => {
         hora_falta: doc.hora_falta || "",
         numero_nota_falta: doc.numero_nota_falta || "",
         oficial_constato: doc.oficial_constato || "",
+        // N.º de la nota a la que este PDF dice responder ("REF."), si lo trae:
+        // permite reconocer un "Continúan faltos" en vez de tomarlo por una
+        // falta nueva.
+        referencia: extraerNumeroReferencia(text),
       };
       const lista = (candidates && candidates.length)
         ? candidates
@@ -3963,9 +4013,13 @@ $("flArchivo").addEventListener("change", async (e) => {
         });
       }
     }
+    // Se clasifica DESPUÉS de leer todos los archivos: una nota que continúa a
+    // otra puede venir en el mismo lote que su madre (que todavía no está en
+    // la base) y en cualquier orden.
+    for (const f of filas) f.noNueva = clasificarNotaEntrante(f, state.notas, filas);
     faltasLoteFilas = filas;
     renderFaltasLoteList();
-    const nuevas = filas.filter((f) => !f.duplicada).length;
+    const nuevas = filas.filter((f) => !f.duplicada && !f.noNueva).length;
     statusEl.textContent = `Se procesaron ${files.length} archivo(s): ${filas.length} persona(s), ${nuevas} nueva(s). Verifique los datos y desmarque lo que no corresponda antes de guardar.`;
   } catch (err) {
     console.error(err);
@@ -4453,6 +4507,13 @@ function claseEstadoNota(n) {
   return "pill-neutral";
 }
 
+// Bajo el nombre en la lista: cuántos días de "Continúan faltos" tiene el
+// expediente, para no tener que abrirlo para saber que siguió sin presentarse.
+function continuanFaltosChipHtml(n) {
+  const dias = entradasSeguimiento(n).length;
+  return dias ? `<div class="muted small">Continúan faltos: ${dias} ${dias === 1 ? "día" : "días"}</div>` : "";
+}
+
 function progresoNotaHtml(n) {
   const concluida = notaConcluida(n);
   if (esGraveConTextoLegal(n) && !concluida) {
@@ -4555,6 +4616,13 @@ function cronologiaNotaHtml(nota) {
       <span class="te-estado">${LABEL[e.estado]}</span>
     </li>`).join("")}</ol>`;
 
+  // Los "Continúan faltos" van entre el hecho y la reincorporación, que es el
+  // orden real en que ocurren.
+  const diasSeguimiento = entradasSeguimiento(nota).length;
+  const continuan = diasSeguimiento
+    ? [{ titulo: `Continúan faltos — ${diasSeguimiento} ${diasSeguimiento === 1 ? "día" : "días"}`, fecha: null, estado: "completo" }]
+    : [];
+
   const leve = /^L/i.test((nota.codigo_infraccion || "").trim());
   const codigoNormalizado = (nota.codigo_infraccion || "").trim().toUpperCase().replace(/\s+/g, "");
   if (!leve && INFRACCIONES_GRAVES[codigoNormalizado]) {
@@ -4565,6 +4633,7 @@ function cronologiaNotaHtml(nota) {
     // siempre y no mencionaban la acción que sí aplica aquí.
     return render([
       { titulo: "Hecho registrado", fecha: nota.created_at, estado: "completo" },
+      ...continuan,
       { titulo: "Reincorporación", fecha: nota.fecha_reincorporacion, estado: nota.fecha_reincorporacion ? "completo" : "pendiente" },
       { titulo: "Informe Administrativo (remitido a otra instancia)", fecha: null, estado: "pendiente" },
     ]);
@@ -4575,6 +4644,7 @@ function cronologiaNotaHtml(nota) {
     // "Cierre" quedaban en "Pendiente" para siempre en un caso ya resuelto.
     return render([
       { titulo: "Hecho registrado", fecha: nota.created_at, estado: "completo" },
+      ...continuan,
       { titulo: "Reincorporación", fecha: nota.fecha_reincorporacion, estado: nota.fecha_reincorporacion ? "completo" : "pendiente" },
       { titulo: "Imputación / notificación", fecha: nota.imputacion_generada_at, estado: "completo" },
       { titulo: "Descargo", fecha: nota.fecha_descargo, estado: "completo" },
@@ -4591,6 +4661,7 @@ function cronologiaNotaHtml(nota) {
   const nd = "nd";
   return render([
     { titulo: "Hecho registrado", fecha: nota.created_at, estado: "completo" },
+    ...continuan,
     { titulo: "Reincorporación", fecha: nota.fecha_reincorporacion, estado: nota.fecha_reincorporacion ? "completo" : "pendiente" },
     { titulo: "Imputación / notificación", fecha: nota.imputacion_generada_at, estado: nota.imputacion_generada_at ? "completo" : (nota.fecha_reincorporacion ? "pendiente" : nd) },
     { titulo: "Descargo", fecha: nota.fecha_descargo, estado: nota.fecha_descargo ? "completo" : (!nota.imputacion_generada_at ? nd : (vencidoDescargo ? "vencido" : "pendiente")) },
