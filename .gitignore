@@ -12,3 +12,13 @@ preview/
 .github/hooks/
 .github/skills/
 skills-lock.json
+
+# Documentos de ejemplo con datos reales de personal (nombres, CIP): NUNCA al repo,
+# que es público. Se guardan fuera de la carpeta del proyecto.
+plantillas/*_ejemplo.docx
+
+# Secretos y volcados del backend: nunca versionar
+.env
+.env.*
+supabase/.temp/
+supabase/.branches/
