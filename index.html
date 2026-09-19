@@ -539,7 +539,7 @@
       <label>Archivo(s) de nota de falta (PDF) — puede seleccionar varios a la vez, uno por efectivo o uno grupal
         <input type="file" id="flArchivo" accept="application/pdf" multiple />
       </label>
-      <p class="muted small">Se crea una nota por cada efectivo detectado. El código de infracción se completa después, en cada expediente. No se vuelven a crear las faltas que ya estén registradas.</p>
+      <p class="muted small">Se crea una nota por cada efectivo detectado. El código de infracción se completa después, en cada expediente. No se vuelven a crear las faltas que ya estén registradas. Si un PDF es un «Continúa faltando» de una falta ya registrada (o incluida en este mismo lote), se agrega a «Continúan faltos» de ese expediente en vez de crear una nota nueva.</p>
       <p id="flStatus" class="muted small hidden"></p>
       <div id="flLista"></div>
       <p id="flError" class="error hidden" role="alert"></p>

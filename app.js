@@ -79,6 +79,15 @@ function svgIco(nombre) {
 // inicio" y abra como aplicación, tolerando conexión intermitente. No cambia
 // nada del flujo web normal.
 if ("serviceWorker" in navigator) {
+  // Una pestaña abierta NO recarga sola el código nuevo: seguía corriendo la
+  // versión con la que se abrió, aunque ya se hubiera publicado un arreglo
+  // (así se veía "todo igual" tras una actualización). Cuando un service worker
+  // nuevo toma el control de una pestaña que YA lo tenía, se avisa que hay que
+  // recargar. En la primera visita (sin controlador previo) no se avisa nada.
+  const teniaControlador = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (teniaControlador) toast("Se actualizó la aplicación. Guarde lo que esté haciendo y presione Ctrl + F5 para cargar la versión nueva.", "ok", 120000);
+  });
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js", { scope: "./" })
       .catch((e) => console.warn("No se pudo registrar el service worker:", e));
@@ -3966,15 +3975,24 @@ function faltaYaRegistrada(numeroNotaFalta, candidate) {
 function pillNoNuevaHtml(noNueva) {
   const origen = noNueva.nota
     ? `expediente N.º ${escapeHtml(noNueva.nota.numero_nota_falta || "-")} (falta del ${escapeHtml(formatDate(noNueva.nota.fecha_falta))})`
-    : `nota N.º ${escapeHtml(noNueva.fila.numero_nota_falta || "-")} de este mismo lote`;
+    : noNueva.fila
+      ? `expediente de la nota N.º ${escapeHtml(noNueva.fila.numero_nota_falta || "-")} de este mismo lote`
+      : "";
   const texto = {
     reincorporacion: `Este N.º ya está registrado como la reincorporación del ${origen} — no es una falta nueva, no se creará una nota`,
     seguimiento: `Este N.º ya está registrado como «Continúan faltos» del ${origen} — no es una falta nueva, no se creará una nota`,
-    continuacion: `Hace referencia (REF.) al ${origen} de esta misma persona: es su seguimiento o corrección, no una falta nueva. Regístrela en «Continúan faltos»`,
+    continuacion: `Es un «Continúa faltando» del ${origen}: se agregará a «Continúan faltos» de ese expediente (no crea una nota nueva)`,
+    continua_sin_madre: `Dice que continúa faltando, pero no hay un expediente abierto de esta persona al que agregarlo. Registre primero su falta original; márquelo solo si de verdad es una falta nueva`,
     repetida_en_lote: `Ya viene antes en este mismo lote (${origen}) — no se creará dos veces`,
   }[noNueva.motivo];
-  return `<span class="pill pill-warning">${texto}</span>`;
+  const clase = noNueva.motivo === "continuacion" ? "pill-info" : "pill-warning";
+  return `<span class="pill ${clase}">${texto}</span>`;
 }
+
+// Motivos por los que una fila NO puede crear una nota: el N.º ya está
+// registrado con seguridad. "continua_sin_madre" es solo un aviso (queda sin
+// marcar pero se puede forzar) porque el aviso puede fallar con PDF mixtos.
+const MOTIVOS_FILA_BLOQUEADA = new Set(["reincorporacion", "seguimiento", "repetida_en_lote"]);
 
 function renderFaltasLoteList() {
   const el = $("flLista");
@@ -3991,7 +4009,7 @@ function renderFaltasLoteList() {
       : `<span class="pill pill-yes">Se creará una nota nueva</span>`;
     return `
       <div class="multi-efectivo-row" data-idx="${i}">
-        <label class="checkbox-row"><input type="checkbox" class="flCheck" ${dup || f.noNueva ? "" : "checked"} /></label>
+        <label class="checkbox-row"><input type="checkbox" class="flCheck" ${f.noNueva ? (f.noNueva.motivo === "continuacion" ? "checked" : "") : (dup ? "" : "checked")} ${f.noNueva && MOTIVOS_FILA_BLOQUEADA.has(f.noNueva.motivo) ? "disabled" : ""} /></label>
         <div class="value" style="flex:1">
           <div style="display:flex; gap:8px">
             <input type="text" class="flGrado" value="${escapeHtml(f.grado || "")}" placeholder="Grado" style="flex:1" />
@@ -4063,6 +4081,10 @@ $("flArchivo").addEventListener("change", async (e) => {
         // permite reconocer un "Continúan faltos" en vez de tomarlo por una
         // falta nueva.
         referencia: extraerNumeroReferencia(text),
+        // El texto dice que la persona "continúa faltando" (la misma señal que
+        // usa extractPersonCandidates): es un seguimiento, no una falta nueva,
+        // aunque el REF. no se haya podido leer.
+        esContinua: /continú[a-z]*\s+falt/i.test(norm),
       };
       const lista = (candidates && candidates.length)
         ? candidates
@@ -4084,7 +4106,8 @@ $("flArchivo").addEventListener("change", async (e) => {
     faltasLoteFilas = filas;
     renderFaltasLoteList();
     const nuevas = filas.filter((f) => !f.duplicada && !f.noNueva).length;
-    statusEl.textContent = `Se procesaron ${files.length} archivo(s): ${filas.length} persona(s), ${nuevas} nueva(s). Verifique los datos y desmarque lo que no corresponda antes de guardar.`;
+    const continuan = filas.filter((f) => f.noNueva?.motivo === "continuacion").length;
+    statusEl.textContent = `Se procesaron ${files.length} archivo(s): ${filas.length} persona(s), ${nuevas} nueva(s)${continuan ? ` y ${continuan} «Continúa faltando» (se agregan a su expediente)` : ""}. Verifique los datos y desmarque lo que no corresponda antes de guardar.`;
   } catch (err) {
     console.error(err);
     statusEl.textContent = "No se pudieron leer algunos archivos automáticamente.";
@@ -4106,20 +4129,42 @@ $("btnGuardarFaltasLote").addEventListener("click", async (e) => {
     return;
   }
 
+  // Dos tipos de fila: las faltas NUEVAS (crean una nota) y los "Continúa
+  // faltando" (se agregan a `seguimiento_faltas` del expediente que continúan,
+  // sin crear nada). Subir un "continúa" por aquí ya no deja una nota de más.
   const registros = [];
+  const continuaciones = [];
   for (const { row, fila } of seleccionados) {
+    const fecha_falta = row.querySelector(".flFechaRow").value;
+    const numero_nota_falta = row.querySelector(".flNumeroRow").value.trim();
+    if (fila.noNueva?.motivo === "continuacion") {
+      if (!fecha_falta || !numero_nota_falta) {
+        errEl.textContent = `Complete fecha y N.º de nota del «Continúa faltando» de ${nombreInvestigadoVisible(fila)}.`;
+        errEl.classList.remove("hidden");
+        return;
+      }
+      continuaciones.push({ fila, file: fila.file, fecha: fecha_falta, numero_nota: numero_nota_falta, oficial_constato: fila.oficial_constato || null, destino: fila.noNueva });
+      continue;
+    }
     const grado = row.querySelector(".flGrado").value.trim();
     const apellidos = row.querySelector(".flApellidos").value.trim();
     const nombres = row.querySelector(".flNombres").value.trim();
-    const fecha_falta = row.querySelector(".flFechaRow").value;
     const hora_falta = row.querySelector(".flHoraRow").value || null;
-    const numero_nota_falta = row.querySelector(".flNumeroRow").value.trim();
     if (!apellidos || !nombres || !fecha_falta || !numero_nota_falta) {
       errEl.textContent = `Complete apellidos, nombres, fecha y N.º de nota para ${apellidos || "(sin apellido)"} ${nombres}.`;
       errEl.classList.remove("hidden");
       return;
     }
-    registros.push({ file: fila.file, grado, apellidos, nombres, fecha_falta, hora_falta, numero_nota_falta, oficial_constato: fila.oficial_constato || null });
+    registros.push({ fila, file: fila.file, grado, apellidos, nombres, fecha_falta, hora_falta, numero_nota_falta, oficial_constato: fila.oficial_constato || null });
+  }
+
+  // Un "continúa" cuya falta original viene en ESTE mismo lote necesita que esa
+  // falta también esté marcada; si no, no habría a qué agregarlo.
+  const sinMadre = continuaciones.find((c) => c.destino.fila && !registros.some((r) => r.fila === c.destino.fila));
+  if (sinMadre) {
+    errEl.textContent = `El «Continúa faltando» de ${nombreInvestigadoVisible(sinMadre.fila)} pertenece a la falta N.º ${sinMadre.destino.fila.numero_nota_falta || "-"} de este mismo lote, que no está marcada. Márquela también, o desmarque este.`;
+    errEl.classList.remove("hidden");
+    return;
   }
 
   ocuparBoton(btnLote, true, "Registrando...");
@@ -4131,6 +4176,15 @@ $("btnGuardarFaltasLote").addEventListener("click", async (e) => {
     const path = `lote_faltas/${Date.now()}_${r.file.name}`;
     const { error: upErr } = await supabase.storage.from("notas").upload(path, r.file);
     if (!upErr) archivosSubidos.set(r.file, { path, nombre: r.file.name });
+  }
+  // Los "continúa" se guardan donde ya los guarda «Continúan faltos» (carpeta
+  // `seguimiento/`), para que el Informe Administrativo los incluya en el .zip.
+  const seguimientoSubidos = new Map();
+  for (const c of continuaciones) {
+    if (seguimientoSubidos.has(c.file)) continue;
+    const path = `seguimiento/${Date.now()}_${c.file.name}`;
+    const { error: upErr } = await supabase.storage.from("notas").upload(path, c.file);
+    if (!upErr) seguimientoSubidos.set(c.file, { path, nombre: c.file.name });
   }
 
   // Puesto según el rol guardado de cada fecha (best-effort; si no hay rol o la
@@ -4167,24 +4221,59 @@ $("btnGuardarFaltasLote").addEventListener("click", async (e) => {
     };
   });
 
-  const { data: inserted, error } = await supabase
-    .from("notas_informativas")
-    .insert(payloads)
-    .select();
+  let inserted = [];
+  if (registros.length) {
+    const { data, error } = await supabase
+      .from("notas_informativas")
+      .insert(payloads)
+      .select();
 
-  if (error) {
-    errEl.textContent = "No se pudieron registrar las faltas: " + error.message;
-    errEl.classList.remove("hidden");
-    return;
+    if (error) {
+      errEl.textContent = "No se pudieron registrar las faltas: " + error.message;
+      errEl.classList.remove("hidden");
+      return;
+    }
+    inserted = data || [];
+
+    for (let i = 0; i < inserted.length; i++) {
+      const archivo = archivosSubidos.get(registros[i].file);
+      if (!archivo) continue;
+      await supabase.from("notas_informativas")
+        .update({ archivo_nota_path: archivo.path, archivo_nota_nombre: archivo.nombre })
+        .eq("id", inserted[i].id);
+    }
   }
 
-  for (let i = 0; i < inserted.length; i++) {
-    const archivo = archivosSubidos.get(registros[i].file);
-    if (!archivo) continue;
-    await supabase.from("notas_informativas")
-      .update({ archivo_nota_path: archivo.path, archivo_nota_nombre: archivo.nombre })
-      .eq("id", inserted[i].id);
+  // "Continúa faltando": se suma a `seguimiento_faltas` del expediente al que
+  // pertenece -- el que ya estaba en la base o el que se acaba de crear arriba
+  // desde este mismo lote. Se acumula en memoria por expediente para que varias
+  // filas del mismo no se pisen entre sí (mismo cuidado que en «Continúan faltos»).
+  const idPorFila = new Map(registros.map((r, i) => [r.fila, inserted[i]?.id]));
+  const acumulado = new Map();
+  let continuanAgregados = 0;
+  for (const c of continuaciones) {
+    const notaBase = c.destino.nota || null;
+    const id = notaBase ? notaBase.id : idPorFila.get(c.destino.fila);
+    if (!id) continue;
+    const previas = acumulado.get(id) || (notaBase && Array.isArray(notaBase.seguimiento_faltas) ? notaBase.seguimiento_faltas : []);
+    const archivo = seguimientoSubidos.get(c.file);
+    acumulado.set(id, [
+      ...previas.filter((s) => s.fecha !== c.fecha),
+      { fecha: c.fecha, numero_nota: c.numero_nota, oficial_constato: c.oficial_constato, archivo_path: archivo?.path || null, archivo_nombre: archivo?.nombre || null },
+    ]);
+    continuanAgregados++;
   }
+  let errorContinua = null;
+  for (const [id, entradas] of acumulado) {
+    const { error } = await supabase.from("notas_informativas").update({ seguimiento_faltas: entradas }).eq("id", id);
+    if (error) errorContinua = error;
+  }
+
+  const partes = [];
+  if (inserted.length) partes.push(`${inserted.length} nota(s) nueva(s)`);
+  if (continuanAgregados) partes.push(`${continuanAgregados} «Continúa faltando» agregado(s) a su expediente`);
+  if (errorContinua) toast("No se pudieron guardar algunos «Continúa faltando»: " + errorContinua.message);
+  else if (partes.length) toast(`Registrado: ${partes.join(" y ")}.`, "ok");
 
   faltasLoteFilas = [];
   closeFaltasLoteModal();
@@ -4574,8 +4663,12 @@ function claseEstadoNota(n) {
 // Bajo el nombre en la lista: cuántos días de "Continúan faltos" tiene el
 // expediente, para no tener que abrirlo para saber que siguió sin presentarse.
 function continuanFaltosChipHtml(n) {
-  const dias = entradasSeguimiento(n).length;
-  return dias ? `<div class="muted small">Continúan faltos: ${dias} ${dias === 1 ? "día" : "días"}</div>` : "";
+  const entradas = entradasSeguimiento(n);
+  if (!entradas.length) return "";
+  const corto = (s) => `${formatDate(s.fecha).slice(0, 5)}${s.numero_nota ? ` · N.º ${escapeHtml(s.numero_nota)}` : ""}`;
+  const resto = entradas.length > 3 ? ` (+${entradas.length - 3} anteriores)` : "";
+  const detalle = entradas.map((s) => `${formatDate(s.fecha)} · N.º ${s.numero_nota || "-"}${s.archivo_nombre ? ` · ${s.archivo_nombre}` : ""}`).join("\n");
+  return `<div class="muted small" title="${escapeHtml(detalle)}">Continúan faltos (${entradas.length}): ${entradas.slice(-3).map(corto).join(" | ")}${resto}</div>`;
 }
 
 function progresoNotaHtml(n) {
