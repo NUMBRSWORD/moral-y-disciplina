@@ -13,6 +13,7 @@ import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva
 import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocumento, actualizarContenidoDocumentoInstitucional } from "./lib/cumplimiento.js";
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible } from "./lib/utils.js";
 import { clasificarNotaEntrante, entradasSeguimiento } from "./lib/seguimiento.js";
+import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
 
@@ -643,6 +644,16 @@ $("loginForm").addEventListener("submit", async (e) => {
     if (error) {
       $("loginError").textContent = "Correo o clave incorrectos.";
       $("loginError").classList.remove("hidden");
+    } else {
+      // Entró con la clave inicial (su propio CIP, que figura en los documentos):
+      // se le exige cambiarla ya. Si esto fallara por lo que fuera, NUNCA debe
+      // impedir el ingreso -- el aviso es una protección extra, no un requisito
+      // para usar la app.
+      try {
+        if (esClaveInicial($("loginEmail").value, password)) abrirCambioClave({ obligatorio: true, claveActual: password });
+      } catch (err) {
+        console.error("No se pudo abrir el cambio de clave:", err);
+      }
     }
   } finally {
     ocuparBoton(btn, false);
@@ -651,6 +662,59 @@ $("loginForm").addEventListener("submit", async (e) => {
 
 $("btnLogout").addEventListener("click", async () => {
   await supabase.auth.signOut();
+});
+
+// ---------- Cambio de clave ----------
+// Obligatorio al ingresar con la clave inicial (sin botón de cerrar: solo
+// cambiarla o cerrar sesión); voluntario desde el botón "Cambiar clave".
+let cambioClave = { obligatorio: false, claveActual: "" };
+
+function abrirCambioClave({ obligatorio = false, claveActual = "" } = {}) {
+  cambioClave = { obligatorio, claveActual };
+  $("cambiarClaveForm").reset();
+  $("ccError").classList.add("hidden");
+  $("cambiarClaveAviso").classList.toggle("hidden", !obligatorio);
+  $("btnCerrarCambiarClave").classList.toggle("hidden", obligatorio);
+  $("modalCambiarClave").classList.remove("hidden");
+  $("ccNueva").focus();
+}
+
+function cerrarCambioClave() {
+  $("modalCambiarClave").classList.add("hidden");
+  $("cambiarClaveForm").reset();
+  cambioClave = { obligatorio: false, claveActual: "" };
+}
+
+$("btnCambiarClave").addEventListener("click", () => abrirCambioClave());
+$("btnCerrarCambiarClave").addEventListener("click", cerrarCambioClave);
+$("btnSalirCambiarClave").addEventListener("click", async () => {
+  cerrarCambioClave();
+  await supabase.auth.signOut();
+});
+$("cambiarClaveForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errEl = $("ccError");
+  errEl.classList.add("hidden");
+  const problema = validarClaveNueva($("ccNueva").value, $("ccRepite").value, cambioClave.claveActual);
+  if (problema) {
+    errEl.textContent = problema;
+    errEl.classList.remove("hidden");
+    return;
+  }
+  const btn = $("btnGuardarClave");
+  ocuparBoton(btn, true, "Guardando...");
+  try {
+    const { error } = await supabase.auth.updateUser({ password: $("ccNueva").value });
+    if (error) {
+      errEl.textContent = "No se pudo cambiar la clave: " + (error.message || "error de red o de sesión") + ".";
+      errEl.classList.remove("hidden");
+      return;
+    }
+    cerrarCambioClave();
+    toast("Clave actualizada.", "ok");
+  } finally {
+    ocuparBoton(btn, false);
+  }
 });
 
 // ---------- Notas informativas ----------
