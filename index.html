@@ -708,8 +708,12 @@
   </div>
 </div>
 
-<!-- ASISTENTE FLOTANTE -->
-<button id="btnAbrirAsistente" class="asistente-fab" title="Asistente de consulta">
+<!-- ASISTENTE FLOTANTE - DESACTIVADO
+     Cada pregunta llama a la IA y se cobra, asi que el lanzador esta oculto. El
+     asistente sigue entero (widget, historial y funcion asistente-md): para
+     volver a activarlo basta quitar la clase "hidden" de este boton, que es la
+     unica forma de abrirlo. -->
+<button id="btnAbrirAsistente" class="asistente-fab hidden" title="Asistente de consulta">
   <img src="assets/mascota-asistente.jpg" alt="" />
 </button>
 <div id="asistenteWidget" class="asistente-widget hidden">
