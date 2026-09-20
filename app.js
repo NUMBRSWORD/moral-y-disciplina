@@ -600,8 +600,31 @@ async function loadProfile(userId) {
   });
 }
 
+// Segundo factor: si la cuenta tiene token activado en la app Faltas, la sesión no
+// sirve hasta escribir el código de 6 dígitos. Quien no tenga token entra como siempre.
+async function faltaElToken() {
+  try {
+    const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (error) return false;
+    return data.nextLevel === "aal2" && data.currentLevel !== "aal2";
+  } catch (err) {
+    // Ante cualquier fallo inesperado NO se bloquea el ingreso: el token es una
+    // protección extra y no debe dejar a nadie fuera por un error de red.
+    console.error("No se pudo comprobar el token:", err);
+    return false;
+  }
+}
+
 async function onAuthed(session) {
   state.session = session;
+  if (await faltaElToken()) {
+    $("topbar").classList.add("hidden");
+    $("tokenError").classList.add("hidden");
+    $("tokenCodigo").value = "";
+    showView("view-token");
+    $("tokenCodigo").focus();
+    return;
+  }
   $("topbar").classList.remove("hidden");
   await loadProfile(session.user.id);
   void prepararAlertasMovil();
@@ -667,6 +690,45 @@ $("loginForm").addEventListener("submit", async (e) => {
   } finally {
     ocuparBoton(btn, false);
   }
+});
+
+$("tokenForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errEl = $("tokenError");
+  errEl.classList.add("hidden");
+  const code = $("tokenCodigo").value.trim();
+  if (!/^\d{6}$/.test(code)) {
+    errEl.textContent = "El código son 6 dígitos.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  const btn = e.target.querySelector("button[type=submit]");
+  ocuparBoton(btn, true, "Verificando...");
+  try {
+    const { data: factores, error: errFactores } = await supabase.auth.mfa.listFactors();
+    if (errFactores) throw errFactores;
+    const factor = (factores.totp || [])[0];
+    if (!factor) throw new Error("Esta cuenta no tiene un token activado.");
+    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: factor.id, code });
+    if (error) {
+      errEl.textContent = "Código incorrecto o vencido. Escriba el que muestra la app en este momento.";
+      errEl.classList.remove("hidden");
+      $("tokenCodigo").value = "";
+      $("tokenCodigo").focus();
+      return;
+    }
+    const { data } = await supabase.auth.getSession();
+    if (data.session) await onAuthed(data.session);
+  } catch (err) {
+    errEl.textContent = "Error: " + (err.message || err);
+    errEl.classList.remove("hidden");
+  } finally {
+    ocuparBoton(btn, false);
+  }
+});
+
+$("tokenSalir").addEventListener("click", async () => {
+  await supabase.auth.signOut();
 });
 
 $("btnLogout").addEventListener("click", async () => {
