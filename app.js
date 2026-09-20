@@ -692,6 +692,27 @@ $("loginForm").addEventListener("submit", async (e) => {
   }
 });
 
+// Entrar con Google, igual que en la app Faltos. Existe porque la clave de este
+// formulario vive en Supabase y NO es la de Google: quien entró con Google no tiene
+// por qué conocerla, y antes se quedaba fuera al usar la web desde una computadora.
+$("btnEntrarGoogle").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  $("loginError").classList.add("hidden");
+  ocuparBoton(btn, true, "Abriendo Google...");
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.href.split("#")[0].split("?")[0] },
+    });
+    if (error) throw error;
+    // Si no hubo error el navegador ya se está yendo a Google; no se restaura el botón.
+  } catch (err) {
+    $("loginError").textContent = "No se pudo abrir el acceso con Google: " + (err.message || err);
+    $("loginError").classList.remove("hidden");
+    ocuparBoton(btn, false);
+  }
+});
+
 $("tokenForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const errEl = $("tokenError");
