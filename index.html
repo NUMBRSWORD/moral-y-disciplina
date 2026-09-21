@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="description" content="Gestión del procedimiento disciplinario de infracciones Leves (Ley N.° 30714) para la PNP: notas informativas, imputación, descargos y órdenes de sanción, con asistencia de IA supervisada." />
+<meta name="robots" content="noindex, nofollow" />
+<script>if (window.top !== window.self) { document.documentElement.style.display = "none"; window.top.location = window.self.location; }</script>
 <title>CPNP Ventanilla — Uso interno</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <meta name="theme-color" content="#0f1720" />
@@ -88,6 +90,7 @@
       <p class="muted small" style="margin-top:10px; text-align:center">
         Su cuenta de Google es distinta de la clave de este formulario.
       </p>
+      <p class="muted small" style="margin-top:6px; text-align:center"><button type="button" class="btn-ghost" data-abrir-aviso>Aviso de privacidad</button></p>
     </form>
   </section>
 
@@ -421,7 +424,8 @@
     <div class="view-header">
       <h2>Cumplimiento</h2>
     </div>
-    <p class="muted small">Políticas institucionales vigentes de este módulo. Revíselas y firme con su propia cuenta para dejar constancia de que las conoce — la firma queda registrada con su nombre, cargo, fecha y la versión exacta del texto que firmó.</p>
+    <p class="muted small"><button type="button" class="btn-ghost" data-abrir-aviso>Ver el aviso de privacidad</button></p>
+    <p class="muted small">Políticas institucionales vigentes de este módulo. Revíselas y firme con su propia cuenta para dejar constancia interna de que las conoce (esta firma no reemplaza a la firma digital de la Ley N.° 27269) — la firma queda registrada con su nombre, cargo, fecha y la versión exacta del texto que firmó.</p>
     <div id="cumplimientoLista"></div>
     <p id="cumplimientoEmpty" class="muted hidden">No hay documentos institucionales registrados todavía.</p>
   </section>
@@ -811,6 +815,34 @@
   </div>
 </div>
 
+<div id="modalAviso" class="modal-overlay hidden">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="avisoTitulo">
+    <div class="modal-header">
+      <h3 id="avisoTitulo">Aviso de privacidad</h3>
+      <button type="button" id="btnCerrarAviso" class="btn-ghost" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="modal-body aviso-privacidad">
+      <p class="muted small">Módulo Moral y Disciplina — Comisaría PNP Ventanilla. Texto en revisión por la asesoría legal de la unidad; los campos entre [corchetes] los completa la Comisaría.</p>
+      <h4>Quién trata sus datos</h4>
+      <p>La Comisaría PNP Ventanilla, titular del banco de datos [denominación y código de registro ante la Autoridad Nacional de Protección de Datos Personales].</p>
+      <h4>Qué datos y para qué</h4>
+      <p>Del personal que usa el sistema: nombres, grado, CIP, DNI y teléfono. De las personas investigadas: nombres, grado, CIP y los datos del procedimiento disciplinario por infracciones leves (notas informativas, descargos, órdenes de sanción y su cumplimiento). La finalidad es ejercer la función disciplinaria conforme a la Ley N.° 30714 y su Reglamento. No se usan para otra finalidad.</p>
+      <h4>Con quién se comparten y fuera del Perú</h4>
+      <ul>
+        <li><strong>Supabase</strong> (base de datos y archivos, servidores en Brasil).</li>
+        <li><strong>Google</strong> (copia de respaldo en Drive y, si usted lo elige, el ingreso con su cuenta de Google).</li>
+        <li><strong>Anthropic</strong> (asistencia de inteligencia artificial, Estados Unidos): solo recibe lo necesario para cada tarea, el resumen ejecutivo va sin nombres, y ningún resultado se guarda ni se notifica sin que un funcionario lo revise y confirme.</li>
+      </ul>
+      <h4>Cuánto tiempo</h4>
+      <p>Cinco (5) años desde el cierre del expediente; vencido el plazo se anonimizan o eliminan.</p>
+      <h4>Sus derechos</h4>
+      <p>Puede pedir acceso, rectificación, cancelación u oposición sobre sus datos ante la Comisaría PNP Ventanilla: [medio de contacto y responsable de atender el derecho]. Si no obtiene respuesta, puede acudir a la Autoridad Nacional de Protección de Datos Personales.</p>
+      <h4>Cómo se protegen</h4>
+      <p>Cada oficial solo ve los expedientes donde figura como oficial que constató; el padrón completo solo lo ve el administrador; el acceso exige clave propia y los cambios quedan en un historial de auditoría.</p>
+    </div>
+  </div>
+</div>
+
 <div id="modalCambiarClave" class="modal-overlay hidden">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cambiarClaveTitulo">
     <div class="modal-header">
@@ -818,7 +850,7 @@
       <button type="button" id="btnCerrarCambiarClave" class="btn-ghost hidden">✕</button>
     </div>
     <form id="cambiarClaveForm" class="modal-body">
-      <p id="cambiarClaveAviso" class="ai-box ai-box-warning hidden">Ingresó con la clave inicial (su propio CIP). Ese número figura en los documentos del sistema y cualquiera podría usarlo para entrar como usted. Elija una clave nueva para continuar.</p>
+      <p id="cambiarClaveAviso" class="ai-box ai-box-warning hidden">La clave con la que ingresó es temporal o fácil de adivinar por otras personas. Elija una clave nueva para continuar.</p>
       <label>Clave nueva (mínimo 8 caracteres, con al menos una letra)
         <input type="password" id="ccNueva" required minlength="8" autocomplete="new-password" />
       </label>

@@ -15,6 +15,7 @@ import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNo
 import { clasificarNotaEntrante, entradasSeguimiento } from "./lib/seguimiento.js";
 import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo } from "./lib/nombresNota.js";
 import { PERIODO_ACUMULADO, agruparPersonas, buscarPersonas, formatearDuracionHoras, resumenDelMes, resumenPersona } from "./lib/personas.js";
+import { restaurarNombres, seudonimizarInvestigados } from "./lib/privacidad.js";
 import { fechaLima, hoyLima, horaLima } from "./lib/fechas.js";
 import { DIAS_MINIMOS, INDETERMINADO, INICIO_INFORME, REMUNERACION, cumpleMinimo, descuentoDeNotas, formatearSoles, textoDescuento, textoDias } from "./lib/descuento.js";
 import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
@@ -619,6 +620,15 @@ async function faltaElToken() {
   }
 }
 
+// true si la base exige cambiar la clave antes de operar. Si la consulta falla (red,
+// función aún no instalada) NO se bloquea el navegador: el servidor ya no entrega
+// datos a una cuenta pendiente, con o sin esta ventana.
+async function necesitaCambiarClave() {
+  const { data, error } = await supabase.rpc("necesita_cambiar_clave");
+  if (error) { console.warn("necesita_cambiar_clave:", error.message); return false; }
+  return data === true;
+}
+
 async function onAuthed(session) {
   state.session = session;
   if (await faltaElToken()) {
@@ -627,6 +637,16 @@ async function onAuthed(session) {
     $("tokenCodigo").value = "";
     showView("view-token");
     $("tokenCodigo").focus();
+    return;
+  }
+  // El cambio de clave se exige en el SERVIDOR: si la clave es la inicial, la base
+  // marca la cuenta y no le da acceso a nada hasta que la clave cambie de verdad.
+  // Aquí solo se muestra la ventana para hacerlo.
+  try { await supabase.rpc("exigir_cambio_si_clave_inicial"); } catch (err) { console.warn(err); }
+  if (await necesitaCambiarClave()) {
+    $("topbar").classList.add("hidden");
+    showView("view-login");
+    abrirCambioClave({ obligatorio: true });
     return;
   }
   $("topbar").classList.remove("hidden");
@@ -790,6 +810,11 @@ function cerrarCambioClave() {
 }
 
 $("btnCambiarClave").addEventListener("click", () => abrirCambioClave());
+
+// Aviso de privacidad (Ley 29733): visible desde el acceso y desde Cumplimiento.
+document.querySelectorAll("[data-abrir-aviso]").forEach((b) => b.addEventListener("click", () => $("modalAviso").classList.remove("hidden")));
+$("btnCerrarAviso").addEventListener("click", () => $("modalAviso").classList.add("hidden"));
+$("modalAviso").addEventListener("click", (e) => { if (e.target === $("modalAviso")) $("modalAviso").classList.add("hidden"); });
 $("btnCerrarCambiarClave").addEventListener("click", cerrarCambioClave);
 $("btnSalirCambiarClave").addEventListener("click", async () => {
   cerrarCambioClave();
@@ -814,8 +839,17 @@ $("cambiarClaveForm").addEventListener("submit", async (e) => {
       errEl.classList.remove("hidden");
       return;
     }
+    // El servidor comprueba que la clave cambió de verdad y levanta la marca.
+    const { data: confirmada, error: errConfirma } = await supabase.rpc("confirmar_cambio_clave");
+    if (errConfirma || confirmada === false) {
+      errEl.textContent = "La clave se guardó pero no pudo validarse. Cierre sesión, ingrese con la clave nueva y repita el cambio.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+    const eraObligatorio = cambioClave.obligatorio;
     cerrarCambioClave();
     toast("Clave actualizada.", "ok");
+    if (eraObligatorio && state.session) await onAuthed(state.session);
   } finally {
     ocuparBoton(btn, false);
   }
@@ -1582,7 +1616,9 @@ async function generarResumenEjecutivo() {
   btn.disabled = true;
   btn.classList.add("is-busy");
   try {
-    const casos = construirResumenEstadoCasos();
+    // A la IA (fuera del Perú) no se le envían nombres: cada investigado va como
+    // "E01", "E02"… y aquí se restauran al recibir el texto (lib/privacidad.js).
+    const { casos, mapa: nombresPorAlias } = seudonimizarInvestigados(construirResumenEstadoCasos());
     // Sin casos no hay nada que resumir: la IA respondía en prosa (sin el formato
     // que se le pide) y el resultado era "La IA no devolvió un formato reconocible".
     if (!casos.length) {
@@ -1594,7 +1630,7 @@ async function generarResumenEjecutivo() {
     });
     if (error) throw new Error(await mensajeErrorFuncion(error));
     if (data?.error) throw new Error(data.error);
-    contenidoEl.textContent = data?.resumen || "No se pudo generar el resumen.";
+    contenidoEl.textContent = data?.resumen ? restaurarNombres(data.resumen, nombresPorAlias) : "No se pudo generar el resumen.";
     statusEl.classList.add("hidden");
   } catch (err) {
     console.error(err);
@@ -2010,12 +2046,13 @@ async function renderNotaDetail(nota) {
       <h3>Orden de Sanción</h3>
       ${puedeSancion ? `
         <form id="sancionForm">
-          <div class="label" style="margin-bottom:8px">Sanción a imponer (evaluando el descargo${nota.fecha_descargo ? " — puede marcarla usted o dejar que la IA la elija" : ""})</div>
+          <div class="label" style="margin-bottom:8px">Sanción a imponer (la elige usted evaluando el descargo${nota.fecha_descargo ? "; la IA solo puede sugerir una, sin marcarla" : ""})</div>
           ${opcionesSancion.map((o) => {
             const marcado = (o.value === "amonestacion" && nota.sancion_tipo === "amonestacion") ||
               (nota.sancion_tipo === "dias" && String(nota.sancion_dias) === o.value);
             return `<label class="checkbox-row"><input type="radio" name="sancionTercio" value="${o.value}" ${marcado ? "checked" : ""} required /> ${escapeHtml(o.label)}</label>`;
           }).join("")}
+          <p id="sancionSugerenciaIA" class="muted small hidden" role="status"></p>
           <label>Descargo del investigado (resumen de puntos relevantes y argumentos de defensa${nota.fecha_descargo ? " — deje en blanco y presione \"Redactar con IA\" para que se lea solo del archivo subido" : ""})
             <textarea id="sSancionDescargo" rows="4" placeholder="${nota.fecha_descargo ? "Primero use 'Redactar con IA' o escriba un resumen propio. No copie el descargo completo." : ""}">${escapeHtml(nota.sancion_descargo_resumen || (nota.fecha_descargo ? "" : "El investigado no presentó su descargo por escrito dentro del plazo de un (01) día hábil establecido por ley, conforme acta respectiva, precluyendo su derecho a la defensa en la presente etapa procedimental."))}</textarea>
           </label>
@@ -2026,7 +2063,8 @@ async function renderNotaDetail(nota) {
           <div class="modal-actions" style="justify-content:flex-start; margin-bottom:10px">
             <button type="button" class="btn-secondary" id="btnRedactarIA">${svgIco("ia")}Analizar descargo y redactar con IA</button>
           </div>
-          <p class="muted small">La IA elige el tercio y redacta el resumen del descargo y el análisis, usando las directivas internas activas como única fuente de reglas institucionales — si el descargo invoca algo que ninguna directiva regula, la IA lo dice en vez de inventarlo.</p>
+          <p class="muted small">La IA redacta el resumen del descargo y el análisis, y puede sugerir un tercio, pero no lo marca: la sanción la elige usted. Usa las directivas internas activas como única fuente de reglas institucionales — si el descargo invoca algo que ninguna directiva regula, la IA lo dice en vez de inventarlo.</p>
+          <label class="checkbox-row"><input type="checkbox" id="sSancionAvisoIA" /> Dejar constancia en la Orden de que el análisis se redactó con apoyo de inteligencia artificial y fue revisado por el funcionario firmante</label>
           <p id="sancionIAStatus" class="muted small hidden"></p>
           ` : `
           <div class="modal-actions" style="justify-content:flex-start; margin-bottom:6px">
@@ -2325,16 +2363,23 @@ async function redactarConIA(nota) {
       $("sSancionAnalisis").value = data.analisis_texto;
       $("sSancionAnalisis").dataset.autofilled = "false";
     }
-    if (data?.tercio_value) {
-      const radio = [...document.querySelectorAll('input[name="sancionTercio"]')]
-        .find((r) => r.value === data.tercio_value);
-      if (radio) radio.checked = true;
+    // La IA SUGIERE el tercio pero no lo marca: la sanción la elige el funcionario
+    // (supervisión humana, art. 24.11 y 31.4 del Reglamento de la Ley 31814).
+    const sugerido = data?.tercio_value
+      ? [...document.querySelectorAll('input[name="sancionTercio"]')].find((r) => r.value === data.tercio_value)
+      : null;
+    if (sugerido) {
+      const sug = $("sancionSugerenciaIA");
+      sug.textContent = `Sugerencia de la IA (no seleccionada): ${sugerido.closest("label").textContent.trim()}. Elija usted la sanción; si elige otra, revise que el análisis la sustente.`;
+      sug.classList.remove("hidden");
     }
+    // Se propone (sin obligar) dejar constancia del apoyo de IA en el documento.
+    if ($("sSancionAvisoIA")) $("sSancionAvisoIA").checked = true;
     // Guarda lo que redactó la IA como borrador: si se recarga antes de
     // "Guardar y descargar", no se pierde.
     guardarBorrador(nota.id, "descargo", $("sSancionDescargo").value);
     guardarBorrador(nota.id, "analisis", $("sSancionAnalisis").value);
-    statusEl.textContent = "Listo — la IA evaluó el descargo y eligió el tercio. Revise la selección y el texto antes de guardar.";
+    statusEl.textContent = "Listo — la IA evaluó el descargo y redactó el texto; el tercio queda a su elección. Revise todo antes de guardar.";
   } catch (err) {
     console.error(err);
     statusEl.classList.add("hidden");
@@ -2439,12 +2484,14 @@ async function submitNotificacionOrden(e, nota) {
   }
 }
 
+const AVISO_APOYO_IA = "El presente análisis fue redactado con apoyo de una herramienta de inteligencia artificial y revisado por el funcionario firmante.";
+
 async function submitSancion(e, nota) {
   e.preventDefault();
   const errEl = $("sancionError");
   errEl.classList.add("hidden");
   const tercioValue = document.querySelector('input[name="sancionTercio"]:checked')?.value;
-  const analisisTexto = $("sSancionAnalisis").value.trim();
+  let analisisTexto = $("sSancionAnalisis").value.trim();
   const descargoTexto = $("sSancionDescargo").value.trim();
 
   if (!tercioValue) { errEl.textContent = "Seleccione la sanción a imponer."; errEl.classList.remove("hidden"); return; }
@@ -2453,6 +2500,13 @@ async function submitSancion(e, nota) {
     errEl.textContent = "Falta el resumen del descargo. Use «Analizar descargo y redactar con IA» o escriba los puntos relevantes y argumentos de defensa antes de generar la orden.";
     errEl.classList.remove("hidden");
     return;
+  }
+
+  // Transparencia hacia el investigado (art. 25.3 del Reglamento de la Ley 31814).
+  if ($("sSancionAvisoIA")?.checked && !analisisTexto.includes(AVISO_APOYO_IA)) {
+    analisisTexto = `${analisisTexto}
+
+${AVISO_APOYO_IA}`;
   }
 
   const submitBtn = e.target.querySelector("button[type=submit]");
