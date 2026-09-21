@@ -15,7 +15,7 @@ import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNo
 import { clasificarNotaEntrante, entradasSeguimiento } from "./lib/seguimiento.js";
 import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo } from "./lib/nombresNota.js";
 import { agruparPersonas, buscarPersonas, formatearDuracion, resumenDelMes, resumenPersona } from "./lib/personas.js";
-import { descuentoDeNotas, formatearSoles } from "./lib/descuento.js";
+import { INDETERMINADO, TOTAL_PERCIBIDO, descuentoDeNotas, formatearSoles, textoDescuento } from "./lib/descuento.js";
 import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
@@ -5130,13 +5130,15 @@ function pintarListaResumen(r, ym) {
   const faltas = filas.reduce((s, e) => s + e.faltas, 0);
   const horas = filas.reduce((s, e) => s + e.horasTotales, 0);
   const descuentos = filas.map((e) => descuentoDeNotas(e.notas));
-  const totalDescuento = descuentos.reduce((s, d) => s + d.monto, 0);
+  const totalDescuento = { monto: descuentos.reduce((s, d) => s + d.monto, 0), sinMonto: descuentos.reduce((s, d) => s + d.sinMonto, 0) };
   const gradosSinMonto = [...new Set(descuentos.flatMap((d) => d.gradosSinMonto))];
   $("resumenListaSubtitulo").textContent = filas.length
-    ? `${faltas} ${faltas === 1 ? "falta" : "faltas"} · ${formatearDuracion(horas)} de ausencia sumada · descuento a requerir ${formatearSoles(totalDescuento)}`
-      + (gradosSinMonto.length ? ` (sin monto cargado para: ${gradosSinMonto.join(", ")})` : "")
+    ? `${faltas} ${faltas === 1 ? "falta" : "faltas"} · ${formatearDuracion(horas)} de ausencia sumada · descuento a requerir ${textoDescuento(totalDescuento, faltas)}`
+      + (gradosSinMonto.length ? ` (sin monto de sueldo cargado para: ${gradosSinMonto.join(", ")})` : "")
       + `. Toque un nombre para abrir su ficha. Esta lista lleva nombres; la tabla de reiterativos de abajo sigue siendo anónima.`
     : "";
+  const montos = Object.entries(TOTAL_PERCIBIDO).map(([g, m]) => `${g} ${formatearSoles(m)}`).join(" · ");
+  $("resumenListaNota").textContent = `Descuento = total percibido del grado ÷ 30 ÷ 24 × horas de ausencia, con el grado de cada falta. Montos usados: ${montos}; los demás grados quedan ${INDETERMINADO} hasta cargar su monto. La app no descuenta: el monto es el que se requiere a DIRREHUM. Los casos sin reincorporar cuentan hasta hoy y pueden cambiar.`;
   $("resumenListaEmpty").classList.toggle("hidden", filas.length > 0);
   $("resumenListaEmpty").textContent = "Nadie en este grupo este mes.";
   $("resumenListaBody").innerHTML = filas.map((e, i) => {
@@ -5146,12 +5148,12 @@ function pintarListaResumen(r, ym) {
     const aprox = e.aproximado ? ` <span class="muted" title="Aproximado: a algún caso le falta la hora">≈</span>` : "";
     const enCurso = e.enCurso ? ` <span class="pill pill-warning" title="Todavía sin reincorporar: cuenta hasta hoy">en curso</span>` : "";
     const d = descuentos[i];
-    const todoSinMonto = d.sinMonto === e.notas.length;
-    const montoTxt = todoSinMonto
-      ? `<span class="muted" title="No hay monto cargado para el grado ${escapeHtml(d.gradosSinMonto.join(", "))}">—</span>`
+    const pista = `Sin monto de sueldo cargado para el grado ${escapeHtml(d.gradosSinMonto.join(", "))}`;
+    const montoTxt = (d.sinMonto >= e.notas.length
+      ? `<span class="pill pill-warning" title="${pista}">${INDETERMINADO}</span>`
       : `<strong>${escapeHtml(formatearSoles(d.monto))}</strong>`
-        + (d.sinMonto ? ` <span class="pill pill-danger" title="${d.sinMonto} falta(s) sin monto para el grado ${escapeHtml(d.gradosSinMonto.join(", "))}: no están sumadas">incompleto</span>` : "")
-        + (e.enCurso ? ` <span class="muted small">provisional</span>` : "");
+        + (d.sinMonto ? ` <span class="pill pill-warning" title="${pista}: ${d.sinMonto} falta(s) no están sumadas">+ ${INDETERMINADO}</span>` : ""))
+      + (e.enCurso ? ` <span class="muted small">provisional</span>` : "");
     return `<tr>
       <td class="case-title"><button type="button" class="link-btn" data-i="${i}" title="Abrir su ficha completa">${escapeHtml(nombreInvestigadoVisible(e, true))}</button></td>
       <td>${e.faltas}</td>
