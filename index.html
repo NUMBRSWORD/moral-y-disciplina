@@ -81,6 +81,31 @@
       </label>
       <p id="loginError" class="error hidden" role="alert"></p>
       <button type="submit" class="btn-primary">Ingresar</button>
+      <p class="muted small" style="margin:14px 0 8px; text-align:center">o</p>
+      <button type="button" id="btnEntrarGoogle" class="btn-secondary" style="width:100%">
+        Continuar con Google
+      </button>
+      <p class="muted small" style="margin-top:10px; text-align:center">
+        Su cuenta de Google es distinta de la clave de este formulario.
+      </p>
+    </form>
+  </section>
+
+  <!-- SEGUNDO FACTOR: CÓDIGO DEL TOKEN (app Faltas) -->
+  <section id="view-token" class="view center-view hidden">
+    <form id="tokenForm" class="card login-card">
+      <div class="brand center">
+        <span class="brand-badge lg">PNP</span>
+        <h1>Código del token</h1>
+        <p class="muted">Abra la aplicación <strong>Faltas</strong> en su celular y escriba el código de 6 dígitos que le muestra.</p>
+      </div>
+      <label>Código
+        <input type="text" id="tokenCodigo" required inputmode="numeric" autocomplete="one-time-code"
+               maxlength="6" pattern="[0-9]{6}" placeholder="000000" />
+      </label>
+      <p id="tokenError" class="error hidden" role="alert"></p>
+      <button type="submit" class="btn-primary">Verificar</button>
+      <button type="button" id="tokenSalir" class="btn-ghost">Cancelar y salir</button>
     </form>
   </section>
 
@@ -683,8 +708,12 @@
   </div>
 </div>
 
-<!-- ASISTENTE FLOTANTE -->
-<button id="btnAbrirAsistente" class="asistente-fab" title="Asistente de consulta">
+<!-- ASISTENTE FLOTANTE - DESACTIVADO
+     Cada pregunta llama a la IA y se cobra, asi que el lanzador esta oculto. El
+     asistente sigue entero (widget, historial y funcion asistente-md): para
+     volver a activarlo basta quitar la clase "hidden" de este boton, que es la
+     unica forma de abrirlo. -->
+<button id="btnAbrirAsistente" class="asistente-fab hidden" title="Asistente de consulta">
   <img src="assets/mascota-asistente.jpg" alt="" />
 </button>
 <div id="asistenteWidget" class="asistente-widget hidden">
