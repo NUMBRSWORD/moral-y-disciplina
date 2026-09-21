@@ -330,6 +330,8 @@ tbody tr:last-child td { border-bottom: none; }
 .stat-tile-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .resumen-lista { margin: 0 0 22px; }
 .resumen-lista h4 { margin: 0 0 2px; font-size: 1rem; }
+#resumenListaBody td.monto { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+.resumen-lista .table-wrap + p { margin: 10px 0 0; }
 .resumen-lista .detail-card-header { flex-wrap: nowrap; align-items: flex-start; }
 .resumen-lista .detail-card-header > div { flex: 1; min-width: 0; }
 .link-btn { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--accent); cursor: pointer; text-align: left; }

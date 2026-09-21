@@ -15,6 +15,7 @@ import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNo
 import { clasificarNotaEntrante, entradasSeguimiento } from "./lib/seguimiento.js";
 import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo } from "./lib/nombresNota.js";
 import { agruparPersonas, buscarPersonas, formatearDuracion, resumenDelMes, resumenPersona } from "./lib/personas.js";
+import { descuentoDeNotas, formatearSoles } from "./lib/descuento.js";
 import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
@@ -5128,8 +5129,13 @@ function pintarListaResumen(r, ym) {
   $("resumenListaTitulo").textContent = def.titulo(filas.length, r, etiquetaMesPanel(ym));
   const faltas = filas.reduce((s, e) => s + e.faltas, 0);
   const horas = filas.reduce((s, e) => s + e.horasTotales, 0);
+  const descuentos = filas.map((e) => descuentoDeNotas(e.notas));
+  const totalDescuento = descuentos.reduce((s, d) => s + d.monto, 0);
+  const gradosSinMonto = [...new Set(descuentos.flatMap((d) => d.gradosSinMonto))];
   $("resumenListaSubtitulo").textContent = filas.length
-    ? `${faltas} ${faltas === 1 ? "falta" : "faltas"} · ${formatearDuracion(horas)} de ausencia sumada. Toque un nombre para abrir su ficha. Esta lista lleva nombres; la tabla de reiterativos de abajo sigue siendo anónima.`
+    ? `${faltas} ${faltas === 1 ? "falta" : "faltas"} · ${formatearDuracion(horas)} de ausencia sumada · descuento a requerir ${formatearSoles(totalDescuento)}`
+      + (gradosSinMonto.length ? ` (sin monto cargado para: ${gradosSinMonto.join(", ")})` : "")
+      + `. Toque un nombre para abrir su ficha. Esta lista lleva nombres; la tabla de reiterativos de abajo sigue siendo anónima.`
     : "";
   $("resumenListaEmpty").classList.toggle("hidden", filas.length > 0);
   $("resumenListaEmpty").textContent = "Nadie en este grupo este mes.";
@@ -5139,11 +5145,19 @@ function pintarListaResumen(r, ym) {
       .map(([c, k]) => `<span class="pill pill-yes">${escapeHtml(c)}${k > 1 ? ` ×${k}` : ""}</span>`).join("");
     const aprox = e.aproximado ? ` <span class="muted" title="Aproximado: a algún caso le falta la hora">≈</span>` : "";
     const enCurso = e.enCurso ? ` <span class="pill pill-warning" title="Todavía sin reincorporar: cuenta hasta hoy">en curso</span>` : "";
+    const d = descuentos[i];
+    const todoSinMonto = d.sinMonto === e.notas.length;
+    const montoTxt = todoSinMonto
+      ? `<span class="muted" title="No hay monto cargado para el grado ${escapeHtml(d.gradosSinMonto.join(", "))}">—</span>`
+      : `<strong>${escapeHtml(formatearSoles(d.monto))}</strong>`
+        + (d.sinMonto ? ` <span class="pill pill-danger" title="${d.sinMonto} falta(s) sin monto para el grado ${escapeHtml(d.gradosSinMonto.join(", "))}: no están sumadas">incompleto</span>` : "")
+        + (e.enCurso ? ` <span class="muted small">provisional</span>` : "");
     return `<tr>
       <td class="case-title"><button type="button" class="link-btn" data-i="${i}" title="Abrir su ficha completa">${escapeHtml(nombreInvestigadoVisible(e, true))}</button></td>
       <td>${e.faltas}</td>
       <td><div class="codes-cell">${fechas}</div></td>
       <td>${escapeHtml(e.duracion)}${aprox}${enCurso}</td>
+      <td class="monto">${montoTxt}</td>
       <td><div class="codes-cell">${codigos}</div></td>
     </tr>`;
   }).join("");
