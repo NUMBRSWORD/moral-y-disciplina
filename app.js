@@ -605,7 +605,7 @@ async function loadProfile(userId) {
   });
 }
 
-// Segundo factor: si la cuenta tiene token activado en la app Faltas, la sesión no
+// Segundo factor: si la cuenta tiene token activado en la app Faltos, la sesión no
 // sirve hasta escribir el código de 6 dígitos. Quien no tenga token entra como siempre.
 async function faltaElToken() {
   try {
