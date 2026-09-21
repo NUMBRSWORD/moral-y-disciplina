@@ -142,7 +142,29 @@ main { max-width: 1500px; margin: 0 auto; padding: 24px 20px 60px; }
   margin: 0 0 18px; padding: 14px 16px;
   background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
 }
-.search-panel > input[type="search"] { flex: 1 1 260px; min-width: 0; }
+.search-panel > input[type="search"], .search-panel > .search-box { flex: 1 1 260px; min-width: 0; }
+.search-box { position: relative; }
+.search-box input[type="search"] { width: 100%; }
+/* Personas encontradas mientras se escribe (ficha por persona en Seguimiento) */
+.sugerencias {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30;
+  max-height: 340px; overflow-y: auto;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.sugerencia {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
+  padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--border);
+}
+.sugerencia:last-child { border-bottom: 0; }
+.sugerencia:hover, .sugerencia.activa { background: var(--accent-soft); }
+.sugerencia .sug-nombre { font-weight: 600; }
+.sugerencia .sug-datos { color: var(--text-muted); font-size: 0.82rem; text-align: right; }
+/* Ficha por persona */
+.ficha-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 14px 0; }
+.ficha-tiles .stat-tile .stat-nota { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+.ficha-codigos { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; }
+.ficha-codigos .ficha-codigos-titulo { color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; margin-right: 4px; }
 
 .quick-summary {
   display: flex; align-items: center; justify-content: space-between; gap: 24px;
@@ -677,6 +699,8 @@ kbd {
   .view-actions > button { width: 100%; min-height: 46px; }
   .search-panel { flex-direction: column; align-items: stretch; padding: 14px; }
   .search-panel > input[type="search"], .search-panel > button, .search-panel > label.inline-filter { width: 100%; min-height: 46px; }
+  .search-panel > .search-box { width: 100%; flex: 0 0 auto; }
+  .search-panel > .search-box input[type="search"] { min-height: 46px; }
   .search-panel > label.inline-filter { display: flex; align-items: center; gap: 6px; }
 
   /* Resumen rápido y paneles */

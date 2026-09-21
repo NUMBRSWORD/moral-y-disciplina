@@ -13,7 +13,8 @@ import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva
 import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocumento, actualizarContenidoDocumentoInstitucional } from "./lib/cumplimiento.js";
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible } from "./lib/utils.js";
 import { clasificarNotaEntrante, entradasSeguimiento } from "./lib/seguimiento.js";
-import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada } from "./lib/nombresNota.js";
+import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo } from "./lib/nombresNota.js";
+import { agruparPersonas, buscarPersonas, resumenPersona } from "./lib/personas.js";
 import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
@@ -654,7 +655,15 @@ function onSignedOut() {
 }
 
 supabase.auth.onAuthStateChange((_event, session) => {
-  if (session) onAuthed(session); else onSignedOut();
+  if (!session) { onSignedOut(); return; }
+  // Supabase repite SIGNED_IN / TOKEN_REFRESHED con la MISMA sesión al volver a la
+  // pestaña o al renovarse el token. Antes cada repetición ejecutaba onAuthed, que
+  // manda a "Expedientes" y recarga todo: quien estaba en Seguimiento, en un
+  // expediente o con una ficha abierta era devuelto al inicio sin haber hecho nada.
+  // Si esa persona ya está dentro de la app, solo se actualiza el token.
+  const yaEnLaApp = state.session?.user?.id === session.user.id && !$("topbar").classList.contains("hidden");
+  if (yaEnLaApp) { state.session = session; return; }
+  onAuthed(session);
 });
 
 supabase.auth.getSession().then(({ data }) => {
@@ -1389,6 +1398,11 @@ async function handleDescargarActaNoDescargo(nota, btnEl) {
 
 // La pestaña Seguimiento es el archivo de lo resuelto: solo expedientes con la
 // Orden ya notificada, con buscador y filtro por fecha encima.
+// Persona elegida en la lista de sugerencias (ficha): mientras esté elegida, el
+// archivo de resueltos de abajo muestra solo SUS casos, sin depender de cómo
+// esté escrito su nombre en cada expediente.
+let personaFiltrada = null;
+
 function aplicarFiltrosNotas() {
   const q = $("searchNotas").value.toLowerCase();
   const desde = $("filtroDesde").value;
@@ -1396,8 +1410,10 @@ function aplicarFiltrosNotas() {
   const filtrarTexto = !!q, filtrarFecha = !!(desde || hasta);
   const filtered = state.notas.filter((n) => {
     if (!notaConcluida(n)) return false;
-    const coincideTexto = !q || [n.nombres, n.apellidos, n.numero_nota_falta, n.codigo_infraccion, n.grado]
-      .filter(Boolean).join(" ").toLowerCase().includes(q);
+    const coincideTexto = personaFiltrada
+      ? mismoEfectivo(n, personaFiltrada)
+      : (!q || [n.nombres, n.apellidos, n.numero_nota_falta, n.codigo_infraccion, n.grado]
+        .filter(Boolean).join(" ").toLowerCase().includes(q));
     // Filtra por fecha de la falta. Los campos de tipo date de Supabase vienen
     // como "YYYY-MM-DD", igual que los inputs de fecha, así que se comparan
     // directamente como texto sin necesidad de convertir a Date.
@@ -1406,20 +1422,126 @@ function aplicarFiltrosNotas() {
     return coincideTexto && coincideDesde && coincideHasta;
   });
   const vacio = (filtrarTexto || filtrarFecha)
-    ? "Ningún expediente resuelto coincide con la búsqueda."
+    ? "Ningún expediente resuelto coincide con la búsqueda. Si la persona tiene casos en trámite, elíjala en la lista de sugerencias para ver su ficha."
     : "Todavía no hay expedientes resueltos.";
   renderNotasTable(filtered, "seguimientoTableBody", "seguimientoEmpty", vacio);
 }
 
-$("searchNotas").addEventListener("input", aplicarFiltrosNotas);
+$("searchNotas").addEventListener("input", () => { personaFiltrada = null; aplicarFiltrosNotas(); });
 $("filtroDesde").addEventListener("change", aplicarFiltrosNotas);
 $("filtroHasta").addEventListener("change", aplicarFiltrosNotas);
 $("btnLimpiarFiltroFecha").addEventListener("click", () => {
   $("filtroDesde").value = "";
   $("filtroHasta").value = "";
   $("searchNotas").value = "";
+  personaFiltrada = null;
+  cerrarSugerenciasPersonas();
+  cerrarFichaPersona();
   aplicarFiltrosNotas();
 });
+
+// ---------- Ficha por persona (pestaña Seguimiento) ----------
+// Al escribir en el buscador se proponen las personas cuyo nombre EMPIEZA así
+// (entre TODOS los expedientes, resueltos o no: antes solo se veían los
+// resueltos y quien tenía casos en trámite nunca aparecía). Al elegir una se
+// muestra su ficha: cuántas veces faltó, el tiempo acumulado y cada caso con su
+// estado. La tabla de abajo sigue siendo el archivo de lo resuelto.
+let indicePersonas = [];
+let indicePersonasFuente = null;
+let sugerenciasPersonas = [];
+let sugerenciaActiva = -1;
+
+function personasDeLaLista() {
+  if (indicePersonasFuente !== state.notas) {
+    indicePersonas = agruparPersonas(state.notas);
+    indicePersonasFuente = state.notas;
+  }
+  return indicePersonas;
+}
+
+function cerrarSugerenciasPersonas() {
+  $("sugerenciasPersonas").classList.add("hidden");
+  $("searchNotas").setAttribute("aria-expanded", "false");
+  sugerenciaActiva = -1;
+}
+
+function pintarSugerenciasPersonas() {
+  const cont = $("sugerenciasPersonas");
+  sugerenciasPersonas = buscarPersonas(personasDeLaLista(), $("searchNotas").value);
+  sugerenciaActiva = -1;
+  if (!sugerenciasPersonas.length) { cont.innerHTML = ""; cerrarSugerenciasPersonas(); return; }
+  cont.innerHTML = sugerenciasPersonas.map((p, i) => {
+    const r = resumenPersona(p.notas);
+    const datos = `${r.faltas} ${r.faltas === 1 ? "falta" : "faltas"} · ${r.duracion}${r.sinReincorporar ? ` · ${r.sinReincorporar} sin reincorporar` : ""}`;
+    return `<div class="sugerencia" role="option" data-i="${i}"><span class="sug-nombre">${escapeHtml(nombreInvestigadoVisible(p, true))}</span><span class="sug-datos">${escapeHtml(datos)}</span></div>`;
+  }).join("");
+  cont.classList.remove("hidden");
+  $("searchNotas").setAttribute("aria-expanded", "true");
+}
+
+function marcarSugerencia(i) {
+  const items = [...$("sugerenciasPersonas").querySelectorAll(".sugerencia")];
+  if (!items.length) return;
+  sugerenciaActiva = (i + items.length) % items.length;
+  items.forEach((el, k) => el.classList.toggle("activa", k === sugerenciaActiva));
+  items[sugerenciaActiva].scrollIntoView({ block: "nearest" });
+}
+
+function elegirPersona(i) {
+  const p = sugerenciasPersonas[i];
+  if (!p) return;
+  cerrarSugerenciasPersonas();
+  $("searchNotas").value = `${p.nombres} ${p.apellidos}`.trim();
+  personaFiltrada = p;
+  aplicarFiltrosNotas();
+  mostrarFichaPersona(p);
+}
+
+function mostrarFichaPersona(p) {
+  const r = resumenPersona(p.notas);
+  const enTramite = p.notas.filter((n) => !notaConcluida(n)).length;
+  $("fichaTitulo").textContent = nombreInvestigadoVisible(p, true);
+  $("fichaSubtitulo").textContent = r.primeraFalta
+    ? `Con expedientes desde el ${formatDate(r.primeraFalta)}. Última falta: ${formatDate(r.ultimaFalta)}.`
+    : "";
+  const tile = (valor, etiqueta, nota) => `<div class="stat-tile"><div class="stat-value">${escapeHtml(String(valor))}</div><div class="stat-label">${escapeHtml(etiqueta)}</div>${nota ? `<div class="stat-nota">${escapeHtml(nota)}</div>` : ""}</div>`;
+  $("fichaTiles").innerHTML = [
+    tile(r.faltas, r.faltas === 1 ? "Falta registrada" : "Faltas registradas"),
+    tile(r.duracion, "Tiempo ausente acumulado", [r.enCurso ? `incluye ${r.enCurso} en curso` : "", r.aproximado ? "aprox. en algún caso" : ""].filter(Boolean).join(" · ")),
+    tile(enTramite, "En trámite", r.sinReincorporar ? `${r.sinReincorporar} sin reincorporar` : ""),
+    tile(r.conSancion, "Con sanción"),
+    tile(formatDate(r.ultimaFalta), "Última falta"),
+  ].join("");
+  const codigos = Object.entries(r.porCodigo).sort((a, b) => b[1] - a[1]);
+  $("fichaCodigos").innerHTML = `<span class="ficha-codigos-titulo">Por código</span>`
+    + codigos.map(([c, k]) => `<span class="pill pill-neutral">${escapeHtml(c)} × ${k}</span>`).join("");
+  // «Exportar a Excel» exporta la última lista dibujada: la ficha no debe alterarla.
+  const previa = notasVisibles;
+  renderNotasTable(p.notas, "fichaTableBody", "fichaEmpty", "Esta persona no tiene expedientes.");
+  notasVisibles = previa;
+  $("fichaPersona").classList.remove("hidden");
+  $("fichaPersona").scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function cerrarFichaPersona() { $("fichaPersona").classList.add("hidden"); }
+
+$("searchNotas").addEventListener("input", pintarSugerenciasPersonas);
+$("searchNotas").addEventListener("focus", () => { if ($("searchNotas").value.trim().length >= 2) pintarSugerenciasPersonas(); });
+$("searchNotas").addEventListener("keydown", (e) => {
+  const abierto = !$("sugerenciasPersonas").classList.contains("hidden");
+  if (!abierto) return;
+  if (e.key === "ArrowDown") { e.preventDefault(); marcarSugerencia(sugerenciaActiva + 1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); marcarSugerencia(sugerenciaActiva - 1); }
+  else if (e.key === "Enter") { e.preventDefault(); elegirPersona(sugerenciaActiva >= 0 ? sugerenciaActiva : 0); }
+  else if (e.key === "Escape") { cerrarSugerenciasPersonas(); }
+});
+// mousedown (no click) para elegir antes de que el buscador pierda el foco.
+$("sugerenciasPersonas").addEventListener("mousedown", (e) => {
+  const el = e.target.closest(".sugerencia");
+  if (el) { e.preventDefault(); elegirPersona(Number(el.dataset.i)); }
+});
+document.addEventListener("click", (e) => { if (!e.target.closest(".search-box")) cerrarSugerenciasPersonas(); });
+$("btnCerrarFicha").addEventListener("click", cerrarFichaPersona);
 
 // ---------- Resumen ejecutivo (IA) ----------
 // Arma, a partir de lo que YA se ve en el dashboard (respetando el filtro de
@@ -1455,6 +1577,12 @@ async function generarResumenEjecutivo() {
   btn.classList.add("is-busy");
   try {
     const casos = construirResumenEstadoCasos();
+    // Sin casos no hay nada que resumir: la IA respondía en prosa (sin el formato
+    // que se le pide) y el resultado era "La IA no devolvió un formato reconocible".
+    if (!casos.length) {
+      statusEl.textContent = "No hay expedientes para resumir todavía.";
+      return;
+    }
     const { data, error } = await supabase.functions.invoke("generar-resumen-casos", {
       body: { fechaHoy: new Date().toISOString().slice(0, 10), casos },
     });

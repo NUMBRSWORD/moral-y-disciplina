@@ -3,7 +3,7 @@
 //     conexión intermitente (los datos siguen viniendo de Supabase en línea).
 //  2. Muestra las notificaciones push cuando estén configuradas (VAPID +
 //     Edge Function). Sin push configurado, este bloque simplemente no se usa.
-const CACHE = "moral-y-disciplina-v38";
+const CACHE = "moral-y-disciplina-v39";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -37,8 +37,13 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return; // deja pasar Supabase, esm.sh, etc.
+  // cache: "no-cache" = revalidar con el servidor en cada carga (petición
+  // condicional: si no cambió responde 304 y casi no cuesta). Sin esto el
+  // navegador reutilizaba archivos de la caché HTTP hasta 10 minutos (GitHub
+  // Pages los sirve con max-age=600), así que tras publicar un arreglo se
+  // seguía viendo la versión anterior de app.js / styles.css.
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: "no-cache" })
       .then((resp) => {
         if (resp.ok) {
           const copia = resp.clone();
