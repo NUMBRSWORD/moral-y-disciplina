@@ -13,6 +13,7 @@ import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva
 import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocumento, actualizarContenidoDocumentoInstitucional } from "./lib/cumplimiento.js";
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible } from "./lib/utils.js";
 import { clasificarNotaEntrante, entradasSeguimiento } from "./lib/seguimiento.js";
+import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada } from "./lib/nombresNota.js";
 import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
@@ -3602,9 +3603,17 @@ function renderReincLoteList() {
     const nombreLinea = f.candidate
       ? escapeHtml(nombreInvestigadoVisible(f.candidate, true))
       : "No se detectó un efectivo en este archivo";
+    const ya = f.yaReincorporada;
+    const yaTexto = ya
+      ? `${escapeHtml(formatDate(ya.nota.fecha_reincorporacion))}${ya.nota.numero_nota_reincorporacion ? ` con la nota N.º ${escapeHtml(ya.nota.numero_nota_reincorporacion)}` : ""} (falta del ${escapeHtml(formatDate(ya.nota.fecha_falta))})`
+      : "";
     const pill = f.nota
       ? `<span class="pill pill-yes">Nota encontrada${f.matchPor === "numero" ? " (por N.º de nota)" : " (por nombre)"} — falta ${formatDate(f.nota.fecha_falta)} · N.º ${escapeHtml(f.nota.numero_nota_falta || "-")}</span>`
-      : `<span class="pill pill-no">No se encontró una nota pendiente que corresponda</span>`;
+      : ya
+        ? (ya.mismaNota
+          ? `<span class="pill pill-info">Ya registrada con esta misma nota: reincorporación del ${yaTexto} — no hace falta volver a registrarla</span>`
+          : `<span class="pill pill-warning">Ya figura reincorporado el ${yaTexto} — no queda una falta pendiente que actualizar</span>`)
+        : `<span class="pill pill-no">No se encontró una nota pendiente que corresponda</span>`;
     return `
       <div class="multi-efectivo-row">
         <label class="checkbox-row"><input type="checkbox" class="rlCheck" ${f.nota ? "checked" : "disabled"} /></label>
@@ -3662,6 +3671,11 @@ $("rlArchivo").addEventListener("change", async (e) => {
         doc = parseReincorporacion(text);
         candidates = extractPersonCandidates(norm).map((c) => ({ grado: c.grado, ...splitApellidosNombres(c.nombreCompleto) }));
       }
+      // La IA y el lector por patrones a veces se saltan a alguien cuando la lista
+      // viene sin coma entre uno y otro ("... Marcos R.P S2 PNP MENDOZA ...").
+      // Se completa con quienes el propio texto nombra como "GRADO PNP APELLIDOS
+      // Nombres" en el párrafo de los reincorporados: así nadie queda fuera.
+      candidates = completarCandidatos(candidates, personalPNPEnTexto(bloqueReincorporados(norm)));
       const base = {
         file,
         fecha_reincorporacion: doc.fecha_reincorporacion || "",
@@ -3671,7 +3685,9 @@ $("rlArchivo").addEventListener("change", async (e) => {
       if (candidates.length) {
         for (const candidate of candidates) {
           const nota = buscarNotaPendiente(doc.numero_nota_falta_ref, candidate);
-          filas.push({ ...base, candidate, nota, matchPor: nota && doc.numero_nota_falta_ref && nota.numero_nota_falta === doc.numero_nota_falta_ref ? "numero" : "nombre" });
+          // Sin falta pendiente: ¿es que ya se le registró la reincorporación?
+          const yaReincorporada = nota ? null : buscarReincorporada(state.notas, candidate, { numeroNota: base.numero_nota_reincorporacion, fecha: base.fecha_reincorporacion });
+          filas.push({ ...base, candidate, nota, yaReincorporada, matchPor: nota && doc.numero_nota_falta_ref && nota.numero_nota_falta === doc.numero_nota_falta_ref ? "numero" : "nombre" });
         }
       } else {
         const nota = buscarNotaPendiente(doc.numero_nota_falta_ref, null);
@@ -3682,7 +3698,8 @@ $("rlArchivo").addEventListener("change", async (e) => {
     renderReincLoteList();
 
     const encontrados = filas.filter((f) => f.nota).length;
-    statusEl.textContent = `Se procesaron ${files.length} archivo(s): ${encontrados} de ${filas.length} coinciden con notas pendientes de reincorporación. Verifique antes de guardar.`;
+    const yaRegistrados = filas.filter((f) => !f.nota && f.yaReincorporada).length;
+    statusEl.textContent = `Se procesaron ${files.length} archivo(s): ${encontrados} de ${filas.length} coinciden con notas pendientes de reincorporación${yaRegistrados ? ` y ${yaRegistrados} ya estaban reincorporados` : ""}. Verifique antes de guardar.`;
   } catch (err) {
     console.error(err);
     statusEl.textContent = "No se pudieron leer algunos archivos automáticamente.";
