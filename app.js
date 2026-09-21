@@ -15,6 +15,7 @@ import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNo
 import { clasificarNotaEntrante, entradasSeguimiento } from "./lib/seguimiento.js";
 import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo } from "./lib/nombresNota.js";
 import { PERIODO_ACUMULADO, agruparPersonas, buscarPersonas, formatearDuracionHoras, resumenDelMes, resumenPersona } from "./lib/personas.js";
+import { fechaLima, hoyLima, horaLima } from "./lib/fechas.js";
 import { DIAS_MINIMOS, INDETERMINADO, INICIO_INFORME, REMUNERACION, cumpleMinimo, descuentoDeNotas, formatearSoles, textoDescuento, textoDias } from "./lib/descuento.js";
 import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
 
@@ -954,7 +955,7 @@ function renderAgendaNotas() {
 $("buscarAgenda").addEventListener("input", renderAgendaNotas);
 
 function exportarAgendaCalendario() {
-  const fechaIcs = (fecha) => String(fecha || new Date().toISOString().slice(0, 10)).slice(0, 10).replaceAll("-", "");
+  const fechaIcs = (fecha) => String(fecha || hoyLima()).slice(0, 10).replaceAll("-", "");
   const escaparIcs = (texto) => String(texto || "").replace(/[\\,;]/g, "\\$&").replace(/\n/g, "\\n");
   const eventos = obtenerAccionesPrioritariasNotas().map((accion, index) => {
     const fecha = accion.tipo === "Plazo vencido" ? fechaLimiteDescargo(accion.nota) : (accion.nota.created_at || new Date().toISOString());
@@ -962,7 +963,7 @@ function exportarAgendaCalendario() {
     return ["BEGIN:VEVENT", `UID:${stamp}`, `DTSTAMP:${fechaIcs(new Date().toISOString())}T000000Z`, `DTSTART;VALUE=DATE:${fechaIcs(fecha)}`, `SUMMARY:${escaparIcs(`${accion.tipo}: ${accion.nombre}`)}`, `DESCRIPTION:${escaparIcs(accion.detalle)}`, "END:VEVENT"].join("\r\n");
   });
   const contenido = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Moral y Disciplina//Agenda//ES", ...eventos, "END:VCALENDAR"].join("\r\n");
-  saveAs(new Blob([contenido], { type: "text/calendar;charset=utf-8" }), `agenda_moral_disciplina_${new Date().toISOString().slice(0, 10)}.ics`);
+  saveAs(new Blob([contenido], { type: "text/calendar;charset=utf-8" }), `agenda_moral_disciplina_${hoyLima()}.ics`);
 }
 
 $("btnExportarAgenda").addEventListener("click", exportarAgendaCalendario);
@@ -983,7 +984,7 @@ async function renderDocumentosGenerados() {
   const etiquetas = { imputacion: "Imputación", acta_no_descargo: "Acta de No Descargo", orden_sancion: "Orden de Sanción" };
   const filas = await Promise.all(docs.map(async (doc) => {
     const enlace = await fileLinkHtml("notas", doc.archivo_path, doc.archivo_nombre);
-    return `<article class="document-item"><div><span class="action-type">${escapeHtml(etiquetas[doc.tipo] || doc.tipo || "Documento")}</span><strong>${escapeHtml(doc.archivo_nombre || "Sin nombre")}</strong><span class="muted small">Generado ${formatFechaHora(String(doc.generado_at || "").slice(0, 10), String(doc.generado_at || "").slice(11, 16))} · ${escapeHtml(doc.generado_por_email || "-")}</span></div><div>${enlace}</div></article>`;
+    return `<article class="document-item"><div><span class="action-type">${escapeHtml(etiquetas[doc.tipo] || doc.tipo || "Documento")}</span><strong>${escapeHtml(doc.archivo_nombre || "Sin nombre")}</strong><span class="muted small">Generado ${formatFechaHora(fechaLima(doc.generado_at), horaLima(doc.generado_at))} · ${escapeHtml(doc.generado_por_email || "-")}</span></div><div>${enlace}</div></article>`;
   }));
   $("documentosLista").innerHTML = filas.join("");
 }
@@ -1095,7 +1096,7 @@ async function renderExpedientesRemitidos() {
     const esPendiente = item.estado === "remitido";
     const driveConectado = $("btnConectarDrive") && /Reconectar/.test($("btnConectarDrive").textContent || "");
     const driveEstadoHtml = item.drive_expediente_url
-      ? `<span class="drive-estado ok">${svgIco("nube")}Copiado a Drive${item.drive_sync_at ? ` · ${formatDate(String(item.drive_sync_at).slice(0, 10))}` : ""}</span>`
+      ? `<span class="drive-estado ok">${svgIco("nube")}Copiado a Drive${item.drive_sync_at ? ` · ${formatDate(fechaLima(item.drive_sync_at))}` : ""}</span>`
       : item.drive_error
         ? `<span class="drive-estado error">${svgIco("nube")}Error al respaldar: ${escapeHtml(item.drive_error)}</span>`
         : `<span class="drive-estado pend">${svgIco("nube")}Aún no respaldado en Drive</span>`;
@@ -1106,7 +1107,7 @@ async function renderExpedientesRemitidos() {
       <div class="reception-item-main">
         <div class="reception-title-row"><span class="reception-status">${escapeHtml(etiquetaEstadoRecepcion(item.estado))}</span><strong>${escapeHtml(item.investigado_nombre || "Investigado sin nombre")}</strong></div>
         <div class="reception-meta"><span>${svgIco("calendario")}Falta: ${formatDate(item.fecha_falta)}</span><span>${svgIco("balanza")}${escapeHtml(item.codigo_infraccion || "-")}</span><span>${svgIco("credencial")}CIP investigado: ${escapeHtml(item.investigado_cip || "-")}</span></div>
-        <p class="muted small">Registrado por ${escapeHtml(item.remitido_por_cip ? `CIP ${item.remitido_por_cip}` : (item.remitido_por_email || "-"))} · ${formatFechaHora(String(item.remitido_at || "").slice(0, 10), String(item.remitido_at || "").slice(11, 16))}</p>
+        <p class="muted small">Registrado por ${escapeHtml(item.remitido_por_cip ? `CIP ${item.remitido_por_cip}` : (item.remitido_por_email || "-"))} · ${formatFechaHora(fechaLima(item.remitido_at), horaLima(item.remitido_at))}</p>
         ${item.observacion ? `<p class="reception-observation"><b>Observación:</b> ${escapeHtml(item.observacion)}</p>` : ""}
         <p class="storage-path" title="Carpeta de archivo">${svgIco("carpeta")}${escapeHtml(item.carpeta_archivo || item.archivo_path || "")}</p>
         ${driveEstadoHtml}
@@ -1561,7 +1562,7 @@ function construirResumenEstadoCasos() {
     fecha_hecho: n.fecha_falta || null,
     reincorporado: !!n.fecha_reincorporacion,
     imputacion_notificada: !!n.imputacion_generada_at,
-    fecha_notificacion_imputacion: n.imputacion_generada_at ? n.imputacion_generada_at.slice(0, 10) : null,
+    fecha_notificacion_imputacion: n.imputacion_generada_at ? fechaLima(n.imputacion_generada_at) : null,
     plazo_descargo_vencido: plazoDescargoVencido(n),
     descargo_recibido: !!n.fecha_descargo,
     orden_sancion_generada: !!n.orden_sancion_generada_at,
@@ -1589,7 +1590,7 @@ async function generarResumenEjecutivo() {
       return;
     }
     const { data, error } = await supabase.functions.invoke("generar-resumen-casos", {
-      body: { fechaHoy: new Date().toISOString().slice(0, 10), casos },
+      body: { fechaHoy: hoyLima(), casos },
     });
     if (error) throw new Error(await mensajeErrorFuncion(error));
     if (data?.error) throw new Error(data.error);
@@ -1636,7 +1637,7 @@ $("btnExportarExcel").addEventListener("click", async (e) => {
   hoja["!cols"] = Object.keys(filas[0]).map((k) => ({ wch: Math.max(k.length, 14) }));
   const libro = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(libro, hoja, "Notas informativas");
-  const fecha = new Date().toISOString().slice(0, 10);
+  const fecha = hoyLima();
   XLSX.writeFile(libro, `notas_informativas_${fecha}.xlsx`);
   ocuparBoton(btn, false);
 });
@@ -1833,7 +1834,7 @@ async function renderNotaDetail(nota) {
   const versionesHtml = versionesDocs?.length
     ? (await Promise.all(versionesDocs.map(async (v) => {
         const link = await fileLinkHtml("notas", v.archivo_path, v.archivo_nombre);
-        return `<div class="detail-field"><div class="label">${escapeHtml(TIPO_DOCUMENTO_LABEL[v.tipo] || v.tipo)} — ${formatFechaHora(v.generado_at.slice(0, 10), v.generado_at.slice(11, 16))}</div><div class="value">${link} <span class="muted small">(${escapeHtml(v.generado_por_email || "-")})</span></div></div>`;
+        return `<div class="detail-field"><div class="label">${escapeHtml(TIPO_DOCUMENTO_LABEL[v.tipo] || v.tipo)} — ${formatFechaHora(fechaLima(v.generado_at), horaLima(v.generado_at))}</div><div class="value">${link} <span class="muted small">(${escapeHtml(v.generado_por_email || "-")})</span></div></div>`;
       }))).join("")
     : "";
 
@@ -1967,7 +1968,7 @@ async function renderNotaDetail(nota) {
         <div class="label">Fecha de notificación de la Imputación</div>
         <div class="value">
           <form id="notificacionForm" class="inline-edit">
-            <input type="date" id="fNotificacion" value="${nota.imputacion_generada_at ? nota.imputacion_generada_at.slice(0, 10) : ""}" required />
+            <input type="date" id="fNotificacion" value="${nota.imputacion_generada_at ? fechaLima(nota.imputacion_generada_at) : ""}" required />
             <button type="submit" class="btn-secondary">Guardar</button>
           </form>
           <p id="notificacionMsg" class="error small hidden" role="alert"></p>
@@ -2038,7 +2039,7 @@ async function renderNotaDetail(nota) {
             <button type="submit" class="btn-primary">Guardar y descargar Orden de Sanción</button>
           </div>
         </form>
-        ${nota.orden_sancion_generada_at ? `<p class="muted small">Generada por última vez el ${formatDate(nota.orden_sancion_generada_at.slice(0, 10))}.</p>` : ""}
+        ${nota.orden_sancion_generada_at ? `<p class="muted small">Generada por última vez el ${formatDate(fechaLima(nota.orden_sancion_generada_at))}.</p>` : ""}
       ` : `<p class="muted small">Para generar la Orden de Sanción, verifique que el oficial que constató la falta y el investigado estén registrados en Efectivos.</p>`}
     </div>
     ` : ""}
@@ -2058,7 +2059,7 @@ async function renderNotaDetail(nota) {
           <p id="archivoLeveError" class="error hidden" role="alert"></p>
           <button type="submit" class="btn-primary">Guardar y descargar Archivo del Procedimiento</button>
         </form>
-        ${nota.archivo_leve_generada_at ? `<p class="muted small">Generado por última vez el ${formatDate(nota.archivo_leve_generada_at.slice(0, 10))}.</p>` : ""}
+        ${nota.archivo_leve_generada_at ? `<p class="muted small">Generado por última vez el ${formatDate(fechaLima(nota.archivo_leve_generada_at))}.</p>` : ""}
       ` : `<p class="muted small">Para generarlo, verifique que el oficial que constató la falta esté registrado en Efectivos.</p>`}
     </div>
     ` : ""}
@@ -2092,7 +2093,7 @@ async function renderNotaDetail(nota) {
     <div class="detail-card">
       <h3>Cargo del expediente firmado</h3>
       ${nota.orden_notificada_at ? `
-        <p class="muted small">Registrado el ${formatDate(nota.orden_notificada_at.slice(0, 10))}.</p>
+        <p class="muted small">Registrado el ${formatDate(fechaLima(nota.orden_notificada_at))}.</p>
         ${ordenNotifArchivo ? `<div class="detail-field"><div class="label">Legajo firmado</div><div class="value">${ordenNotifArchivo}</div></div>` : ""}
         ${nota.archivo_descargo_path ? `<div class="detail-field"><div class="label">Descargo firmado (adjunto)</div><div class="value">${descargoArchivo}</div></div>` : ""}
       ` : `
@@ -2579,7 +2580,7 @@ async function generarPaqueteInformeZip(nota, firmantes) {
   // Sin reincorporación todavía, se cierra el rango con hoy (igual que hace
   // construirDatosInformeAdministrativo) para no dejar de adjuntar los roles
   // de servicio ya guardados de los días transcurridos.
-  const fechaCierreZip = nota.fecha_reincorporacion || new Date().toISOString().slice(0, 10);
+  const fechaCierreZip = nota.fecha_reincorporacion || hoyLima();
   for (const fecha of diasDeAusencia(nota.fecha_falta, fechaCierreZip)) {
     const rol = (state.rolesServicio || []).find((r) => r.fecha === fecha);
     if (rol) await agregar(rol.archivo_path, `Rol ${fecha} - ${rol.archivo_nombre || "rol.pdf"}`, "Roles de Servicio");
@@ -2846,7 +2847,7 @@ async function renderRolesServicioTabla() {
     tr.innerHTML = `
       <td>${formatDate(r.fecha)}${r.fecha_fin && r.fecha_fin !== r.fecha ? ` a ${formatDate(r.fecha_fin)}` : ""}</td>
       <td>${link}</td>
-      <td class="small muted">${formatDate(String(r.created_at || "").slice(0, 10))}</td>
+      <td class="small muted">${formatDate(fechaLima(r.created_at))}</td>
       <td class="row-actions"><button type="button" class="btn-danger btn-borrar-rol" data-id="${r.id}" data-path="${escapeHtml(r.archivo_path)}">Eliminar</button></td>
     `;
     tbody.appendChild(tr);
@@ -4654,12 +4655,8 @@ $("directivaForm")?.addEventListener("submit", async (e) => {
 // válida para un texto que esa persona no llegó a leer.
 function fechaHoraFirma(iso) {
   if (!iso) return "";
-  const d = new Date(iso);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  return `${dd}/${mm}/${d.getFullYear()} ${hh}:${mi}`;
+  const [anio, mes, dia] = fechaLima(iso).split("-");
+  return `${dia}/${mes}/${anio} ${horaLima(iso)}`;
 }
 
 async function loadCumplimientoView() {
@@ -5406,8 +5403,8 @@ function renderHistorialTable(entries) {
   for (const e of entries) {
     const tr = document.createElement("tr");
     const pillClase = e.action === "INSERT" ? "pill-yes" : e.action === "DELETE" ? "pill-no" : "pill-inactive";
-    const fecha = e.changed_at.slice(0, 10);
-    const hora = e.changed_at.slice(11, 16);
+    const fecha = fechaLima(e.changed_at);
+    const hora = horaLima(e.changed_at);
     tr.innerHTML = `
       <td>${formatFechaHora(fecha, hora)}</td>
       <td>${escapeHtml(e.changed_by_email || "-")}</td>
