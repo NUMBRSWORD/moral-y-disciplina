@@ -14,7 +14,7 @@ import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocument
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible } from "./lib/utils.js";
 import { clasificarNotaEntrante, entradasSeguimiento } from "./lib/seguimiento.js";
 import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo } from "./lib/nombresNota.js";
-import { PERIODO_ACUMULADO, agruparPersonas, buscarPersonas, formatearDuracion, resumenDelMes, resumenPersona } from "./lib/personas.js";
+import { PERIODO_ACUMULADO, agruparPersonas, buscarPersonas, formatearDuracionHoras, resumenDelMes, resumenPersona } from "./lib/personas.js";
 import { DIAS_MINIMOS, INDETERMINADO, INICIO_INFORME, REMUNERACION, cumpleMinimo, descuentoDeNotas, formatearSoles, textoDescuento, textoDias } from "./lib/descuento.js";
 import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
 
@@ -5104,7 +5104,7 @@ function calcularResumenMensual(ym) {
     total,
     efectivos,
     horasTotales,
-    duracionTotal: formatearDuracion(horasTotales),
+    duracionTotal: formatearDuracionHoras(horasTotales),
     efectivosDistintos: efectivos.length,
     reiterativos: efectivos.filter((e) => e.faltas > 1).length,
     codigoCounts,
@@ -5153,10 +5153,10 @@ function pintarListaResumen(r, ym) {
       + (gradosSinMonto.length ? ` (sin monto de sueldo cargado para: ${gradosSinMonto.join(", ")})` : "")
     : ` · sin descuento: el informe a DIRREHUM rige desde ${etiquetaInicio}`;
   $("resumenListaSubtitulo").textContent = filas.length
-    ? `${faltas} ${faltas === 1 ? "falta" : "faltas"} · ${formatearDuracion(horas)} de ausencia sumada${descuentoTxt}. Toque un nombre para abrir su ficha. Esta lista lleva nombres; la tabla de reiterativos de abajo sigue siendo anónima.`
+    ? `${faltas} ${faltas === 1 ? "falta" : "faltas"} · ${formatearDuracionHoras(horas)} de ausencia sumada${descuentoTxt}. Toque un nombre para abrir su ficha. Esta lista lleva nombres; la tabla de reiterativos de abajo sigue siendo anónima.`
     : "";
   const remuneraciones = Object.entries(REMUNERACION).map(([g, m]) => `${g} ${formatearSoles(m)}`).join(" · ");
-  $("resumenListaNota").textContent = `Descuento aprox. = remuneración del grado ÷ 30 × días faltados (sin la bonificación por riesgo de vida). Un día faltado se completa cada 24:00 h de ausencia acumulada en el período elegido; lo que sobra no cuenta hasta completar otro día (47:00 h = 1 día y sobran 23:00 h). Solo se muestra a quien ya completó ${textoDias(DIAS_MINIMOS)}. El informe rige desde ${etiquetaInicio}. Remuneraciones usadas: ${remuneraciones}; los demás grados quedan ${INDETERMINADO} hasta cargar su monto. La app no descuenta: el monto es el que se requiere a DIRREHUM, que paga por días efectivamente laborados. Los casos sin reincorporar cuentan hasta hoy y pueden cambiar. La suma de tiempo sirve solo para solicitar el descuento: no cambia la infracción, cada falta conserva su propio código (dos faltas de 23:30 h siguen siendo dos L21, no una G39).`;
+  $("resumenListaNota").textContent = `Descuento aprox. = remuneración del grado ÷ 30 × días faltados (sin la bonificación por riesgo de vida). Un día faltado se completa cada 24:00 h de ausencia acumulada en el período elegido; lo que sobra no cuenta hasta completar otro día (47:00 h = 1 día y sobran 23:00 h). Solo se muestra a quien ya completó ${textoDias(DIAS_MINIMOS)} (24:00 h). Aquí el tiempo va en días y horas, sin minutos; los días y minutos exactos se cuentan en el informe. El informe rige desde ${etiquetaInicio}. Remuneraciones usadas: ${remuneraciones}; los demás grados quedan ${INDETERMINADO} hasta cargar su monto. La app no descuenta: el monto es el que se requiere a DIRREHUM, que paga por días efectivamente laborados. Los casos sin reincorporar cuentan hasta hoy y pueden cambiar. La suma de tiempo sirve solo para solicitar el descuento: no cambia la infracción, cada falta conserva su propio código (dos faltas de 23:30 h siguen siendo dos L21, no una G39).`;
   $("resumenListaEmpty").classList.toggle("hidden", filas.length > 0);
   $("resumenListaEmpty").textContent = "Nadie en este grupo este mes.";
   $("resumenListaBody").innerHTML = filas.map((e, i) => {
@@ -5167,7 +5167,7 @@ function pintarListaResumen(r, ym) {
     const enCurso = e.enCurso ? ` <span class="pill pill-warning" title="Todavía sin reincorporar: cuenta hasta hoy">en curso</span>` : "";
     const d = descuentos[i];
     const pista = `Sin monto de sueldo cargado para el grado ${escapeHtml(d.gradosSinMonto.join(", "))}`;
-    const sobran = d.minutosSobrantes ? ` · sobran ${formatearDuracion(d.minutosSobrantes / 60)}` : "";
+    const sobran = d.minutosSobrantes >= 60 ? ` · sobran ${formatearDuracionHoras(d.minutosSobrantes / 60)}` : "";
     const provisional = e.enCurso ? " · provisional" : "";
     // Solo lleva monto quien ya completó el mínimo de días; a los demás no se les
     // pone un importe para que no haya equivocación.
@@ -5184,7 +5184,7 @@ function pintarListaResumen(r, ym) {
       <td class="case-title"><button type="button" class="link-btn" data-i="${i}" title="Abrir su ficha completa">${escapeHtml(nombreInvestigadoVisible(e, true))}</button></td>
       <td>${e.faltas}</td>
       <td><div class="codes-cell">${fechas}</div></td>
-      <td>${escapeHtml(e.duracion)}${aprox}${enCurso}</td>
+      <td>${escapeHtml(formatearDuracionHoras(e.horasTotales))}${aprox}${enCurso}</td>
       <td class="monto">${montoTxt}</td>
       <td><div class="codes-cell">${codigos}</div></td>
     </tr>`;
