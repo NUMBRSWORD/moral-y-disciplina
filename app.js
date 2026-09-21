@@ -15,7 +15,7 @@ import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNo
 import { clasificarNotaEntrante, entradasSeguimiento } from "./lib/seguimiento.js";
 import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo } from "./lib/nombresNota.js";
 import { PERIODO_TODO, agruparPersonas, buscarPersonas, formatearDuracion, resumenDelMes, resumenPersona } from "./lib/personas.js";
-import { INDETERMINADO, TOTAL_PERCIBIDO, descuentoDeNotas, formatearSoles, textoDescuento } from "./lib/descuento.js";
+import { INDETERMINADO, TOTAL_PERCIBIDO, descuentoDeNotas, formatearSoles, textoDescuento, textoDias } from "./lib/descuento.js";
 import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
@@ -5138,15 +5138,19 @@ function pintarListaResumen(r, ym) {
   const faltas = filas.reduce((s, e) => s + e.faltas, 0);
   const horas = filas.reduce((s, e) => s + e.horasTotales, 0);
   const descuentos = filas.map((e) => descuentoDeNotas(e.notas));
-  const totalDescuento = { monto: descuentos.reduce((s, d) => s + d.monto, 0), sinMonto: descuentos.reduce((s, d) => s + d.sinMonto, 0) };
+  const totalDescuento = {
+    monto: descuentos.reduce((s, d) => s + d.monto, 0),
+    dias: descuentos.reduce((s, d) => s + d.dias, 0),
+    diasSinMonto: descuentos.reduce((s, d) => s + d.diasSinMonto, 0),
+  };
   const gradosSinMonto = [...new Set(descuentos.flatMap((d) => d.gradosSinMonto))];
   $("resumenListaSubtitulo").textContent = filas.length
-    ? `${faltas} ${faltas === 1 ? "falta" : "faltas"} · ${formatearDuracion(horas)} de ausencia sumada · descuento a requerir ${textoDescuento(totalDescuento, faltas)}`
+    ? `${faltas} ${faltas === 1 ? "falta" : "faltas"} · ${formatearDuracion(horas)} de ausencia sumada · descuento a requerir ${textoDescuento(totalDescuento)} por ${textoDias(totalDescuento.dias)} faltados`
       + (gradosSinMonto.length ? ` (sin monto de sueldo cargado para: ${gradosSinMonto.join(", ")})` : "")
       + `. Toque un nombre para abrir su ficha. Esta lista lleva nombres; la tabla de reiterativos de abajo sigue siendo anónima.`
     : "";
   const montos = Object.entries(TOTAL_PERCIBIDO).map(([g, m]) => `${g} ${formatearSoles(m)}`).join(" · ");
-  $("resumenListaNota").textContent = `Descuento = total percibido del grado ÷ 30 ÷ 24 × horas de ausencia, con el grado de cada falta. Montos usados: ${montos}; los demás grados quedan ${INDETERMINADO} hasta cargar su monto. La app no descuenta: el monto es el que se requiere a DIRREHUM. Los casos sin reincorporar cuentan hasta hoy y pueden cambiar. La suma de tiempo sirve solo para solicitar el descuento: no cambia la infracción, cada falta conserva su propio código (dos faltas de 23:30 h siguen siendo dos L21, no una G39).`;
+  $("resumenListaNota").textContent = `Descuento = total percibido del grado ÷ 30 × días faltados. Un día faltado se completa cada 24:00 h de ausencia acumulada en el período elegido; lo que sobra no cuenta hasta completar otro día (47:00 h = 1 día y sobran 23:00 h). Montos usados: ${montos}; los demás grados quedan ${INDETERMINADO} hasta cargar su monto. La app no descuenta: el monto es el que se requiere a DIRREHUM, que paga por días efectivamente laborados. Los casos sin reincorporar cuentan hasta hoy y pueden cambiar. La suma de tiempo sirve solo para solicitar el descuento: no cambia la infracción, cada falta conserva su propio código (dos faltas de 23:30 h siguen siendo dos L21, no una G39).`;
   $("resumenListaEmpty").classList.toggle("hidden", filas.length > 0);
   $("resumenListaEmpty").textContent = "Nadie en este grupo este mes.";
   $("resumenListaBody").innerHTML = filas.map((e, i) => {
@@ -5157,11 +5161,12 @@ function pintarListaResumen(r, ym) {
     const enCurso = e.enCurso ? ` <span class="pill pill-warning" title="Todavía sin reincorporar: cuenta hasta hoy">en curso</span>` : "";
     const d = descuentos[i];
     const pista = `Sin monto de sueldo cargado para el grado ${escapeHtml(d.gradosSinMonto.join(", "))}`;
-    const montoTxt = (d.sinMonto >= e.notas.length
+    const sobran = d.minutosSobrantes ? ` · sobran ${formatearDuracion(d.minutosSobrantes / 60)}` : "";
+    const montoTxt = (d.dias > 0 && d.diasSinMonto >= d.dias
       ? `<span class="pill pill-warning" title="${pista}">${INDETERMINADO}</span>`
       : `<strong>${escapeHtml(formatearSoles(d.monto))}</strong>`
-        + (d.sinMonto ? ` <span class="pill pill-warning" title="${pista}: ${d.sinMonto} falta(s) no están sumadas">+ ${INDETERMINADO}</span>` : ""))
-      + (e.enCurso ? ` <span class="muted small">provisional</span>` : "");
+        + (d.diasSinMonto ? ` <span class="pill pill-warning" title="${pista}: ${d.diasSinMonto} día(s) no están sumados">+ ${INDETERMINADO}</span>` : ""))
+      + `<div class="muted small">${textoDias(d.dias)}${sobran}${e.enCurso ? " · provisional" : ""}</div>`;
     return `<tr>
       <td class="case-title"><button type="button" class="link-btn" data-i="${i}" title="Abrir su ficha completa">${escapeHtml(nombreInvestigadoVisible(e, true))}</button></td>
       <td>${e.faltas}</td>
