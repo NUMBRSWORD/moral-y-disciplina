@@ -13,7 +13,7 @@ Ventanilla) → el Reglamento **sí aplica** (art. 3). No cae en las excepciones
 
 | Función (Edge Function) | Qué hace | ¿Decide algo sola? | Riesgo (art. 22-24) |
 |---|---|---|---|
-| `redactar-analisis` | Redacta un borrador del "Análisis y Evaluación" del descargo para la Orden de Sanción | **No.** Escribe en un `<textarea>` editable; el tercio de sanción lo elige el humano en un desplegable; el humano hace clic en "Generar Orden de Sanción" por separado | Ver §2 — es la más cercana a la zona gris del art. 24.1.e |
+| `redactar-analisis` | Redacta un borrador del "Análisis y Evaluación" del descargo para la Orden de Sanción | **No.** Escribe en un `<textarea>` editable; la IA **sugiere** un tercio pero NO lo marca (aparece como texto y el funcionario elige); el humano hace clic en "Generar Orden de Sanción" por separado | Ver §2 — es la más cercana a la zona gris del art. 24.1.e |
 | `revisar-documento-ia` | Revisa consistencia de la imputación antes de generarla; verifica que el cargo de notificación/expediente corresponda; detecta el puesto en el rol de servicio y avisa si la persona estaba de vacaciones/permiso | **No.** Solo muestra observaciones/advertencias en pantalla; nunca bloquea ni completa nada por sí sola | Riesgo aceptable (función de control de calidad, no decisoria) |
 | `extraer-nota-informativa` | Extrae de un PDF/imagen (nota, rol de servicio) los campos para autocompletar el formulario | **No.** Todos los campos autocompletados quedan en inputs editables (`dataset.autofilled`); el humano guarda aparte | Riesgo aceptable |
 | `extraer-texto-vision` | OCR/transcripción de PDFs difíciles de leer | Extracción de texto, no interpretación ni decisión | Riesgo aceptable |
@@ -92,7 +92,7 @@ ambigüedad del literal y la recomendación de consultar a la SGTD.
 
 ### 3. ¿La IA decide algo por sí sola, o solo asiste?
 Solo asiste. El texto queda en `#sancionAnalisis` (editable). El **tercio de la sanción**
-(amonestación / días) lo elige el humano en `<select id="fTercio">`, no la IA. El envío
+(amonestación / días) lo elige el humano con un botón de opción; la IA solo muestra una sugerencia en texto, sin marcarla. **Corregido el 21-sep-2026:** hasta esa fecha el código marcaba solo el tercio que devolvía la IA, y este documento decía lo contrario. El envío
 final es un `submit` explícito de `submitSancion`, con un botón separado del de "Redactar
 con IA". Si el humano no toca nada, el documento igual requiere ese clic para generarse.
 
@@ -151,3 +151,26 @@ riesgo.
 >    una vez cada 12 meses, o al agregar una función de IA nueva.
 > 6. **Responsable del tratamiento.** _____________________  Firma: ___________
 >    Fecha: ___________
+
+---
+
+## Actualización del 21-sep-2026 (auditoría)
+
+La auditoría de esa fecha encontró que la IA preseleccionaba el tercio de la sanción, en contradicción
+con lo que afirma este documento. Se corrigió en el código y se hicieron estos cambios:
+
+- **Supervisión humana (art. 24.11 y 31.4):** la IA ya no marca la sanción; muestra una sugerencia y el
+  funcionario elige. El prompt de `redactar-analisis` dice que solo sugiere.
+- **Transparencia (art. 25):** casilla en la Orden de Sanción para dejar constancia de que el análisis se
+  redactó con apoyo de IA y fue revisado por el funcionario firmante (se propone marcada tras usar la IA;
+  el funcionario puede desmarcarla). Los botones de IA ya avisan "con IA" antes de usarse.
+- **Privacidad desde el diseño (art. 26):** el resumen ejecutivo envía a la IA alias (E01, E02…) y no
+  nombres; los nombres se restauran solo en el navegador (`lib/privacidad.js`).
+- **Control de acceso y uso:** las 10 funciones de IA exigen usuario aprobado, tienen un tope diario por
+  persona (300 llamadas) y un tope de tamaño de entrada; ya no devuelven detalles internos en los errores.
+- **Trazabilidad:** la aprobación de cuentas, los cambios de rol y las firmas ahora quedan en el historial
+  de auditoría.
+
+**Sigue pendiente (acción del responsable):** consulta formal a la SGTD sobre si `redactar-analisis` es de
+riesgo alto (borrador en `docs/consulta-sgtd-riesgo-alto.md`), y firma de la política institucional por
+el Comisario. El plazo del Reglamento para el Poder Ejecutivo venció alrededor del 10-set-2026.
