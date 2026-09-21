@@ -443,7 +443,24 @@
           </div>
           <select id="resumenMesSelect"></select>
         </div>
+        <p class="muted small resumen-pista">Toque un recuadro para ver qué efectivos faltaron, en qué días y cuánto tiempo.</p>
         <div class="panel-stats" id="resumenMensualStats"></div>
+        <div id="resumenLista" class="resumen-lista hidden">
+          <div class="detail-card-header">
+            <div>
+              <h4 id="resumenListaTitulo"></h4>
+              <span id="resumenListaSubtitulo" class="muted small"></span>
+            </div>
+            <button type="button" id="btnCerrarResumenLista" class="btn-ghost" aria-label="Cerrar la lista">✕</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Efectivo</th><th>Faltas</th><th>Días que faltó</th><th>Tiempo ausente</th><th>Códigos</th></tr></thead>
+              <tbody id="resumenListaBody"></tbody>
+            </table>
+          </div>
+          <p id="resumenListaEmpty" class="muted small hidden"></p>
+        </div>
         <p class="eyebrow">Por código de infracción</p>
         <div class="table-wrap">
           <table>

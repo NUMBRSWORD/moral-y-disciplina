@@ -14,7 +14,7 @@ import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocument
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible } from "./lib/utils.js";
 import { clasificarNotaEntrante, entradasSeguimiento } from "./lib/seguimiento.js";
 import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo } from "./lib/nombresNota.js";
-import { agruparPersonas, buscarPersonas, resumenPersona } from "./lib/personas.js";
+import { agruparPersonas, buscarPersonas, formatearDuracion, resumenDelMes, resumenPersona } from "./lib/personas.js";
 import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
@@ -1489,7 +1489,11 @@ function marcarSugerencia(i) {
 
 function elegirPersona(i) {
   const p = sugerenciasPersonas[i];
-  if (!p) return;
+  if (p) seleccionarPersona(p);
+}
+
+// También la usa el Resumen mensual («Ver ficha»), sin pasar por las sugerencias.
+function seleccionarPersona(p) {
   cerrarSugerenciasPersonas();
   $("searchNotas").value = `${p.nombres} ${p.apellidos}`.trim();
   personaFiltrada = p;
@@ -5075,48 +5079,89 @@ function mesesConDatos(notas) {
 }
 
 // Resumen mensual: por código de infracción, y quién es reiterativo (más de 3
-// faltas en el mes) SIN mostrar nombre -- solo grado y el detalle de códigos,
-// pensado para poder compartirse sin exponer identidades.
+// faltas en el mes). La tabla de reiterativos es SIN nombre -- solo grado y el
+// detalle de códigos -- pensada para poder compartirse sin exponer identidades;
+// la lista que se abre al tocar un recuadro sí trae nombres (ver abajo).
 function calcularResumenMensual(ym) {
-  const notas = (state.notas || []).filter((n) => (n.fecha_falta || "").slice(0, 7) === ym);
+  const { total, efectivos } = resumenDelMes(state.notas, ym);
+  const codigoDe = (n) => (n.codigo_infraccion || "").trim() || "Sin código";
   const codigoCounts = {};
-  const porPersona = new Map();
-  notas.forEach((n) => {
-    const codigo = (n.codigo_infraccion || "").trim() || "Sin código";
-    codigoCounts[codigo] = (codigoCounts[codigo] || 0) + 1;
-    const key = normalizarNombre(n.apellidos, n.nombres);
-    if (!porPersona.has(key)) porPersona.set(key, { grado: n.grado || "", codigos: [] });
-    const p = porPersona.get(key);
-    p.codigos.push(codigo);
-    if (n.grado) p.grado = n.grado;
-  });
-  const personas = [...porPersona.values()];
-  const masDe3 = personas
-    .filter((p) => p.codigos.length > 3)
-    .sort((a, b) => b.codigos.length - a.codigos.length)
-    .map((p) => {
+  efectivos.forEach((e) => e.notas.forEach((n) => {
+    const c = codigoDe(n);
+    codigoCounts[c] = (codigoCounts[c] || 0) + 1;
+  }));
+  const masDe3 = efectivos
+    .filter((e) => e.faltas > 3)
+    .map((e) => {
       const conteo = {};
-      p.codigos.forEach((c) => { conteo[c] = (conteo[c] || 0) + 1; });
-      return { grado: p.grado, faltas: p.codigos.length, conteo };
+      e.notas.forEach((n) => { const c = codigoDe(n); conteo[c] = (conteo[c] || 0) + 1; });
+      return { grado: e.grado, faltas: e.faltas, conteo };
     });
   return {
-    total: notas.length,
-    efectivosDistintos: personas.length,
-    reiterativos: personas.filter((p) => p.codigos.length > 1).length,
+    total,
+    efectivos,
+    efectivosDistintos: efectivos.length,
+    reiterativos: efectivos.filter((e) => e.faltas > 1).length,
     codigoCounts,
     masDe3,
   };
 }
 
+// Cada recuadro del resumen abre la lista de efectivos que le corresponde.
+const LISTAS_RESUMEN = {
+  faltas: { filtro: () => true, titulo: (n, r, mes) => `Las ${r.total} faltas de ${mes}, por efectivo (${n})` },
+  efectivos: { filtro: () => true, titulo: (n, r, mes) => `${n} ${n === 1 ? "efectivo faltó" : "efectivos faltaron"} en ${mes}` },
+  reiterativos: { filtro: (e) => e.faltas > 1, titulo: (n, r, mes) => `${n} ${n === 1 ? "reiterativo" : "reiterativos"} (2 o más faltas) en ${mes}` },
+  masDe3: { filtro: (e) => e.faltas > 3, titulo: (n, r, mes) => `${n} con más de 3 faltas en ${mes}` },
+};
+let listaResumenActiva = null;
+let efectivosListaResumen = [];
+
+const diaMesCorto = (f) => { const [, m, d] = String(f).split("-"); return `${d}/${m}`; };
+
+function pintarListaResumen(r, ym) {
+  const def = LISTAS_RESUMEN[listaResumenActiva];
+  $("resumenLista").classList.toggle("hidden", !def);
+  if (!def) return;
+  const filas = r.efectivos.filter(def.filtro);
+  efectivosListaResumen = filas;
+  $("resumenListaTitulo").textContent = def.titulo(filas.length, r, etiquetaMesPanel(ym));
+  const faltas = filas.reduce((s, e) => s + e.faltas, 0);
+  const horas = filas.reduce((s, e) => s + e.horasTotales, 0);
+  $("resumenListaSubtitulo").textContent = filas.length
+    ? `${faltas} ${faltas === 1 ? "falta" : "faltas"} · ${formatearDuracion(horas)} de ausencia sumada. Toque un nombre para abrir su ficha. Esta lista lleva nombres; la tabla de reiterativos de abajo sigue siendo anónima.`
+    : "";
+  $("resumenListaEmpty").classList.toggle("hidden", filas.length > 0);
+  $("resumenListaEmpty").textContent = "Nadie en este grupo este mes.";
+  $("resumenListaBody").innerHTML = filas.map((e, i) => {
+    const fechas = e.fechas.map((f) => `<span class="pill pill-neutral">${escapeHtml(diaMesCorto(f))}</span>`).join("");
+    const codigos = Object.entries(e.porCodigo).sort((a, b) => b[1] - a[1])
+      .map(([c, k]) => `<span class="pill pill-yes">${escapeHtml(c)}${k > 1 ? ` ×${k}` : ""}</span>`).join("");
+    const aprox = e.aproximado ? ` <span class="muted" title="Aproximado: a algún caso le falta la hora">≈</span>` : "";
+    const enCurso = e.enCurso ? ` <span class="pill pill-warning" title="Todavía sin reincorporar: cuenta hasta hoy">en curso</span>` : "";
+    return `<tr>
+      <td class="case-title"><button type="button" class="link-btn" data-i="${i}" title="Abrir su ficha completa">${escapeHtml(nombreInvestigadoVisible(e, true))}</button></td>
+      <td>${e.faltas}</td>
+      <td><div class="codes-cell">${fechas}</div></td>
+      <td>${escapeHtml(e.duracion)}${aprox}${enCurso}</td>
+      <td><div class="codes-cell">${codigos}</div></td>
+    </tr>`;
+  }).join("");
+}
+
 function renderResumenMensual(ym) {
   if (!ym) return;
   const r = calcularResumenMensual(ym);
-  $("resumenMensualStats").innerHTML = `
-    <div class="stat-tile"><div class="stat-value">${r.total}</div><div class="stat-label">Faltas registradas</div></div>
-    <div class="stat-tile"><div class="stat-value">${r.efectivosDistintos}</div><div class="stat-label">Efectivos distintos</div></div>
-    <div class="stat-tile"><div class="stat-value">${r.reiterativos}</div><div class="stat-label">Reiterativos (2+)</div></div>
-    <div class="stat-tile"><div class="stat-value">${r.masDe3.length}</div><div class="stat-label">Con más de 3 faltas</div></div>
-  `;
+  const tile = (clave, valor, etiqueta) => {
+    const activo = listaResumenActiva === clave;
+    return `<button type="button" class="stat-tile stat-tile-btn${activo ? " activo" : ""}" data-lista="${clave}" aria-pressed="${activo}"><div class="stat-value">${valor}</div><div class="stat-label">${etiqueta}</div></button>`;
+  };
+  $("resumenMensualStats").innerHTML =
+    tile("faltas", r.total, "Faltas registradas") +
+    tile("efectivos", r.efectivosDistintos, "Efectivos distintos") +
+    tile("reiterativos", r.reiterativos, "Reiterativos (2+)") +
+    tile("masDe3", r.masDe3.length, "Con más de 3 faltas");
+  pintarListaResumen(r, ym);
   const codigosOrdenados = Object.entries(r.codigoCounts).sort((a, b) => b[1] - a[1]);
   $("resumenCodigoBody").innerHTML = codigosOrdenados.length
     ? codigosOrdenados.map(([c, n]) => `<tr><td><span class="pill pill-yes">${escapeHtml(c)}</span></td><td>${n}</td></tr>`).join("") +
@@ -5143,6 +5188,28 @@ function inicializarResumenMensual(notas) {
   renderResumenMensual(sel.value);
 }
 $("resumenMesSelect")?.addEventListener("change", (e) => renderResumenMensual(e.target.value));
+// Tocar un recuadro abre su lista; tocarlo otra vez (o la ✕) la cierra. Al
+// cambiar de mes la lista abierta se queda y se vuelve a calcular.
+$("resumenMensualStats")?.addEventListener("click", (e) => {
+  const clave = e.target.closest("[data-lista]")?.dataset.lista;
+  if (!clave) return;
+  listaResumenActiva = listaResumenActiva === clave ? null : clave;
+  renderResumenMensual($("resumenMesSelect").value);
+  if (listaResumenActiva) $("resumenLista").scrollIntoView({ block: "nearest", behavior: "smooth" });
+});
+$("btnCerrarResumenLista")?.addEventListener("click", () => {
+  listaResumenActiva = null;
+  renderResumenMensual($("resumenMesSelect").value);
+});
+$("resumenListaBody")?.addEventListener("click", (e) => {
+  const efectivo = efectivosListaResumen[Number(e.target.closest("button[data-i]")?.dataset.i)];
+  if (!efectivo) return;
+  // La ficha muestra TODOS los expedientes de la persona, no solo los del mes.
+  const persona = personasDeLaLista().find((g) => mismoEfectivo(g.notas[0], efectivo.notas[0]));
+  if (!persona) return;
+  showView("view-seguimiento");
+  seleccionarPersona(persona);
+});
 
 // Chart.js solo se descarga la primera vez que se abre el Panel (no en cada
 // carga de la app). Se cachea la promesa para no repetir la descarga.
