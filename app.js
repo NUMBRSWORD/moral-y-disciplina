@@ -14,8 +14,8 @@ import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocument
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible } from "./lib/utils.js";
 import { clasificarNotaEntrante, entradasSeguimiento } from "./lib/seguimiento.js";
 import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo } from "./lib/nombresNota.js";
-import { PERIODO_TODO, agruparPersonas, buscarPersonas, formatearDuracion, resumenDelMes, resumenPersona } from "./lib/personas.js";
-import { INDETERMINADO, TOTAL_PERCIBIDO, descuentoDeNotas, formatearSoles, textoDescuento, textoDias } from "./lib/descuento.js";
+import { PERIODO_ACUMULADO, agruparPersonas, buscarPersonas, formatearDuracion, resumenDelMes, resumenPersona } from "./lib/personas.js";
+import { DIAS_MINIMOS, INDETERMINADO, INICIO_INFORME, REMUNERACION, cumpleMinimo, descuentoDeNotas, formatearSoles, textoDescuento, textoDias } from "./lib/descuento.js";
 import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
@@ -5068,7 +5068,7 @@ function colorTema(varName) {
 const MESES_CORTO_PANEL = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
 function etiquetaMesPanel(ym) {
-  if (ym === PERIODO_TODO) return "Todo el período (acumulado)";
+  if (ym === PERIODO_ACUMULADO) return `Acumulado desde ${etiquetaMesPanel(INICIO_INFORME.slice(0, 7))}`;
   const [y, m] = ym.split("-");
   const nombre = MESES_CORTO_PANEL[Number(m) - 1] || m;
   return `${nombre.charAt(0).toUpperCase()}${nombre.slice(1)} ${y}`;
@@ -5085,7 +5085,7 @@ function mesesConDatos(notas) {
 // detalle de códigos -- pensada para poder compartirse sin exponer identidades;
 // la lista que se abre al tocar un recuadro sí trae nombres (ver abajo).
 function calcularResumenMensual(ym) {
-  const { total, efectivos } = resumenDelMes(state.notas, ym);
+  const { total, efectivos } = resumenDelMes(state.notas, ym, undefined, INICIO_INFORME);
   const codigoDe = (n) => (n.codigo_infraccion || "").trim() || "Sin código";
   const codigoCounts = {};
   efectivos.forEach((e) => e.notas.forEach((n) => {
@@ -5116,7 +5116,7 @@ function calcularResumenMensual(ym) {
 const LISTAS_RESUMEN = {
   // La sumatoria: todos los efectivos, de quien más tiempo acumula a quien menos.
   tiempo: { filtro: () => true, orden: (a, b) => b.horasTotales - a.horasTotales, titulo: (n, r, mes) => `Tiempo ausente acumulado por ${n} ${n === 1 ? "efectivo" : "efectivos"} en ${mes}` },
-  faltas: { filtro: () => true, titulo: (n, r, mes) => `Las ${r.total} faltas de ${mes}, por efectivo (${n})` },
+  faltas: { filtro: () => true, titulo: (n, r, mes) => `Las ${r.total} faltas, por efectivo (${n}), en ${mes}` },
   efectivos: { filtro: () => true, titulo: (n, r, mes) => `${n} ${n === 1 ? "efectivo faltó" : "efectivos faltaron"} en ${mes}` },
   reiterativos: { filtro: (e) => e.faltas > 1, titulo: (n, r, mes) => `${n} ${n === 1 ? "reiterativo" : "reiterativos"} (2 o más faltas) en ${mes}` },
   masDe3: { filtro: (e) => e.faltas > 3, titulo: (n, r, mes) => `${n} con más de 3 faltas en ${mes}` },
@@ -5133,7 +5133,10 @@ function pintarListaResumen(r, ym) {
   const filas = r.efectivos.filter(def.filtro);
   if (def.orden) filas.sort(def.orden);
   efectivosListaResumen = filas;
-  const periodo = ym === PERIODO_TODO ? "todo el período" : etiquetaMesPanel(ym);
+  const periodo = ym === PERIODO_ACUMULADO ? `el ${etiquetaMesPanel(ym).replace(/^Acumulado/, "acumulado")}` : etiquetaMesPanel(ym);
+  // El informe a DIRREHUM rige desde INICIO_INFORME: antes de eso no hay descuento.
+  const etiquetaInicio = etiquetaMesPanel(INICIO_INFORME.slice(0, 7));
+  const aplicaDescuento = ym === PERIODO_ACUMULADO || ym >= INICIO_INFORME.slice(0, 7);
   $("resumenListaTitulo").textContent = def.titulo(filas.length, r, periodo);
   const faltas = filas.reduce((s, e) => s + e.faltas, 0);
   const horas = filas.reduce((s, e) => s + e.horasTotales, 0);
@@ -5144,13 +5147,16 @@ function pintarListaResumen(r, ym) {
     diasSinMonto: descuentos.reduce((s, d) => s + d.diasSinMonto, 0),
   };
   const gradosSinMonto = [...new Set(descuentos.flatMap((d) => d.gradosSinMonto))];
-  $("resumenListaSubtitulo").textContent = filas.length
-    ? `${faltas} ${faltas === 1 ? "falta" : "faltas"} · ${formatearDuracion(horas)} de ausencia sumada · descuento a requerir ${textoDescuento(totalDescuento)} por ${textoDias(totalDescuento.dias)} faltados`
+  const cumplen = descuentos.filter(cumpleMinimo).length;
+  const descuentoTxt = aplicaDescuento
+    ? ` · descuento aprox. a requerir ${textoDescuento(totalDescuento)} por ${textoDias(totalDescuento.dias)} faltados (${cumplen} ${cumplen === 1 ? "efectivo llega" : "efectivos llegan"} a ${textoDias(DIAS_MINIMOS)} o más)`
       + (gradosSinMonto.length ? ` (sin monto de sueldo cargado para: ${gradosSinMonto.join(", ")})` : "")
-      + `. Toque un nombre para abrir su ficha. Esta lista lleva nombres; la tabla de reiterativos de abajo sigue siendo anónima.`
+    : ` · sin descuento: el informe a DIRREHUM rige desde ${etiquetaInicio}`;
+  $("resumenListaSubtitulo").textContent = filas.length
+    ? `${faltas} ${faltas === 1 ? "falta" : "faltas"} · ${formatearDuracion(horas)} de ausencia sumada${descuentoTxt}. Toque un nombre para abrir su ficha. Esta lista lleva nombres; la tabla de reiterativos de abajo sigue siendo anónima.`
     : "";
-  const montos = Object.entries(TOTAL_PERCIBIDO).map(([g, m]) => `${g} ${formatearSoles(m)}`).join(" · ");
-  $("resumenListaNota").textContent = `Descuento = total percibido del grado ÷ 30 × días faltados. Un día faltado se completa cada 24:00 h de ausencia acumulada en el período elegido; lo que sobra no cuenta hasta completar otro día (47:00 h = 1 día y sobran 23:00 h). Montos usados: ${montos}; los demás grados quedan ${INDETERMINADO} hasta cargar su monto. La app no descuenta: el monto es el que se requiere a DIRREHUM, que paga por días efectivamente laborados. Los casos sin reincorporar cuentan hasta hoy y pueden cambiar. La suma de tiempo sirve solo para solicitar el descuento: no cambia la infracción, cada falta conserva su propio código (dos faltas de 23:30 h siguen siendo dos L21, no una G39).`;
+  const remuneraciones = Object.entries(REMUNERACION).map(([g, m]) => `${g} ${formatearSoles(m)}`).join(" · ");
+  $("resumenListaNota").textContent = `Descuento aprox. = remuneración del grado ÷ 30 × días faltados (sin la bonificación por riesgo de vida). Un día faltado se completa cada 24:00 h de ausencia acumulada en el período elegido; lo que sobra no cuenta hasta completar otro día (47:00 h = 1 día y sobran 23:00 h). Solo se muestra a quien ya completó ${textoDias(DIAS_MINIMOS)}. El informe rige desde ${etiquetaInicio}. Remuneraciones usadas: ${remuneraciones}; los demás grados quedan ${INDETERMINADO} hasta cargar su monto. La app no descuenta: el monto es el que se requiere a DIRREHUM, que paga por días efectivamente laborados. Los casos sin reincorporar cuentan hasta hoy y pueden cambiar. La suma de tiempo sirve solo para solicitar el descuento: no cambia la infracción, cada falta conserva su propio código (dos faltas de 23:30 h siguen siendo dos L21, no una G39).`;
   $("resumenListaEmpty").classList.toggle("hidden", filas.length > 0);
   $("resumenListaEmpty").textContent = "Nadie en este grupo este mes.";
   $("resumenListaBody").innerHTML = filas.map((e, i) => {
@@ -5162,11 +5168,18 @@ function pintarListaResumen(r, ym) {
     const d = descuentos[i];
     const pista = `Sin monto de sueldo cargado para el grado ${escapeHtml(d.gradosSinMonto.join(", "))}`;
     const sobran = d.minutosSobrantes ? ` · sobran ${formatearDuracion(d.minutosSobrantes / 60)}` : "";
-    const montoTxt = (d.dias > 0 && d.diasSinMonto >= d.dias
-      ? `<span class="pill pill-warning" title="${pista}">${INDETERMINADO}</span>`
-      : `<strong>${escapeHtml(formatearSoles(d.monto))}</strong>`
-        + (d.diasSinMonto ? ` <span class="pill pill-warning" title="${pista}: ${d.diasSinMonto} día(s) no están sumados">+ ${INDETERMINADO}</span>` : ""))
-      + `<div class="muted small">${textoDias(d.dias)}${sobran}${e.enCurso ? " · provisional" : ""}</div>`;
+    const provisional = e.enCurso ? " · provisional" : "";
+    // Solo lleva monto quien ya completó el mínimo de días; a los demás no se les
+    // pone un importe para que no haya equivocación.
+    const montoTxt = !aplicaDescuento
+      ? `<span class="muted" title="El informe a DIRREHUM rige desde ${escapeHtml(etiquetaInicio)}">—</span>`
+      : !cumpleMinimo(d)
+        ? `<span class="muted" title="Todavía no completa ${textoDias(DIAS_MINIMOS)}">—</span><div class="muted small">aún no completa ${textoDias(DIAS_MINIMOS)}${sobran}${provisional}</div>`
+        : (d.diasSinMonto >= d.dias
+          ? `<span class="pill pill-warning" title="${pista}">${INDETERMINADO}</span>`
+          : `<strong>${escapeHtml(formatearSoles(d.monto))}</strong>`
+            + (d.diasSinMonto ? ` <span class="pill pill-warning" title="${pista}: ${d.diasSinMonto} día(s) no están sumados">+ ${INDETERMINADO}</span>` : ""))
+          + `<div class="muted small">${textoDias(d.dias)}${sobran}${provisional}</div>`;
     return `<tr>
       <td class="case-title"><button type="button" class="link-btn" data-i="${i}" title="Abrir su ficha completa">${escapeHtml(nombreInvestigadoVisible(e, true))}</button></td>
       <td>${e.faltas}</td>
@@ -5192,9 +5205,10 @@ function renderResumenMensual(ym) {
     tile("reiterativos", r.reiterativos, "Reiterativos (2+)") +
     tile("masDe3", r.masDe3.length, "Con más de 3 faltas");
   pintarListaResumen(r, ym);
-  const todoElPeriodo = ym === PERIODO_TODO;
-  $("resumenPeriodoTxt").textContent = todoElPeriodo ? "en todo el período" : "en el mes";
-  $("resumenReiterativosEmpty").textContent = todoElPeriodo ? "Nadie superó las 3 faltas en todo el período." : "Nadie superó las 3 faltas este mes.";
+  const acumulado = ym === PERIODO_ACUMULADO;
+  const desdeTxt = `acumulado desde ${etiquetaMesPanel(INICIO_INFORME.slice(0, 7))}`;
+  $("resumenPeriodoTxt").textContent = acumulado ? `en el ${desdeTxt}` : "en el mes";
+  $("resumenReiterativosEmpty").textContent = acumulado ? `Nadie superó las 3 faltas en el ${desdeTxt}.` : "Nadie superó las 3 faltas este mes.";
   const codigosOrdenados = Object.entries(r.codigoCounts).sort((a, b) => b[1] - a[1]);
   $("resumenCodigoBody").innerHTML = codigosOrdenados.length
     ? codigosOrdenados.map(([c, n]) => `<tr><td><span class="pill pill-yes">${escapeHtml(c)}</span></td><td>${n}</td></tr>`).join("") +
@@ -5216,8 +5230,8 @@ function inicializarResumenMensual(notas) {
   const sel = $("resumenMesSelect");
   if (!meses.length) { sel.innerHTML = ""; return; }
   const previo = sel.value;
-  sel.innerHTML = [PERIODO_TODO, ...meses].map((m) => `<option value="${m}">${etiquetaMesPanel(m)}</option>`).join("");
-  sel.value = [PERIODO_TODO, ...meses].includes(previo) ? previo : meses[0];
+  sel.innerHTML = [PERIODO_ACUMULADO, ...meses].map((m) => `<option value="${m}">${etiquetaMesPanel(m)}</option>`).join("");
+  sel.value = [PERIODO_ACUMULADO, ...meses].includes(previo) ? previo : meses[0];
   renderResumenMensual(sel.value);
 }
 $("resumenMesSelect")?.addEventListener("change", (e) => renderResumenMensual(e.target.value));
