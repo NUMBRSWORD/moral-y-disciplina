@@ -47,6 +47,26 @@ No inventes datos que no estén en la lista dada. Sé conciso y útil, como si f
 
 Responde ÚNICAMENTE con un objeto JSON válido, sin texto antes ni después, con exactamente esta clave: {"resumen": "..."}`;
 
+// Saca el texto del resumen aunque la respuesta venga cortada: con muchos casos
+// la IA se queda sin tokens a mitad de la respuesta y el JSON queda sin cerrar
+// (antes: "La IA no devolvió un formato reconocible"). Si no se puede leer como
+// JSON se rescata lo que alcanzó a escribir, y si no hay JSON se usa el texto.
+function extraerResumen(text: string): string | null {
+  const m = text.match(/\{[\s\S]*\}/);
+  if (m) {
+    try {
+      const p = JSON.parse(m[0]);
+      if (typeof p.resumen === "string" && p.resumen.trim()) return p.resumen;
+    } catch { /* puede venir cortado: se rescata abajo */ }
+  }
+  const parcial = text
+    .replace(/^[\s\S]*?"resumen"\s*:\s*"/, "")
+    .replace(/"\s*\}?\s*$/, "")
+    .replace(/\\n/g, "\n")
+    .replace(/\\"/g, '"');
+  return parcial.trim() || null;
+}
+
 function buildUserMessage(input: Record<string, unknown>): string {
   return [
     `Fecha de hoy: ${input.fechaHoy || ""}`,
@@ -84,7 +104,7 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 1500,
+        max_tokens: 4000,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: buildUserMessage(input) }],
       }),
@@ -99,17 +119,17 @@ Deno.serve(async (req: Request) => {
     }
 
     const data = await resp.json();
-    const text = (data.content || []).map((b: { text?: string }) => b.text || "").join("");
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) {
-      return new Response(JSON.stringify({ error: "La IA no devolvió un formato reconocible. Intente de nuevo." }), {
+    const text = (data.content || []).filter((b: { type?: string }) => b.type === "text").map((b: { text?: string }) => b.text || "").join("");
+    let resumen = extraerResumen(text);
+    if (!resumen) {
+      return new Response(JSON.stringify({ error: "La IA no devolvió un resumen. Intente de nuevo." }), {
         status: 502,
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
-    const parsed = JSON.parse(match[0]);
+    if (data.stop_reason === "max_tokens") resumen += "\n\n(El resumen se cortó por su extensión.)";
 
-    return new Response(JSON.stringify(parsed), {
+    return new Response(JSON.stringify({ resumen }), {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (err) {
