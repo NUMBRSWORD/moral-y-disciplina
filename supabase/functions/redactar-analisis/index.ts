@@ -4,14 +4,16 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
 
-// Acceso: solo personas con sesión iniciada. `verify_jwt` de Supabase solo
-// comprueba que el token sea un JWT válido, y la anon key (pública: está en
-// config.js) lo es -- sin esta verificación cualquiera que la copie podría usar
-// esta función como proxy de la IA a costa de la cuenta. auth.getUser() sí la
-// rechaza (403 "missing sub claim"): el token anónimo no es de ningún usuario.
-// Este bloque se repite igual en cada función de IA porque cada una se
-// despliega por separado.
+// Acceso: solo personas APROBADAS con sesión iniciada y con un tope diario de uso.
+// `verify_jwt` de Supabase solo comprueba que el token sea un JWT válido, y la anon
+// key (pública: está en config.js) lo es; auth.getUser() rechaza ese token anónimo
+// pero aceptaría a cualquier persona con una cuenta (p. ej. de Google). Por eso
+// autorizar_uso_ia() (base de datos) exige además un usuario aprobado y cuenta las
+// llamadas del día. Este bloque se repite igual en cada función de IA porque cada
+// una se despliega por separado.
 const ORIGENES_PERMITIDOS = ["https://numbrsword.github.io"];
+const LIMITE_DIARIO = 300;
+const MAX_BYTES_ENTRADA = 25 * 1024 * 1024;
 
 // Restringir el origen es solo higiene: la protección real es la sesión.
 function corsHeaders(req: Request) {
@@ -24,11 +26,27 @@ function corsHeaders(req: Request) {
   };
 }
 
-async function haySesion(req: Request): Promise<boolean> {
+// null = puede continuar; si no, la respuesta con la que se rechaza.
+async function autorizar(req: Request, cors: Record<string, string>): Promise<Response | null> {
+  const rechazo = (status: number, error: string) =>
+    new Response(JSON.stringify({ error }), { status, headers: { ...cors, "Content-Type": "application/json" } });
+  if (Number(req.headers.get("content-length") || 0) > MAX_BYTES_ENTRADA) return rechazo(413, "El archivo es demasiado grande.");
   const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return false;
-  const { data, error } = await createClient(SUPABASE_URL, SUPABASE_ANON_KEY).auth.getUser(token);
-  return !error && !!data.user;
+  if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return rechazo(401, "Debe iniciar sesión.");
+  const cliente = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false },
+  });
+  const { data, error } = await cliente.auth.getUser(token);
+  if (error || !data.user) return rechazo(401, "Debe iniciar sesión.");
+  const { data: estado, error: errRpc } = await cliente.rpc("autorizar_uso_ia", { p_limite: LIMITE_DIARIO });
+  if (errRpc) {
+    console.error("autorizar_uso_ia:", errRpc.message);
+    return rechazo(503, "No se pudo verificar su acceso. Intente de nuevo.");
+  }
+  if (estado === "no_aprobado") return rechazo(403, "Su cuenta no está autorizada para usar la IA.");
+  if (estado === "cuota") return rechazo(429, "Alcanzó el límite diario de uso de la IA. Intente mañana.");
+  return null;
 }
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
@@ -36,7 +54,7 @@ const MODEL = "claude-sonnet-5";
 
 const SYSTEM_PROMPT = `Eres un asesor legal que redacta la "Orden de Sanción" disciplinaria de la Policía Nacional del Perú (PNP), conforme a la Ley N° 30714 - Régimen Disciplinario de la PNP.
 
-A diferencia de una versión anterior de esta herramienta, AHORA ERES TÚ quien debe ELEGIR el tercio de sanción a imponer (no viene ya elegido por el oficial). Se te da: los hechos objetivos del caso, el código de infracción con su texto y rango de sanción (Anexo I), la lista de opciones de tercio disponibles para ese código (cada una con su "value" exacto y su "extremo": mínimo/medio/máximo), el descargo del investigado (o notas del oficial si no hubo descargo), antecedentes disciplinarios previos del investigado si los hay, y posiblemente un conjunto de DIRECTIVAS INTERNAS VIGENTES de la PNP que debes usar como única fuente de reglas institucionales específicas.
+A diferencia de una versión anterior de esta herramienta, AHORA SUGIERES el tercio de sanción (la decisión final la toma siempre el funcionario, que puede elegir otro: tu sugerencia NO se marca sola). Se te da: los hechos objetivos del caso, el código de infracción con su texto y rango de sanción (Anexo I), la lista de opciones de tercio disponibles para ese código (cada una con su "value" exacto y su "extremo": mínimo/medio/máximo), el descargo del investigado (o notas del oficial si no hubo descargo), antecedentes disciplinarios previos del investigado si los hay, y posiblemente un conjunto de DIRECTIVAS INTERNAS VIGENTES de la PNP que debes usar como única fuente de reglas institucionales específicas.
 
 === REGLA CRÍTICA SOBRE LAS DIRECTIVAS ===
 Se te puede proporcionar un conjunto de "directivas" (documentos internos reales, tal como los subió el administrador del sistema). Debes usarlas así:
@@ -109,12 +127,8 @@ Deno.serve(async (req: Request) => {
   const cors = corsHeaders(req);
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
-  if (!(await haySesion(req))) {
-    return new Response(JSON.stringify({ error: "Debe iniciar sesión." }), {
-      status: 401,
-      headers: { ...cors, "Content-Type": "application/json" },
-    });
-  }
+  const rechazo = await autorizar(req, cors);
+  if (rechazo) return rechazo;
 
   if (!ANTHROPIC_API_KEY) {
     return new Response(JSON.stringify({ error: "Falta configurar ANTHROPIC_API_KEY en el servidor." }), {
@@ -133,7 +147,7 @@ Deno.serve(async (req: Request) => {
       resp = await llamarIA(SYSTEM_PROMPT, userMessage, 8000);
     } catch (fetchErr) {
       console.error("redactar-analisis: fetch a Anthropic falló", String(fetchErr));
-      return new Response(JSON.stringify({ error: `No se pudo contactar a la API de IA: ${String(fetchErr)}` }), {
+      return new Response(JSON.stringify({ error: "No se pudo contactar a la IA. Intente de nuevo." }), {
         status: 502,
         headers: { ...cors, "Content-Type": "application/json" },
       });
@@ -142,7 +156,7 @@ Deno.serve(async (req: Request) => {
     if (!resp.ok) {
       const errText = await resp.text();
       console.error("redactar-analisis: Anthropic respondió", resp.status, errText.slice(0, 2000));
-      return new Response(JSON.stringify({ error: `Error de la API de IA (HTTP ${resp.status}): ${errText.slice(0, 800)}` }), {
+      return new Response(JSON.stringify({ error: "La IA no está disponible en este momento. Intente de nuevo." }), {
         status: 502,
         headers: { ...cors, "Content-Type": "application/json" },
       });
@@ -183,7 +197,7 @@ Deno.serve(async (req: Request) => {
     });
   } catch (err) {
     console.error("redactar-analisis: excepción", String(err));
-    return new Response(JSON.stringify({ error: String(err) }), {
+    return new Response(JSON.stringify({ error: "Error interno al procesar la solicitud. Intente de nuevo." }), {
       status: 500,
       headers: { ...cors, "Content-Type": "application/json" },
     });
