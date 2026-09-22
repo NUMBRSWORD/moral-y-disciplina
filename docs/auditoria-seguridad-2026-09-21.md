@@ -21,9 +21,9 @@ quien administra la cuenta u organización) · **Documentado** (plantilla o guí
 | ID | Hallazgo | Sev. | Estado |
 |---|---|---|---|
 | C1 | Credenciales iniciales predecibles en cuentas antiguas; el cambio obligatorio solo se exigía en el navegador | Crítica | **Corregido:** el servidor no da acceso a una cuenta con cambio de clave pendiente. **Acción del responsable:** rotar esas claves (script privado) |
-| A1 | Storage: los archivos de un expediente eran legibles por cualquier usuario aprobado; sin límites de tamaño ni tipo | Alta | **Corregido** (migración `storage_por_expediente_y_limites`) |
+| A1 | Storage: los archivos de un expediente eran legibles por cualquier usuario aprobado; sin límites de tamaño ni tipo | Alta | **Corregido** (migraciones `storage_por_expediente_y_limites` y `casos_imputacion_limites_y_lectura_acotada`, que completa el depósito `casos-imputacion-pnp`) |
 | A2 | «Hoy» en hora UTC y días hábiles sin feriados (TUO Ley 27444, art. 134.1) | Alta | **Corregido** (`lib/fechas.js`, +19 pruebas) |
-| A3 | Funciones de IA: sesión válida pero no usuario aprobado; sin cuota ni tope de entrada; 4 funciones sin protección | Alta | **Corregido** en las 10 funciones (`autorizar_uso_ia`) |
+| A3 | Funciones de IA: sesión válida pero no usuario aprobado; sin cuota ni tope de entrada; 4 funciones sin protección | Alta | **Corregido** en las 10 funciones (`autorizar_uso_ia`). Las 4 que solo estaban en el servidor ya tienen copia en `supabase/functions` |
 | A4 | `extraer-nota-informativa` fallaba con notas grupales largas | Alta | **Corregido** (más margen y mensajes claros) |
 | A5 | Sin copias automáticas de la base; cuentas personales como titulares | Alta | **Acción del responsable** (guía en `docs/respaldos.md`) |
 | A6 | Datos personales (Ley 29733): aviso, flujo transfronterizo, registro, incidentes | Alta | **Corregido en la app** (aviso, resumen sin nombres) · **Documentado** (`docs/proteccion-datos-personales.md`, `docs/plan-incidentes.md`) · trámites: responsable |
