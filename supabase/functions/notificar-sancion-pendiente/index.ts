@@ -53,7 +53,7 @@ Deno.serve(async (req: Request) => {
 
     webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
     const payload = JSON.stringify({
-      title: "Moral y Disciplina — CPNP Ventanilla",
+      title: "Faltos — Expedientes",
       body: "Orden de Sanción generada: falta notificarla y subir el cargo firmado.",
       tag: `tarea-${nota.id}`,
       url: APP_URL,

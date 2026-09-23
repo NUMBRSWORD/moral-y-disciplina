@@ -60,7 +60,7 @@ self.addEventListener("push", (event) => {
   try { data = event.data ? event.data.json() : {}; }
   catch (_) { data = { body: event.data ? event.data.text() : "Tiene una tarea pendiente." }; }
   event.waitUntil(
-    self.registration.showNotification(data.title || "Moral y Disciplina — CPNP Ventanilla", {
+    self.registration.showNotification(data.title || "Faltos — Expedientes", {
       body: data.body || "Tiene un expediente pendiente de revisión.",
       icon: "icon.svg",
       badge: "icon.svg",

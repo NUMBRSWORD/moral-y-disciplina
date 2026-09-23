@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="description" content="Gestión del procedimiento disciplinario de infracciones Leves (Ley N.° 30714) para la PNP: notas informativas, imputación, descargos y órdenes de sanción, con asistencia de IA supervisada." />
+<meta name="description" content="Herramienta independiente para organizar expedientes y documentos de procedimientos disciplinarios. No pertenece a la PNP ni a una entidad pública." />
 <meta name="robots" content="noindex, nofollow" />
 <script>if (window.top !== window.self) { document.documentElement.style.display = "none"; window.top.location = window.self.location; }</script>
-<title>CPNP Ventanilla — Uso interno</title>
+<title>Faltos — Gestión de expedientes</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <meta name="theme-color" content="#0f1720" />
 <meta name="application-name" content="Moral y Disciplina" />
@@ -35,10 +35,10 @@
 <header id="topbar" class="hidden">
   <div class="topbar-inner">
     <div class="brand">
-      <span class="brand-badge">PNP</span>
+      <span class="brand-badge">F</span>
       <span class="brand-titles">
-        <span class="brand-title">CPNP Ventanilla</span>
-        <span class="brand-sub">Moral y Disciplina · <strong>Uso interno</strong></span>
+        <span class="brand-title">Faltos</span>
+        <span class="brand-sub">Gestión de expedientes · <strong>Herramienta independiente</strong></span>
       </span>
     </div>
     <nav class="tabs">
@@ -70,10 +70,11 @@
   <section id="view-login" class="view center-view">
     <form id="loginForm" class="card login-card">
       <div class="brand center">
-        <span class="brand-badge lg">PNP</span>
-        <h1>CPNP Ventanilla</h1>
+        <span class="brand-badge lg">F</span>
+        <h1>Faltos</h1>
         <p class="muted">Moral y Disciplina — infracciones Leves (Ley N.° 30714)</p>
-        <p class="uso-interno-chip">🔒 Uso interno · Solo personal autorizado</p>
+        <p class="uso-interno-chip">🔒 Acceso autorizado · Herramienta no oficial</p>
+        <p class="muted small">No pertenece a la PNP ni reemplaza trámites, notificaciones o plazos oficiales.</p>
       </div>
       <label>Correo o CIP
         <input type="text" id="loginEmail" required autocomplete="username" />
@@ -98,7 +99,7 @@
   <section id="view-token" class="view center-view hidden">
     <form id="tokenForm" class="card login-card">
       <div class="brand center">
-        <span class="brand-badge lg">PNP</span>
+        <span class="brand-badge lg">F</span>
         <h1>Código del token</h1>
         <p class="muted">Abra la aplicación <strong>Faltos</strong> en su celular y escriba el código de 6 dígitos que le muestra.</p>
       </div>
@@ -425,9 +426,9 @@
       <h2>Cumplimiento</h2>
     </div>
     <p class="muted small"><button type="button" class="btn-ghost" data-abrir-aviso>Ver el aviso de privacidad</button></p>
-    <p class="muted small">Políticas institucionales vigentes de este módulo. Revíselas y firme con su propia cuenta para dejar constancia interna de que las conoce (esta firma no reemplaza a la firma digital de la Ley N.° 27269) — la firma queda registrada con su nombre, cargo, fecha y la versión exacta del texto que firmó.</p>
+    <p class="muted small">Documentos y políticas del servicio. Revíselos y confirme su lectura con su propia cuenta. Esta constancia no reemplaza una firma digital certificada; se registra su nombre, cargo, fecha y la versión del texto.</p>
     <div id="cumplimientoLista"></div>
-    <p id="cumplimientoEmpty" class="muted hidden">No hay documentos institucionales registrados todavía.</p>
+    <p id="cumplimientoEmpty" class="muted hidden">No hay documentos registrados todavía.</p>
   </section>
 
   <!-- PANEL DE METRICAS -->
@@ -822,23 +823,15 @@
       <button type="button" id="btnCerrarAviso" class="btn-ghost" aria-label="Cerrar">✕</button>
     </div>
     <div class="modal-body aviso-privacidad">
-      <p class="muted small">Módulo Moral y Disciplina — Comisaría PNP Ventanilla. Texto en revisión por la asesoría legal de la unidad; los campos entre [corchetes] los completa la Comisaría.</p>
-      <h4>Quién trata sus datos</h4>
-      <p>La Comisaría PNP Ventanilla, titular del banco de datos [denominación y código de registro ante la Autoridad Nacional de Protección de Datos Personales].</p>
-      <h4>Qué datos y para qué</h4>
-      <p>Del personal que usa el sistema: nombres, grado, CIP, DNI y teléfono. De las personas investigadas: nombres, grado, CIP y los datos del procedimiento disciplinario por infracciones leves (notas informativas, descargos, órdenes de sanción y su cumplimiento). La finalidad es ejercer la función disciplinaria conforme a la Ley N.° 30714 y su Reglamento. No se usan para otra finalidad.</p>
-      <h4>Con quién se comparten y fuera del Perú</h4>
-      <ul>
-        <li><strong>Supabase</strong> (base de datos y archivos, servidores en Brasil).</li>
-        <li><strong>Google</strong> (copia de respaldo en Drive y, si usted lo elige, el ingreso con su cuenta de Google).</li>
-        <li><strong>Anthropic</strong> (asistencia de inteligencia artificial, Estados Unidos): solo recibe lo necesario para cada tarea, el resumen ejecutivo va sin nombres, y ningún resultado se guarda ni se notifica sin que un funcionario lo revise y confirme.</li>
-      </ul>
-      <h4>Cuánto tiempo</h4>
-      <p>Cinco (5) años desde el cierre del expediente; vencido el plazo se anonimizan o eliminan.</p>
-      <h4>Sus derechos</h4>
-      <p>Puede pedir acceso, rectificación, cancelación u oposición sobre sus datos ante la Comisaría PNP Ventanilla: [medio de contacto y responsable de atender el derecho]. Si no obtiene respuesta, puede acudir a la Autoridad Nacional de Protección de Datos Personales.</p>
-      <h4>Cómo se protegen</h4>
-      <p>Cada oficial solo ve los expedientes donde figura como oficial que constató; el padrón completo solo lo ve el administrador; el acceso exige clave propia y los cambios quedan en un historial de auditoría.</p>
+      <p><strong>Borrador pendiente de completar antes de publicar.</strong> Faltos es una herramienta independiente, sin vínculo oficial con la PNP ni con una entidad pública. No reemplaza trámites ni plazos oficiales.</p>
+      <h4>Responsable y contacto</h4>
+      <p>[Nombre o razón social, dirección y correo de privacidad pendientes de confirmar].</p>
+      <h4>Datos y finalidad</h4>
+      <p>Se tratan datos de cuenta, acceso y expedientes, incluidos nombres, CIP, DNI, notas, descargos, órdenes, apelaciones y adjuntos. La finalidad es organizar expedientes para usuarios autorizados.</p>
+      <h4>Servicios</h4>
+      <p>Se utilizan Supabase, Google y, para funciones de asistencia, Anthropic. El responsable debe confirmar destinatarios, regiones y tratamiento efectivo antes de publicar.</p>
+      <h4>Conservación, derechos y eliminación</h4>
+      <p>[Plazos de conservación y procedimiento real de eliminación pendientes de confirmar]. Se debe facilitar un contacto para solicitar acceso, rectificación o eliminación de datos y cuentas.</p>
     </div>
   </div>
 </div>

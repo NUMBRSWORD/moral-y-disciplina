@@ -11,7 +11,7 @@ const HOME = "https://numbrsword.github.io/moral-y-disciplina/";
 function page(title: string, detail: string, ok = false) {
   const color = ok ? "#1f9d55" : "#e5484d";
   return new Response(
-    `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><body style="margin:0;background:#0f1720;color:#e7edf3;font-family:system-ui;display:grid;min-height:100vh;place-items:center"><main style="max-width:520px;padding:32px;border:1px solid #2a3947;border-radius:14px;background:#16212c"><p style="color:${color};font-weight:700">${ok ? "✓" : "!"} CPNP Ventanilla — Moral y Disciplina</p><h1 style="font-size:24px">${title}</h1><p style="line-height:1.5">${detail}</p><a href="${HOME}" style="display:inline-block;padding:10px 15px;color:#fff;background:#1f9d55;border-radius:8px;text-decoration:none">Volver a la aplicación</a></main></body></html>`,
+    `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><body style="margin:0;background:#0f1720;color:#e7edf3;font-family:system-ui;display:grid;min-height:100vh;place-items:center"><main style="max-width:520px;padding:32px;border:1px solid #2a3947;border-radius:14px;background:#16212c"><p style="color:${color};font-weight:700">${ok ? "✓" : "!"} Faltos — Herramienta independiente</p><h1 style="font-size:24px">${title}</h1><p style="line-height:1.5">${detail}</p><a href="${HOME}" style="display:inline-block;padding:10px 15px;color:#fff;background:#1f9d55;border-radius:8px;text-decoration:none">Volver a la aplicación</a></main></body></html>`,
     { headers: { "Content-Type": "text/html; charset=utf-8" } },
   );
 }

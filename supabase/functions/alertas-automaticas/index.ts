@@ -85,7 +85,7 @@ Deno.serve(async (req: Request) => {
         try {
           await webpush.sendNotification(
             { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-            JSON.stringify({ title: "Moral y Disciplina — CPNP Ventanilla", body: alerta.texto, tag: `alerta-${nota.id}-${alerta.tipo}-${alerta.clave}`, url: APP_URL }),
+            JSON.stringify({ title: "Faltos — Expedientes", body: alerta.texto, tag: `alerta-${nota.id}-${alerta.tipo}-${alerta.clave}`, url: APP_URL }),
           );
           entregas++;
         } catch (error) {
