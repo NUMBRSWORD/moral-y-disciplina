@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="description" content="Gestión del procedimiento disciplinario de infracciones Leves (Ley N.° 30714) para la PNP: notas informativas, imputación, descargos y órdenes de sanción, con asistencia de IA supervisada." />
+<meta name="description" content="Faltos: herramienta independiente para organizar expedientes por infracciones Leves (Ley N.° 30714) —notas informativas, imputación, descargos y órdenes de sanción— con asistencia de IA supervisada. No pertenece a ninguna entidad pública." />
 <meta name="robots" content="noindex, nofollow" />
 <script>if (window.top !== window.self) { document.documentElement.style.display = "none"; window.top.location = window.self.location; }</script>
-<title>CPNP Ventanilla — Uso interno</title>
+<title>Faltos — Expedientes disciplinarios</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <meta name="theme-color" content="#0f1720" />
 <meta name="application-name" content="Moral y Disciplina" />
@@ -35,10 +35,10 @@
 <header id="topbar" class="hidden">
   <div class="topbar-inner">
     <div class="brand">
-      <span class="brand-badge">PNP</span>
+      <span class="brand-badge">F</span>
       <span class="brand-titles">
-        <span class="brand-title">CPNP Ventanilla</span>
-        <span class="brand-sub">Moral y Disciplina · <strong>Uso interno</strong></span>
+        <span class="brand-title">Faltos</span>
+        <span class="brand-sub">Expedientes disciplinarios · <strong>Herramienta independiente</strong></span>
       </span>
     </div>
     <nav class="tabs">
@@ -70,10 +70,10 @@
   <section id="view-login" class="view center-view">
     <form id="loginForm" class="card login-card">
       <div class="brand center">
-        <span class="brand-badge lg">PNP</span>
-        <h1>CPNP Ventanilla</h1>
-        <p class="muted">Moral y Disciplina — infracciones Leves (Ley N.° 30714)</p>
-        <p class="uso-interno-chip">🔒 Uso interno · Solo personal autorizado</p>
+        <span class="brand-badge lg">F</span>
+        <h1>Faltos</h1>
+        <p class="muted">Organización de expedientes por infracciones Leves (Ley N.° 30714)</p>
+        <p class="uso-interno-chip">🔒 Acceso restringido a personas autorizadas</p>
       </div>
       <label>Correo o CIP
         <input type="text" id="loginEmail" required autocomplete="username" />
@@ -103,7 +103,7 @@
   <section id="view-token" class="view center-view hidden">
     <form id="tokenForm" class="card login-card">
       <div class="brand center">
-        <span class="brand-badge lg">PNP</span>
+        <span class="brand-badge lg">F</span>
         <h1>Código del token</h1>
         <p class="muted">Abra la aplicación <strong>Faltos</strong> en su celular y escriba el código de 6 dígitos que le muestra.</p>
       </div>
@@ -827,11 +827,11 @@
       <button type="button" id="btnCerrarAviso" class="btn-ghost" aria-label="Cerrar">✕</button>
     </div>
     <div class="modal-body aviso-privacidad">
-      <p class="muted small">Módulo Moral y Disciplina — Comisaría PNP Ventanilla. Texto en revisión por la asesoría legal de la unidad; los campos entre [corchetes] los completa la Comisaría.</p>
+      <p class="muted small">Faltos es una herramienta independiente: no pertenece a la Policía Nacional del Perú ni a ninguna entidad pública, y no sustituye ningún canal oficial. <strong>Texto en revisión</strong>; los campos entre [corchetes] los completa el responsable antes de publicarlo.</p>
       <h4>Quién trata sus datos</h4>
-      <p>La Comisaría PNP Ventanilla, titular del banco de datos [denominación y código de registro ante la Autoridad Nacional de Protección de Datos Personales].</p>
+      <p>[Responsable del tratamiento: nombre o razón social, dirección y correo de contacto, pendientes de designar], titular del banco de datos [denominación y código de registro ante la Autoridad Nacional de Protección de Datos Personales].</p>
       <h4>Qué datos y para qué</h4>
-      <p>Del personal que usa el sistema: nombres, grado, CIP, DNI y teléfono. De las personas investigadas: nombres, grado, CIP y los datos del procedimiento disciplinario por infracciones leves (notas informativas, descargos, órdenes de sanción y su cumplimiento). La finalidad es ejercer la función disciplinaria conforme a la Ley N.° 30714 y su Reglamento. No se usan para otra finalidad.</p>
+      <p>Del personal que usa el sistema: nombres, grado, CIP, DNI y teléfono. De las personas investigadas: nombres, grado, CIP y los datos del procedimiento disciplinario por infracciones leves (notas informativas, descargos, órdenes de sanción y su cumplimiento). La finalidad es organizar los expedientes del procedimiento disciplinario regulado por la Ley N.° 30714 y su Reglamento, para las personas autorizadas a tratarlos. No se usan para otra finalidad.</p>
       <h4>Con quién se comparten y fuera del Perú</h4>
       <ul>
         <li><strong>Supabase</strong> (base de datos y archivos, servidores en Brasil).</li>
@@ -841,7 +841,7 @@
       <h4>Cuánto tiempo</h4>
       <p>Cinco (5) años desde el cierre del expediente; vencido el plazo se anonimizan o eliminan.</p>
       <h4>Sus derechos</h4>
-      <p>Puede pedir acceso, rectificación, cancelación u oposición sobre sus datos ante la Comisaría PNP Ventanilla: [medio de contacto y responsable de atender el derecho]. Si no obtiene respuesta, puede acudir a la Autoridad Nacional de Protección de Datos Personales.</p>
+      <p>Puede pedir acceso, rectificación, cancelación u oposición sobre sus datos al responsable indicado arriba: [medio de contacto y responsable de atender el derecho]. También puede pedir la eliminación de su cuenta en <a href="eliminar-cuenta.html">esta página</a>. Si no obtiene respuesta, puede acudir a la Autoridad Nacional de Protección de Datos Personales.</p>
       <h4>Cómo se protegen</h4>
       <p>Cada oficial solo ve los expedientes donde figura como oficial que constató; el padrón completo solo lo ve el administrador; el acceso exige clave propia y los cambios quedan en un historial de auditoría.</p>
     </div>

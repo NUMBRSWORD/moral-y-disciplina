@@ -2114,7 +2114,7 @@ async function renderNotaDetail(nota) {
             <label>Grado<input type="text" id="iaConformeGrado" placeholder="Ej. MAY. PNP" /></label>
             <label>Nombre<input type="text" id="iaConformeNombre" required placeholder="Ej. VARGAS SOTO, Mario Enrique" /></label>
           </div>
-          <label>Cargo<input type="text" id="iaConformeCargo" placeholder="Ej. Comisario (e) CPNP Ventanilla" /></label>
+          <label>Cargo<input type="text" id="iaConformeCargo" placeholder="Ej. Jefe de la unidad" /></label>
           <p class="muted small" style="margin-bottom:6px"><strong>2. Instructor</strong> (usted)</p>
           <div class="grid-2">
             <label>Grado<input type="text" id="iaInstructorGrado" value="${escapeHtml(yoMismoInforme?.grado || "")}" /></label>
@@ -4760,7 +4760,7 @@ function renderCumplimientoLista() {
         <form class="firma-form" data-documento-id="${d.id}" data-version="${d.version}">
           <label>Grado <input type="text" class="firma-grado-input" placeholder="Ej. Comandante PNP" /></label>
           <label>Nombre y apellidos <input type="text" class="firma-nombre-input" required placeholder="Ej. REYES MEDINA, Jorge Luis" /></label>
-          <label>Cargo <input type="text" class="firma-cargo-input" required placeholder="Ej. Comisario PNP Ventanilla" /></label>
+          <label>Cargo <input type="text" class="firma-cargo-input" required placeholder="Ej. Jefe de la unidad" /></label>
           <p class="firma-error error hidden" role="alert"></p>
           <button type="submit" class="btn-primary">${svgIco("firmar")}Firmar</button>
         </form>

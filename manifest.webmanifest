@@ -1,7 +1,7 @@
 {
-  "name": "CPNP Ventanilla — Moral y Disciplina",
-  "short_name": "Moral y Disciplina",
-  "description": "Seguimiento del procedimiento disciplinario de infracciones Leves (Ley N.° 30714) de la PNP: notas, imputación, descargos y órdenes de sanción.",
+  "name": "Faltos — Expedientes disciplinarios",
+  "short_name": "Faltos",
+  "description": "Herramienta independiente para organizar expedientes por infracciones Leves (Ley N.° 30714): notas, imputación, descargos y órdenes de sanción.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
