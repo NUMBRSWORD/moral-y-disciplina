@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Faltos — Descargar la aplicación</title>
+<meta name="description" content="Descarga de la aplicación Android Faltos para instalación directa." />
+<style>
+  :root { color-scheme: light dark; --fondo:#f4f6f2; --tarjeta:#fffefb; --texto:#14231c;
+          --suave:#526159; --verde:#096b4e; --borde:#d5e1d8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fondo:#0c1510; --tarjeta:#17251d; --texto:#eef7f1; --suave:#c1d0c5;
+            --verde:#79ddb1; --borde:#456452; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 16px 48px; background:var(--fondo); color:var(--texto);
+         font:16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; }
+  h1 { font-size: 28px; line-height:1.25; margin:0 0 4px; }
+  h2 { font-size: 18px; margin: 26px 0 8px; }
+  .marca { font-size:12px; letter-spacing:.08em; color:var(--verde); font-weight:700; margin:0 0 18px; }
+  .tarjeta { background:var(--tarjeta); border:1px solid var(--borde); border-radius:18px;
+             padding:20px; margin-top:16px; }
+  .descarga { display:block; text-align:center; background:var(--verde); color:#fff;
+              text-decoration:none; font-weight:700; padding:16px; border-radius:14px; margin-top:8px; }
+  @media (prefers-color-scheme: dark) { .descarga { color:#06281d; } }
+  .aviso { color:var(--suave); font-size:14px; }
+  ol { padding-left: 20px; } li { margin:6px 0; }
+</style>
+</head>
+<body>
+<main>
+  <p class="marca">FALTOS · HERRAMIENTA INDEPENDIENTE</p>
+  <h1>Descargar la aplicación</h1>
+  <p class="aviso">Instalación directa en Android (sin tienda). Versión 1.3.</p>
+
+  <div class="tarjeta">
+    <a class="descarga" href="descargas/faltos-1.3.apk" download>Descargar Faltos 1.3 (Android)</a>
+    <p class="aviso" style="margin-top:14px">Requiere Android 7 o superior. Al ser una instalación
+      directa, el teléfono pedirá permiso para instalar aplicaciones de esta fuente: es normal.</p>
+  </div>
+
+  <div class="tarjeta">
+    <h2>Cómo instalarla</h2>
+    <ol>
+      <li>Toque el botón de descarga desde el teléfono.</li>
+      <li>Abra el archivo descargado.</li>
+      <li>Si aparece el aviso «Por seguridad, su teléfono no permite instalar apps de esta
+        fuente», toque <strong>Ajustes</strong> y active el permiso para el navegador.</li>
+      <li>Vuelva a abrir el archivo e instale.</li>
+    </ol>
+  </div>
+
+  <div class="tarjeta">
+    <h2>Descargarla no da acceso</h2>
+    <p>Cualquiera puede instalar la aplicación, pero para ver información hace falta
+      iniciar sesión con Google, que un administrador apruebe la cuenta, firmar las
+      políticas y activar el Token Digital. Sin eso, la aplicación no muestra ningún dato.</p>
+  </div>
+
+  <p class="aviso">Faltos no pertenece a la Policía Nacional del Perú ni a ninguna entidad
+    pública, y no sustituye ningún canal oficial.
+    <a href="eliminar-cuenta.html">Eliminar mi cuenta</a></p>
+</main>
+</body>
+</html>
