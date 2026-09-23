@@ -3,7 +3,7 @@
 //     conexión intermitente (los datos siguen viniendo de Supabase en línea).
 //  2. Muestra las notificaciones push cuando estén configuradas (VAPID +
 //     Edge Function). Sin push configurado, este bloque simplemente no se usa.
-const CACHE = "moral-y-disciplina-v51";
+const CACHE = "moral-y-disciplina-v52";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -11,8 +11,7 @@ const APP_SHELL = [
   "./app.js",
   "./config.js",
   "./manifest.webmanifest",
-  "./favicon.svg",
-  "./icon.svg",
+  "./mascota-refinada.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -62,8 +61,8 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title || "Faltos — Expedientes", {
       body: data.body || "Tiene un expediente pendiente de revisión.",
-      icon: "icon.svg",
-      badge: "icon.svg",
+      icon: "mascota-refinada.png",
+      badge: "mascota-refinada.png",
       tag: data.tag || "expediente-pendiente",
       renotify: true,
       data: { url: data.url || "./" },

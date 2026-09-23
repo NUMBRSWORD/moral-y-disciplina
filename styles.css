@@ -1,13 +1,14 @@
 :root {
-  --bg: #0f1720;
-  --bg-elev: #16212c;
-  --bg-card: #1b2836;
-  --border: #2a3947;
-  --text: #e7edf3;
-  --text-muted: #93a3b3;
-  --accent: #1f9d55;
-  --accent-hover: #199049;
-  --accent-soft: rgba(31, 157, 85, 0.15);
+  --bg: #0c1510;
+  --bg-elev: #1d3025;
+  --bg-card: #17251d;
+  --border: #456452;
+  --text: #eef7f1;
+  --text-muted: #c1d0c5;
+  --accent: #79ddb1;
+  --accent-hover: #a0e9c8;
+  --accent-soft: rgba(121, 221, 177, 0.14);
+  --on-accent: #073627;
   --danger: #e5484d;
   --danger-soft: rgba(229, 72, 77, 0.15);
   --radius: 10px;
@@ -21,15 +22,16 @@
    predeterminado -- es el que ya conocían todos los oficiales -- así que
    esto es una opción nueva, no un cambio de apariencia para nadie. */
 :root[data-theme="light"] {
-  --bg: #eef1f4;
-  --bg-elev: #ffffff;
-  --bg-card: #ffffff;
-  --border: #d8dee4;
-  --text: #16222c;
-  --text-muted: #5c6b78;
-  --accent: #1a8a4a;
-  --accent-hover: #157139;
-  --accent-soft: rgba(26, 138, 74, 0.12);
+  --bg: #f4f6f2;
+  --bg-elev: #f8faf5;
+  --bg-card: #fffefb;
+  --border: #d5e1d8;
+  --text: #14231c;
+  --text-muted: #526159;
+  --accent: #096b4e;
+  --accent-hover: #07543e;
+  --accent-soft: rgba(9, 107, 78, 0.12);
+  --on-accent: #ffffff;
   --danger: #c0342c;
   --danger-soft: rgba(192, 52, 44, 0.1);
   --radius: 10px;
@@ -57,7 +59,7 @@ body {
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .skip-link {
   position: absolute; top: -48px; left: 12px; z-index: 100;
-  background: var(--accent); color: #fff; padding: 10px 16px;
+  background: var(--accent); color: var(--on-accent); padding: 10px 16px;
   border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.9rem;
   transition: top 160ms var(--ease-out);
 }
@@ -79,7 +81,7 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand.center { flex-direction: column; text-align: center; gap: 6px; margin-bottom: 8px; }
 .brand-badge {
-  background: var(--accent); color: #fff; font-weight: 700;
+  background: var(--accent); color: var(--on-accent); font-weight: 700;
   font-size: 0.75rem; letter-spacing: 0.05em;
   padding: 4px 8px; border-radius: 6px;
 }
@@ -115,7 +117,7 @@ button { font-family: inherit; }
   transition: background-color 160ms var(--ease-out), border-color 160ms var(--ease-out), transform 120ms var(--ease-out);
 }
 .btn-primary:active, .btn-secondary:active, .btn-ghost:active, .btn-danger:active { transform: scale(0.97); }
-.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
 .btn-primary:hover { background: var(--accent-hover); }
 .btn-secondary { background: var(--bg-card); color: var(--text); border-color: var(--border); }
 .btn-secondary:hover { border-color: var(--accent); }
@@ -346,7 +348,7 @@ tbody tr:last-child td { border-bottom: none; }
 .case-progress-steps span { position: relative; display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid var(--border); border-radius: 50%; color: var(--text-muted); font-size: 0.64rem; font-weight: 700; background: var(--bg-card); }
 .case-progress-steps span + span { margin-left: 18px; }
 .case-progress-steps span + span::before { content: ""; position: absolute; right: 100%; width: 18px; height: 1px; background: var(--border); }
-.case-progress-steps .is-done { color: #fff; background: var(--accent); border-color: var(--accent); }
+.case-progress-steps .is-done { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
 .case-progress-steps .is-current { box-shadow: 0 0 0 3px var(--accent-soft); }
 .case-progress-steps .is-done + .is-done::before { background: var(--accent); }
 .case-progress.is-concluida .pill { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
@@ -381,7 +383,7 @@ tbody tr:last-child td { border-bottom: none; }
 .form-stepper li:not(:last-child)::after { content: ""; position: absolute; top: 10px; left: calc(50% + 13px); width: calc(100% - 26px); height: 1px; background: var(--border); }
 .form-stepper span { display: grid; z-index: 1; place-items: center; width: 21px; height: 21px; border: 1px solid var(--border); border-radius: 50%; background: var(--bg-card); font-size: .68rem; font-weight: 700; }
 .form-stepper .is-current { color: var(--accent); font-weight: 700; }
-.form-stepper .is-current span { color: #fff; border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.form-stepper .is-current span { color: var(--on-accent); border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 /* Detail view */
 .detail-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; }

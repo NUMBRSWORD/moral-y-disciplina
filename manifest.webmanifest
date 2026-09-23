@@ -6,10 +6,10 @@
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0f1720",
-  "theme_color": "#0f1720",
+  "background_color": "#0c1510",
+  "theme_color": "#0c1510",
   "lang": "es-PE",
   "icons": [
-    { "src": "mascota.webp", "sizes": "1280x1280", "type": "image/webp", "purpose": "any maskable" }
+    { "src": "mascota-refinada.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any maskable" }
   ]
 }
