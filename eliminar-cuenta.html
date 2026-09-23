@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Faltos — Eliminar mi cuenta</title>
+<meta name="description" content="Cómo solicitar la eliminación de la cuenta y de los datos personales en la aplicación Faltos." />
+<style>
+  :root { color-scheme: light dark; --fondo:#f4f6f2; --tarjeta:#fffefb; --texto:#14231c;
+          --suave:#526159; --verde:#096b4e; --borde:#d5e1d8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fondo:#0c1510; --tarjeta:#17251d; --texto:#eef7f1; --suave:#c1d0c5;
+            --verde:#79ddb1; --borde:#456452; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 16px 48px; background:var(--fondo); color:var(--texto);
+         font:16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 28px; line-height:1.25; margin:0 0 4px; }
+  h2 { font-size: 19px; margin: 28px 0 8px; }
+  .marca { font-size:12px; letter-spacing:.08em; color:var(--verde); font-weight:700; margin:0 0 18px; }
+  .tarjeta { background:var(--tarjeta); border:1px solid var(--borde); border-radius:18px;
+             padding:20px; margin-top:16px; }
+  ol, ul { padding-left: 20px; }
+  li { margin: 6px 0; }
+  .aviso { color:var(--suave); font-size:14px; }
+  code { background:rgba(127,127,127,.15); padding:2px 6px; border-radius:6px; }
+</style>
+</head>
+<body>
+<main>
+  <p class="marca">FALTOS · HERRAMIENTA INDEPENDIENTE</p>
+  <h1>Eliminar mi cuenta y mis datos</h1>
+  <p class="aviso">Esta página explica cómo pedir la baja de la cuenta de la aplicación
+    <strong>Faltos</strong>, sin necesidad de instalarla.</p>
+
+  <div class="tarjeta">
+    <h2>Desde la aplicación</h2>
+    <ol>
+      <li>Abra Faltos e inicie sesión.</li>
+      <li>En la pantalla de inicio (o en la pantalla de cuenta pendiente de aprobación),
+        toque <strong>«Eliminar mi cuenta»</strong>.</li>
+      <li>Lea lo que se elimina y confirme. Su pedido queda registrado con la fecha.</li>
+    </ol>
+  </div>
+
+  <div class="tarjeta">
+    <h2>Sin la aplicación</h2>
+    <p>Escriba desde el correo con el que creó su cuenta a la dirección de contacto del
+      responsable del servicio, indicando el asunto <code>Eliminación de cuenta Faltos</code>.
+      Se le responderá a ese mismo correo cuando la eliminación se haya ejecutado.</p>
+    <p class="aviso"><strong>Responsable y correo de contacto:</strong>
+      [completar antes de publicar la aplicación].</p>
+  </div>
+
+  <div class="tarjeta">
+    <h2>Qué se elimina</h2>
+    <ul>
+      <li>La cuenta de acceso y el enlace con la cuenta de Google.</li>
+      <li>Los datos de identificación declarados: grado, nombres, apellidos, CIP, DNI y teléfono.</li>
+      <li>El Token Digital y los datos de la sesión guardados en el teléfono.</li>
+    </ul>
+    <h2>Qué puede conservarse</h2>
+    <ul>
+      <li>Los expedientes y documentos registrados en el servicio, que no son datos
+        personales de la cuenta sino parte del acervo documental.</li>
+      <li>Las constancias de aceptación de políticas y los registros de acceso, mientras
+        exista una obligación de conservarlos.</li>
+    </ul>
+    <p class="aviso"><strong>Plazo de ejecución:</strong> [completar antes de publicar la
+      aplicación].</p>
+  </div>
+
+  <p class="aviso">Faltos es una herramienta independiente. No pertenece a la Policía
+    Nacional del Perú ni a ninguna entidad pública, y no sustituye ningún canal oficial.</p>
+</main>
+</body>
+</html>
