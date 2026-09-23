@@ -10,6 +10,6 @@
   "theme_color": "#0f1720",
   "lang": "es-PE",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "mascota.webp", "sizes": "1280x1280", "type": "image/webp", "purpose": "any maskable" }
   ]
 }

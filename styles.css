@@ -84,6 +84,8 @@ h1, h2, h3 { letter-spacing: -0.01em; }
   padding: 4px 8px; border-radius: 6px;
 }
 .brand-badge.lg { font-size: 1rem; padding: 8px 14px; border-radius: 8px; }
+.brand-mascot { width: 36px; height: 36px; object-fit: contain; flex: 0 0 auto; }
+.brand-mascot.lg { width: 88px; height: 88px; }
 .brand-title { font-weight: 600; }
 .tabs { display: flex; gap: 4px; flex: 1; }
 .tab-btn {
@@ -694,7 +696,7 @@ kbd {
   /* Barra superior compacta */
   .topbar-inner { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 10px; padding: 8px 12px; }
   .brand { min-width: 0; gap: 7px; }
-  .brand-badge { padding: 4px 7px; font-size: 0.68rem; }
+  .brand-mascot { width: 32px; height: 32px; }
   .brand-title { font-size: 0.9rem; }
   .brand-sub { display: none; }
   .tabs { grid-column: 1 / -1; width: auto; display: flex; gap: 6px; overflow-x: auto; margin: 0 -12px; padding: 2px 12px 6px; scrollbar-width: none; scroll-snap-type: x proximity; }
