@@ -2,9 +2,12 @@
   "name": "moral-y-disciplina",
   "private": true,
   "type": "module",
-  "description": "Sin dependencias que instalar: los paquetes del navegador (Supabase, docxtemplater, pdf.js, etc.) se cargan directo desde esm.sh en el código. Este package.json solo existe para 'npm test'.",
+  "description": "Web y Android de Faltos. npm ci prepara la base PostgreSQL aislada de pruebas; no usa credenciales de producción.",
+  "devDependencies": { "@electric-sql/pglite": "0.5.8" },
   "scripts": {
     "check": "node scripts/check.mjs",
-    "test": "node scripts/check.mjs && node --test lib/*.test.js"
+    "build:web": "node scripts/build-web.mjs",
+    "sync:web": "node scripts/sync-web.mjs",
+    "test": "node scripts/check.mjs && node --test lib/*.test.js tests/*.test.mjs"
   }
 }

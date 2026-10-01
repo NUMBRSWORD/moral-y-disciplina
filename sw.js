@@ -3,7 +3,7 @@
 //     conexión intermitente (los datos siguen viniendo de Supabase en línea).
 //  2. Muestra las notificaciones push cuando estén configuradas (VAPID +
 //     Edge Function). Sin push configurado, este bloque simplemente no se usa.
-const CACHE = "moral-y-disciplina-v52";
+const CACHE = "moral-y-disciplina-v55";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -25,7 +25,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k.startsWith("moral-y-disciplina-") && k !== CACHE).map((k) => caches.delete(k)))
     )
   );
   self.clients.claim();
@@ -51,7 +51,9 @@ self.addEventListener("fetch", (event) => {
         }
         return resp;
       })
-      .catch(() => caches.match(event.request).then((c) => c || caches.match("./index.html")))
+      .catch(() => caches.match(event.request).then(async (c) => c ||
+        (event.request.mode === "navigate" ? await caches.match("./index.html") : null) ||
+        new Response("Sin conexión", { status: 503, headers: { "Content-Type": "text/plain" } })))
   );
 });
 
@@ -60,7 +62,7 @@ self.addEventListener("push", (event) => {
   try { data = event.data ? event.data.json() : {}; }
   catch (_) { data = { body: event.data ? event.data.text() : "Tiene una tarea pendiente." }; }
   event.waitUntil(
-    self.registration.showNotification(data.title || "Moral y Disciplina — CPNP Ventanilla", {
+    self.registration.showNotification(data.title || "Faltos", {
       body: data.body || "Tiene un expediente pendiente de revisión.",
       icon: "icon.svg",
       badge: "icon.svg",

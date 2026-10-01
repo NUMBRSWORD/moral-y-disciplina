@@ -1,79 +1,48 @@
-# Sample workflow for building and deploying a Jekyll site to GitHub Pages
-name: Deploy Jekyll with GitHub Pages dependencies preinstalled
-
+name: Verificar y publicar Faltos
 on:
-  # Runs on pushes targeting the default branch
   push:
-    branches: ["main"]
-
-  # Allows you to run this workflow manually from the Actions tab
+    branches: ["main", "combinado", "codex/**"]
+  pull_request:
   workflow_dispatch:
-
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
-# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
 concurrency:
-  group: "pages"
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
-
 jobs:
-  # Pruebas de la lógica pura (lib/*.test.js) -- si fallan, no se construye ni
-  # se despliega nada. Antes no había ningún gate: un cambio roto se publicaba
-  # igual si nadie corría "npm test" a mano antes de subirlo.
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Run tests
-        run: npm test
-
-  # Build job
-  build:
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Setup Pages
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
-      - name: Build with Jekyll
-        uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - name: Preparar solo los archivos públicos
+        id: pages
+        run: npm run build:web
+      - name: Guardar web verificada
+        if: github.repository == 'NUMBRSWORD/moral-y-disciplina' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa
         with:
-          source: ./
-          destination: ./_site
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
-
-  # Deployment job
+          path: ${{ steps.pages.outputs.directory }}
   deploy:
+    if: github.repository == 'NUMBRSWORD/moral-y-disciplina' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
-      # wretry.action envuelve las salidas del paso original en un solo
-      # campo JSON en vez de exponerlas con su nombre de siempre -- hay que
-      # desempacarlo con fromJSON() para seguir llegando a "page_url".
       url: ${{ fromJSON(steps.deployment.outputs.outputs).page_url }}
-    runs-on: ubuntu-latest
-    needs: build
     steps:
-      # actions/deploy-pages falla de forma intermitente por hipos
-      # transitorios de la API de GitHub Pages (visto en la práctica en
-      # notificaciones-pnp: el mismo commit vuelve a desplegar bien en el
-      # siguiente intento, sin cambiar nada). Reintenta automáticamente en
-      # vez de depender de que alguien note el fallo y le dé "Re-run" a mano.
-      - name: Deploy to GitHub Pages
+      - name: Publicar la web canónica
         id: deployment
-        uses: Wandalen/wretry.action@e68c23e6309f2871ca8ae4763e7629b9c258e1ea # v3
+        uses: Wandalen/wretry.action@e68c23e6309f2871ca8ae4763e7629b9c258e1ea
         with:
-          action: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
+          action: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346
           attempt_limit: 3
           attempt_delay: 15000

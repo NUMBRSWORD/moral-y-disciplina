@@ -22,11 +22,16 @@ import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
 import { prepararLote, revisarFila, filasGuardables, resumenDelLote, filaARegistroDeExpediente, necesitaAyudaDeIA, aplicarLecturaDeIA, marcarRepetidos } from "./lib/loteExpedientes.js";
 import { estadoDeRemision, esperaOficio, esperaHojaDeTramite } from "./lib/remision.js";
 import { datosDelOficio, documentosRemitidos, faltaParaElOficio, renderizarOficioRemisionDocx } from "./lib/oficioRemision.js";
+import { leerFirmantesOficio } from "./lib/firmantesOficio.js";
 import { piezasDelExpediente } from "./lib/expedienteFirmado.js";
+import { leerTodasLasPaginas, cargaCompartida, puedeActualizar } from "./lib/cargaDatos.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Dentro de la app Android la página recibe su configuración antes de cargar.
+// Allí el inicio, las políticas y el token son pantallas nativas: la web no los repite.
+const EN_APP_ANDROID = !!window.__faltosConfig;
 
 const state = {
   session: null,
@@ -405,6 +410,8 @@ $("btnTemaToggle").addEventListener("click", () => {
 
 // ---------- View switching ----------
 function showView(id) {
+  // «Volver» desde un expediente regresa a Subir expediente solo si se abrió desde ahí.
+  if (id !== "view-nota-detail") state.origenDetalle = null;
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $(id).classList.remove("hidden");
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
@@ -423,15 +430,51 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (target === "efectivos") { showView("view-efectivos"); loadEfectivos(); }
     if (target === "roles") { showView("view-roles"); loadRolesServicio(); }
     if (target === "directivas") { showView("view-directivas"); loadDirectivasView(); }
-    if (target === "agenda") { showView("view-agenda"); renderAgendaNotas(); }
+    if (target === "agenda") { showView("view-agenda"); actualizarVistaCompartida(); }
     if (target === "documentos") { showView("view-documentos"); loadDocumentosGenerados(); }
     if (target === "recepcion") { showView("view-recepcion"); loadNotas().then(loadExpedientesRemitidos); }
-    if (target === "panel") { showView("view-panel"); renderPanel(); }
+    if (target === "panel") { showView("view-panel"); actualizarVistaCompartida(); }
     if (target === "historial") { showView("view-historial"); loadHistorial(); }
   });
 });
 
-$("btnVolverDashboard").addEventListener("click", () => { showView("view-dashboard"); loadNotas(); });
+$("btnVolverDashboard").addEventListener("click", () => {
+  if (state.origenDetalle === "view-subir") { state.origenDetalle = null; abrirSubirExpediente(); return; }
+  showView("view-dashboard"); loadNotas();
+});
+
+// Sincronización de lectura entre web y APK. No recarga la página, no navega al
+// inicio y nunca reemplaza un formulario abierto. Supabase sigue aplicando RLS.
+const actualizarVistaCompartida = cargaCompartida(async () => {
+  const vista = document.querySelector('.view:not(.hidden)')?.id;
+  if (!puedeActualizar({visible:document.visibilityState === 'visible', sesion:state.session && state.role,
+    modal:!!document.querySelector('.modal-overlay:not(.hidden)'),
+    editando:!!document.activeElement?.matches('input,textarea,select,[contenteditable=true]'), vista})) return;
+  const usuario = state.session.user.id;
+  let aviso = $("estadoSincronizacion");
+  if (!aviso) {
+    aviso = document.createElement('p'); aviso.id='estadoSincronizacion'; aviso.className='muted small';
+    aviso.setAttribute('role','status');
+  }
+  $(vista).prepend(aviso);
+  aviso.textContent='Actualizando datos…';
+  try {
+    const ok = vista === 'view-efectivos' ? await loadEfectivos() : await loadNotas();
+    if (usuario !== state.session?.user?.id) { aviso.remove(); return; }
+    if (ok === false) throw new Error('datos');
+    if (document.querySelector('.view:not(.hidden)')?.id === vista) {
+      if (vista === 'view-panel') await renderPanel();
+      if (vista === 'view-agenda') renderAgendaNotas();
+    }
+    aviso.textContent='Datos actualizados · '+new Intl.DateTimeFormat('es-PE',{hour:'2-digit',minute:'2-digit'}).format(new Date());
+  } catch (_) {
+    aviso.textContent='Sin actualizar: compruebe su conexión. Los datos visibles pueden estar desactualizados.';
+  }
+});
+window.addEventListener('focus', actualizarVistaCompartida);
+window.addEventListener('faltos-resume', actualizarVistaCompartida);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) actualizarVistaCompartida(); });
+setInterval(actualizarVistaCompartida, 60000);
 
 // ---------- Paleta de búsqueda global (Ctrl + K) ----------
 // Salta rápido a un expediente sin recorrer pestañas. Trabaja sobre lo ya
@@ -657,10 +700,15 @@ async function onAuthed(session) {
     abrirCambioClave({ obligatorio: true });
     return;
   }
+  if (!EN_APP_ANDROID && !(await politicasAlDia())) return;
   $("topbar").classList.remove("hidden");
   await loadProfile(session.user.id);
   void prepararAlertasMovil();
-  showView("view-dashboard");
+  const sencillo = usaInicioSencillo();
+  document.body.classList.toggle("modo-sencillo", sencillo);
+  $("btnInicioSencillo").classList.toggle("hidden", !sencillo);
+  showView(sencillo ? "view-inicio" : "view-dashboard");
+  void actualizarAvisoToken();
   // Efectivos se carga ANTES que las notas (y se espera) porque
   // renderNotasTable decide si mostrar el botón "Descargar Imputación" según
   // state.efectivos; si las notas se pintaran primero, ese arreglo estaría
@@ -680,7 +728,12 @@ async function onAuthed(session) {
 function onSignedOut() {
   state.session = null;
   state.role = null;
+  state.notas = []; state.efectivos = []; state.remisiones = [];
+  state.expedientesRemitidos = []; state.currentNotaId = null;
+  $("estadoSincronizacion")?.remove();
   $("topbar").classList.add("hidden");
+  document.body.classList.remove("modo-sencillo");
+  $("tokenRecuperacion").classList.add("hidden");
   showView("view-login");
 }
 
@@ -691,7 +744,11 @@ supabase.auth.onAuthStateChange((_event, session) => {
   // manda a "Expedientes" y recarga todo: quien estaba en Seguimiento, en un
   // expediente o con una ficha abierta era devuelto al inicio sin haber hecho nada.
   // Si esa persona ya está dentro de la app, solo se actualiza el token.
-  const yaEnLaApp = state.session?.user?.id === session.user.id && !$("topbar").classList.contains("hidden");
+  const mismaPersona = state.session?.user?.id === session.user.id;
+  // En las políticas la barra está oculta, pero repetir onAuthed borraría lo que
+  // la persona ya escribió para firmar.
+  const yaEnLaApp = mismaPersona && (!$("topbar").classList.contains("hidden")
+    || !$("view-politicas").classList.contains("hidden"));
   if (yaEnLaApp) { state.session = session; return; }
   onAuthed(session);
 });
@@ -865,17 +922,26 @@ $("cambiarClaveForm").addEventListener("submit", async (e) => {
 
 // ---------- Notas informativas ----------
 async function loadNotas() {
-  const { data, error } = await supabase
-    .from("notas_informativas")
-    .select("*, expedientes(*)")
-    .order("fecha_falta", { ascending: false });
-  if (error) { console.error(error); toast("No se pudieron cargar los expedientes: " + (error.message || "error de red o de sesión") + ". Intente recargar la página."); return; }
+  return cargarNotasCompletas();
+}
+const cargarNotasCompletas = cargaCompartida(async () => {
+  const usuario = state.session?.user?.id;
+  let data;
+  try {
+    data = await leerTodasLasPaginas(() => supabase.from("notas_informativas")
+      .select("*, expedientes(*)").order("fecha_falta", { ascending: false }).order("id"));
+    if (!usuario || usuario !== state.session?.user?.id) return false;
+    if (!await cargarRemisiones()) return false;
+  } catch (error) {
+    toast("No se pudieron actualizar los expedientes. Compruebe su conexión y vuelva a intentar.");
+    return false;
+  }
+  if (usuario !== state.session?.user?.id) return false;
   // La política de RLS "ve notas propias o es admin" ya filtra en el
   // servidor qué filas puede ver este usuario (por oficial_constato_cip);
   // el navegador nunca recibe las que no le corresponden, así que aquí ya
   // no hace falta (ni conviene) repetir el filtro en JavaScript.
   state.notas = data || [];
-  await cargarRemisiones();
   renderResumenRapidoNotas();
   renderBandejaAccionesNotas();
   // Inicio (Expedientes): solo lo pendiente. Seguimiento: solo lo resuelto.
@@ -885,7 +951,8 @@ async function loadNotas() {
     "No hay expedientes pendientes. Los resueltos están en la pestaña «Seguimiento».",
   );
   aplicarFiltrosNotas();
-}
+  return true;
+});
 
 let notasVisibles = [];
 
@@ -1074,18 +1141,27 @@ function etiquetaEstadoRecepcion(estado) {
 }
 
 async function cargarRemisiones() {
-  const { data, error } = await supabase.from("expedientes_remitidos")
-    .select("nota_id, archivo_oficio_path, archivo_ht_path");
-  // Un fallo aquí no puede tumbar la lista de casos: sin estos datos el estado
-  // dirá que falta el oficio, que es lo que se ve antes de remitir.
-  if (error) { console.error("No se pudo leer el estado de remisión:", error); return; }
-  state.remisiones = data || [];
+  const usuario = state.session?.user?.id;
+  try {
+    const data = await leerTodasLasPaginas(() => supabase.from("expedientes_remitidos")
+      .select("id, nota_id, archivo_oficio_path, archivo_ht_path").order("id"));
+    if (!usuario || usuario !== state.session?.user?.id) return false;
+    state.remisiones = data; return true;
+  } catch (error) {
+    // No afirmar que falta un oficio cuando simplemente falló la consulta.
+    toast("No se pudo verificar la remisión. Los datos no se han actualizado; vuelva a intentar.");
+    return false;
+  }
 }
 
 async function loadExpedientesRemitidos() {
-  const { data, error } = await supabase
-    .from("expedientes_remitidos").select("*").order("remitido_at", { ascending: false });
-  if (error) { console.error(error); toast("No se pudo cargar la recepción: " + error.message); return; }
+  const usuario = state.session?.user?.id;
+  let data;
+  try {
+    data = await leerTodasLasPaginas(() => supabase.from("expedientes_remitidos")
+      .select("*").order("remitido_at", { ascending: false }).order("id"));
+  } catch (error) { toast("No se pudo actualizar la recepción. Vuelva a intentar."); return false; }
+  if (!usuario || usuario !== state.session?.user?.id) return false;
   state.expedientesRemitidos = data || [];
   state.remisiones = data || [];
   await cargarEstadoRespaldoDrive();
@@ -2186,6 +2262,7 @@ async function renderNotaDetail(nota) {
     </div>
     ` : ""}
 
+
     ${isAdmin ? `
     <div class="detail-card">
       <h3>Expediente</h3>
@@ -2906,13 +2983,18 @@ async function submitExpediente(e, notaId) {
 
 // ---------- Efectivos ----------
 async function loadEfectivos() {
-  const { data, error } = await supabase
-    .from("efectivos")
-    .select("*")
-    .order("apellidos_nombres", { ascending: true });
-  if (error) { console.error(error); toast("No se pudo cargar el padrón de Efectivos: " + (error.message || "error de red") + ". Los documentos podrían no completar CIP/DNI."); return; }
+  const usuario = state.session?.user?.id;
+  let data;
+  try {
+    data = await leerTodasLasPaginas(() => supabase.from("efectivos")
+      .select("*").order("apellidos_nombres", { ascending: true }).order("id"));
+  } catch (error) {
+    toast("No se pudo actualizar el padrón. Compruebe su conexión antes de generar documentos."); return false;
+  }
+  if (!usuario || usuario !== state.session?.user?.id) return false;
   state.efectivos = data || [];
   renderEfectivosTable(state.efectivos);
+  return true;
 }
 
 function renderEfectivosTable(list) {
@@ -4919,11 +5001,11 @@ async function loadCumplimientoView() {
   renderCumplimientoLista();
 }
 
-function renderCumplimientoLista() {
-  const container = $("cumplimientoLista");
+function renderCumplimientoLista(containerId = "cumplimientoLista") {
+  const container = $(containerId);
   if (!container) return;
   const list = state.cumplimientoDocs;
-  $("cumplimientoEmpty").classList.toggle("hidden", list.length > 0);
+  if (containerId === "cumplimientoLista") $("cumplimientoEmpty").classList.toggle("hidden", list.length > 0);
   const isAdmin = state.role === "admin";
   const miId = state.session?.user?.id;
 
@@ -4988,7 +5070,8 @@ function renderCumplimientoLista() {
       try {
         await firmarDocumento(supabase, { documentoId, version, firmanteId: state.session.user.id, nombre, grado, cargo });
         toast("Firma registrada.", "ok");
-        await loadCumplimientoView();
+        if (container.id === "politicasLista") await politicasAlDia();
+        else await loadCumplimientoView();
       } catch (err) {
         console.error(err);
         errEl.textContent = "Error: " + (err.message || err);
@@ -5035,6 +5118,249 @@ $("documentoInstitucionalForm")?.addEventListener("submit", async (e) => {
     errEl.classList.remove("hidden");
   } finally {
     ocuparBoton(submitBtn, false);
+  }
+});
+
+// ---------- Políticas al entrar (web) ----------
+// Igual que la app Android: un fallo de carga o una lista vacía no cuentan como
+// conformidad. Solo se continúa con todas las políticas firmadas en su versión vigente.
+async function politicasAlDia() {
+  let pendientes = null;
+  try {
+    [state.cumplimientoDocs, state.cumplimientoFirmas] = await Promise.all([
+      listarDocumentosInstitucionales(supabase),
+      listarFirmasDocumentos(supabase),
+    ]);
+    const miId = state.session?.user?.id;
+    if (state.cumplimientoDocs.length) {
+      pendientes = state.cumplimientoDocs.filter((d) => !state.cumplimientoFirmas.some((f) =>
+        f.documento_id === d.id && f.documento_version === d.version && f.firmante_id === miId));
+    }
+  } catch (err) {
+    console.error(err);
+    state.cumplimientoDocs = [];
+    state.cumplimientoFirmas = [];
+  }
+  if (pendientes && !pendientes.length && $("view-politicas").classList.contains("hidden")) return true;
+  $("topbar").classList.add("hidden");
+  showView("view-politicas");
+  const listas = !!pendientes;
+  $("politicasEstado").textContent = !listas
+    ? "No se pudieron cargar las políticas. Compruebe su conexión y reintente."
+    : pendientes.length
+      ? `Falta firmar ${pendientes.length} de ${state.cumplimientoDocs.length} documento(s).`
+      : "Todas las políticas están firmadas. Ya puede continuar.";
+  $("politicasReintentar").classList.toggle("hidden", listas);
+  $("politicasContinuar").disabled = !listas || pendientes.length > 0;
+  if (listas) renderCumplimientoLista("politicasLista");
+  else $("politicasLista").replaceChildren();
+  return false;
+}
+
+$("politicasContinuar").addEventListener("click", () => {
+  $("view-politicas").classList.add("hidden");
+  if (state.session) onAuthed(state.session);
+});
+$("politicasReintentar").addEventListener("click", () => { void politicasAlDia(); });
+$("politicasSalir").addEventListener("click", () => { void supabase.auth.signOut(); });
+
+// ---------- Inicio sencillo en celular (usuarios) ----------
+// El mismo inicio que la app Android: dos accesos grandes en lugar de pestañas.
+function usaInicioSencillo() {
+  return !EN_APP_ANDROID && state.role !== "admin" && window.matchMedia("(max-width: 700px)").matches;
+}
+
+$("btnInicioSencillo").addEventListener("click", () => showView("view-inicio"));
+$("inicioPendientes").addEventListener("click", () => { showView("view-dashboard"); loadNotas(); });
+$("inicioSubir").addEventListener("click", () => abrirSubirExpediente());
+$("subirBuscar").addEventListener("input", () => renderSubirExpediente());
+
+async function abrirSubirExpediente() {
+  showView("view-subir");
+  $("subirEstado").textContent = "Consultando sus expedientes…";
+  renderSubirExpediente();
+  const ok = await loadNotas();
+  $("subirEstado").textContent = ok === false ? "No se pudieron actualizar los expedientes. Compruebe su conexión." : "";
+  renderSubirExpediente();
+}
+
+function estadoSubida(n) {
+  if (n.archivo_orden_notificacion_path && n.orden_notificada_at) return ["pill-yes", "Expediente subido"];
+  if (n.archivo_leve_generada_at) return ["pill-yes", "Archivado sin sanción"];
+  return ["pill-warning", "Pendiente de subir"];
+}
+
+function renderSubirExpediente() {
+  const lista = $("subirLista");
+  const q = $("subirBuscar").value.trim().toLocaleLowerCase("es");
+  const filas = (state.notas || [])
+    .filter((n) => !q || `${nombreInvestigadoVisible(n, true)} ${n.numero_nota_falta || ""}`.toLocaleLowerCase("es").includes(q))
+    .sort((a, b) => (estadoSubida(a)[0] === "pill-warning" ? 0 : 1) - (estadoSubida(b)[0] === "pill-warning" ? 0 : 1));
+  lista.innerHTML = filas.map((n) => {
+    const [clase, texto] = estadoSubida(n);
+    return `<article class="detail-card subir-item">
+      <div>
+        <h3>${escapeHtml(nombreInvestigadoVisible(n, true))}</h3>
+        <p class="muted small">Nota ${escapeHtml(n.numero_nota_falta || "sin número")} · Falta: ${escapeHtml(formatDate(n.fecha_falta))}</p>
+        <span class="pill ${clase}">${texto}</span>
+      </div>
+      <button type="button" class="btn-secondary" data-abrir-nota="${escapeHtml(n.id)}">Abrir</button>
+    </article>`;
+  }).join("") || `<p class="muted">${state.notas?.length ? "No hay coincidencias." : "No hay expedientes disponibles para su perfil."}</p>`;
+  lista.querySelectorAll("[data-abrir-nota]").forEach((b) => b.addEventListener("click", async () => {
+    state.origenDetalle = "view-subir";
+    b.disabled = true;
+    try { await openNotaDetail(b.dataset.abrirNota); } finally { b.disabled = false; }
+  }));
+}
+
+// ---------- Token Digital desde la web (iPhone y navegadores) ----------
+// Usa una app de códigos estándar (Google/Microsoft Authenticator, Contraseñas de iPhone).
+// Es el mismo segundo factor de Supabase que verifica la pantalla «Código del token».
+async function tokenVerificado() {
+  const { data, error } = await supabase.auth.mfa.listFactors();
+  if (error) return null;
+  return (data?.all || []).some((f) => f.factor_type === "totp" && f.status === "verified");
+}
+
+async function actualizarAvisoToken() {
+  const falta = !EN_APP_ANDROID && (await tokenVerificado()) === false;
+  $("btnActivarToken").classList.toggle("hidden", !falta);
+  $("inicioAvisoToken").classList.toggle("hidden", !falta);
+}
+
+async function quitarTokensSinVerificar() {
+  const { data } = await supabase.auth.mfa.listFactors();
+  for (const f of data?.all || []) {
+    if (f.factor_type === "totp" && f.status !== "verified") await supabase.auth.mfa.unenroll({ factorId: f.id });
+  }
+}
+
+async function abrirActivarToken() {
+  $("tokenPasoQr").classList.remove("hidden");
+  $("tokenPasoCodigos").classList.add("hidden");
+  $("tokenActivarError").classList.add("hidden");
+  $("tokenNuevoCodigo").value = "";
+  $("tokenQrImagen").removeAttribute("src");
+  $("tokenSecreto").textContent = "";
+  $("modalToken").classList.remove("hidden");
+  try {
+    await quitarTokensSinVerificar();
+    const { data, error } = await supabase.auth.mfa.enroll({ factorType: "totp", friendlyName: `Web ${new Date().toISOString()}` });
+    if (error) throw error;
+    state.tokenNuevoId = data.id;
+    const qr = String(data.totp.qr_code || "");
+    const svg = qr.startsWith("data:") ? qr.slice(qr.indexOf(",") + 1) : qr;
+    $("tokenQrImagen").src = svg.trim().startsWith("<")
+      ? "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg)
+      : qr;
+    $("tokenSecreto").textContent = data.totp.secret;
+    $("tokenNuevoCodigo").focus();
+  } catch (err) {
+    $("tokenActivarError").textContent = "No se pudo preparar el token: " + (err.message || err);
+    $("tokenActivarError").classList.remove("hidden");
+  }
+}
+
+async function cerrarActivarToken() {
+  $("modalToken").classList.add("hidden");
+  // Un token preparado y no confirmado no debe quedar a medias en la cuenta.
+  if (state.tokenNuevoId) {
+    state.tokenNuevoId = null;
+    try { await quitarTokensSinVerificar(); } catch (err) { console.warn(err); }
+  }
+  void actualizarAvisoToken();
+}
+
+async function copiarTexto(texto) {
+  try { await navigator.clipboard.writeText(texto); toast("Copiado.", "ok"); }
+  catch { toast("No se pudo copiar. Anótelo a mano."); }
+}
+
+$("btnActivarToken").addEventListener("click", abrirActivarToken);
+$("inicioActivarToken").addEventListener("click", abrirActivarToken);
+$("btnCerrarModalToken").addEventListener("click", cerrarActivarToken);
+$("btnCancelarToken").addEventListener("click", cerrarActivarToken);
+$("btnTerminarToken").addEventListener("click", cerrarActivarToken);
+$("tokenCopiarSecreto").addEventListener("click", () => copiarTexto($("tokenSecreto").textContent));
+$("tokenCopiarCodigos").addEventListener("click", () =>
+  copiarTexto([...$("tokenCodigosLista").children].map((li) => li.textContent).join("\n")));
+
+$("btnConfirmarToken").addEventListener("click", async (e) => {
+  const errEl = $("tokenActivarError");
+  errEl.classList.add("hidden");
+  const code = $("tokenNuevoCodigo").value.trim();
+  if (!state.tokenNuevoId) return;
+  if (!/^\d{6}$/.test(code)) {
+    errEl.textContent = "El código son 6 dígitos.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  const btn = e.currentTarget;
+  ocuparBoton(btn, true, "Activando...");
+  try {
+    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: state.tokenNuevoId, code });
+    if (error) {
+      errEl.textContent = "Código incorrecto o vencido. Escriba el que muestra la app en este momento.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+    state.tokenNuevoId = null;
+    $("tokenPasoQr").classList.add("hidden");
+    $("tokenPasoCodigos").classList.remove("hidden");
+    $("tokenCodigosLista").replaceChildren();
+    $("tokenCodigosError").classList.add("hidden");
+    const { data: codigos, error: errCodigos } = await supabase.rpc("generar_codigos_recuperacion");
+    if (errCodigos || !Array.isArray(codigos)) {
+      $("tokenCodigosError").textContent = "El token quedó activo, pero no se pudieron generar los códigos de recuperación. Pida ayuda al administrador.";
+      $("tokenCodigosError").classList.remove("hidden");
+    } else {
+      for (const c of codigos) { const li = document.createElement("li"); li.textContent = c; $("tokenCodigosLista").appendChild(li); }
+    }
+  } catch (err) {
+    errEl.textContent = "Error: " + (err.message || err);
+    errEl.classList.remove("hidden");
+  } finally {
+    ocuparBoton(btn, false);
+  }
+});
+
+// Recuperación: un código de un solo uso quita el token perdido (el servidor
+// limita los intentos) y la persona vuelve a activar uno nuevo.
+$("tokenRecuperacionCodigo").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); $("tokenRecuperacionUsar").click(); }
+});
+$("tokenPerdido").addEventListener("click", () => {
+  $("tokenRecuperacion").classList.toggle("hidden");
+  $("tokenRecuperacionCodigo").focus();
+});
+$("tokenRecuperacionUsar").addEventListener("click", async (e) => {
+  const errEl = $("tokenError");
+  errEl.classList.add("hidden");
+  const codigo = $("tokenRecuperacionCodigo").value.trim();
+  if (!codigo) return;
+  const btn = e.currentTarget;
+  ocuparBoton(btn, true, "Verificando...");
+  try {
+    const { data, error } = await supabase.rpc("usar_codigo_recuperacion", { p_codigo: codigo });
+    if (error) throw error;
+    if (data !== "ok") {
+      errEl.textContent = data === "bloqueado"
+        ? "Demasiados intentos. Espere una hora o pida ayuda al administrador."
+        : "Código de recuperación incorrecto o ya usado.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+    $("tokenRecuperacionCodigo").value = "";
+    $("tokenRecuperacion").classList.add("hidden");
+    toast("Se quitó el token anterior. Active uno nuevo desde «Activar token».", "ok", 9000);
+    const { data: renovada } = await supabase.auth.refreshSession();
+    if (renovada?.session) await onAuthed(renovada.session);
+  } catch (err) {
+    errEl.textContent = "Error: " + (err.message || err);
+    errEl.classList.remove("hidden");
+  } finally {
+    ocuparBoton(btn, false);
   }
 });
 
@@ -5091,6 +5417,7 @@ $("asistenteForm")?.addEventListener("submit", async (e) => {
 
 // ---------- Panel de métricas ----------
 let chartsPanel = {};
+let revisionPanel = 0;
 
 // Mismas etapas que ya se muestran en el detalle de cada nota (Acta de No
 // Descargo / Orden de Sanción), resumidas en una sola categoría por caso
@@ -5194,7 +5521,30 @@ function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
   let titulo = "Complete los datos de la falta";
   let detalle = "Registre el código de infracción para poder continuar con el trámite.";
   let tono = "is-pending";
-  if (!nota.codigo_infraccion) {
+  if (nota.archivo_leve_generada_at) {
+    icono = "check"; titulo = "Trámite concluido (archivado)"; tono = "is-done";
+    detalle = "El caso se archivó sin sanción: la conducta no se adecuaba a ningún código del Anexo I.";
+  } else if (orden && notif) {
+    icono = "check"; tono = "is-done";
+    titulo = "Expediente subido";
+    detalle = "Consulte el estado de recepción física. Subir el PDF no confirma que el administrador recibió el documento físico.";
+    if (isAdmin) {
+      tono = "is-ready";
+      if (esperaOficio(nota, state.remisiones || [])) {
+        titulo = "Genere el oficio de remisión";
+        detalle = "El expediente firmado ya está subido. Genere el oficio y adjúntelo en Recepción; la Hoja de Trámite puede incorporarse cuando sea devuelta.";
+      } else if (esperaHojaDeTramite(nota, state.remisiones || [])) {
+        titulo = "Adjunte la Hoja de Trámite";
+        detalle = "El oficio ya está adjunto. Registre la Hoja de Trámite cuando sea devuelta recepcionada.";
+      } else {
+        titulo = "Revise recepción y archivo";
+        detalle = "Compruebe los documentos de cierre y confirme la recepción física solo después de verificar el original.";
+      }
+    }
+  } else if (orden) {
+    icono = "firmar"; titulo = "Cargue el expediente firmado";
+    detalle = "Suba el legajo completo firmado en un PDF y confirme la fecha de notificación.";
+  } else if (!nota.codigo_infraccion) {
     // valores por defecto
   } else if (!leve) {
     const codigoNormalizado = (nota.codigo_infraccion || "").trim().toUpperCase().replace(/\s+/g, "");
@@ -5207,9 +5557,6 @@ function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
       icono = "info"; titulo = "Falta grave o muy grave";
       detalle = "Todavía no hay texto legal verificado en la app para este código, así que el Informe Administrativo no está disponible aquí. Continúe el trámite según el procedimiento que corresponde.";
     }
-  } else if (nota.archivo_leve_generada_at) {
-    icono = "check"; titulo = "Trámite concluido (archivado)"; tono = "is-done";
-    detalle = "El caso se archivó sin sanción: la conducta no se adecuaba a ningún código del Anexo I.";
   } else if (!nota.fecha_reincorporacion) {
     titulo = "Registre la reincorporación";
     detalle = "Complete fecha, hora y N.º de nota de reincorporación para habilitar la Imputación.";
@@ -5228,15 +5575,6 @@ function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
   } else if (listoDescargo && !orden) {
     icono = "descargar"; titulo = "Genere la Orden de Sanción"; tono = "is-ready";
     detalle = "La evaluación está lista. Revise los datos y descargue la Orden.";
-  } else if (orden && !notif) {
-    icono = "firmar"; titulo = "Cargue el expediente firmado";
-    detalle = "Suba el legajo completo firmado en un PDF (la IA revisa que esté completo) y confirme la fecha de notificación.";
-  } else if (orden && notif && isAdmin) {
-    icono = "check"; titulo = "Registre el expediente cerrado"; tono = "is-ready";
-    detalle = "En Recepción, adjunte el expediente firmado, la HT y el Oficio para archivarlo y respaldarlo en Drive.";
-  } else if (orden && notif) {
-    icono = "check"; titulo = "Trámite concluido"; tono = "is-done";
-    detalle = "La Orden fue notificada. El cierre administrativo lo realiza el administrador en Recepción.";
   }
   return `<aside class="next-action ${tono}" aria-label="Siguiente acción recomendada">
     <span class="next-action-icon">${svgIco(icono)}</span>
@@ -5518,6 +5856,7 @@ function cargarChart() {
 }
 
 async function renderPanel() {
+  const revision = ++revisionPanel;
   const notas = state.notas;
   $("panelEmpty").classList.toggle("hidden", notas.length > 0);
   $("panelContenido").classList.toggle("hidden", notas.length === 0);
@@ -5528,6 +5867,7 @@ async function renderPanel() {
   let Chart;
   try {
     Chart = await cargarChart();
+    if (revision !== revisionPanel) return;
   } catch (err) {
     console.error(err); toast("No se pudieron cargar los gráficos. Revise la conexión."); return;
   }
@@ -5730,8 +6070,15 @@ function formatearHorasFalto(nota) {
 // ---------------------------------------------------------------------------
 
 let expedientesLoteFilas = [];
+let expedientesLoteOcupado = false;
+function ocuparExpedientesLote(ocupado) {
+  expedientesLoteOcupado = ocupado;
+  for (const id of ["xlArchivo", "btnGuardarExpLote", "btnCerrarModalExpLote", "btnCancelarExpLote", "btnExpedientesLote"])
+    if ($(id)) $(id).disabled = ocupado;
+}
 
 $("btnExpedientesLote")?.addEventListener("click", () => {
+  if (expedientesLoteOcupado) return;
   $("xlArchivo").value = "";
   $("xlStatus").classList.add("hidden");
   $("xlError").classList.add("hidden");
@@ -5741,7 +6088,9 @@ $("btnExpedientesLote")?.addEventListener("click", () => {
 });
 $("btnCerrarModalExpLote")?.addEventListener("click", cerrarExpedientesLote);
 $("btnCancelarExpLote")?.addEventListener("click", cerrarExpedientesLote);
-function cerrarExpedientesLote() { $("modalExpedientesLote").classList.add("hidden"); }
+function cerrarExpedientesLote() {
+  if (!expedientesLoteOcupado) $("modalExpedientesLote").classList.add("hidden");
+}
 
 /**
  * Casos que ya tienen un expediente guardado: al confirmar se reemplazaría.
@@ -5753,6 +6102,7 @@ function notasQueYaTienenExpediente() {
 }
 
 $("xlArchivo")?.addEventListener("change", async (e) => {
+  if (expedientesLoteOcupado) return;
   const archivos = [...e.target.files].filter((f) => f.type === "application/pdf");
   const statusEl = $("xlStatus");
   const errEl = $("xlError");
@@ -5760,8 +6110,11 @@ $("xlArchivo")?.addEventListener("change", async (e) => {
   expedientesLoteFilas = [];
   renderExpedientesLote();
   if (!archivos.length) { statusEl.classList.add("hidden"); return; }
+  ocuparExpedientesLote(true);
   statusEl.classList.remove("hidden");
   try {
+    // Antes del OCR, obtener los casos actuales (incluidos los que llegaron de la APK).
+    if (!await loadEfectivos() || !await loadNotas()) throw new Error("No se pudieron actualizar los casos. Vuelva a intentar.");
     const leidos = [];
     for (const file of archivos) {
       statusEl.textContent = `${file.name}: leyendo...`;
@@ -5786,7 +6139,7 @@ $("xlArchivo")?.addEventListener("change", async (e) => {
     statusEl.classList.add("hidden");
     errEl.textContent = "No se pudieron leer los archivos: " + (err.message || err);
     errEl.classList.remove("hidden");
-  }
+  } finally { ocuparExpedientesLote(false); }
 });
 
 /**
@@ -5892,6 +6245,7 @@ function renderExpedientesLote() {
 }
 
 $("btnGuardarExpLote")?.addEventListener("click", async (e) => {
+  if (expedientesLoteOcupado) return;
   const btn = e.currentTarget;
   const statusEl = $("xlStatus");
   const errEl = $("xlError");
@@ -5904,6 +6258,7 @@ $("btnGuardarExpLote")?.addEventListener("click", async (e) => {
     return;
   }
 
+  ocuparExpedientesLote(true);
   ocuparBoton(btn, true, "Archivando...");
   statusEl.classList.remove("hidden");
   const fallos = [];
@@ -5937,22 +6292,27 @@ $("btnGuardarExpLote")?.addEventListener("click", async (e) => {
           await supabase.storage.from("notas").remove([anterior]);
         }
         guardados++;
+        // Un reintento de un lote parcialmente fallido no vuelve a subir los éxitos.
+        fila.guardada = true; fila.confirmada = false;
       } catch (err) {
         console.error(`No se pudo archivar el expediente de ${fila.nombreSugerido}:`, err);
         fallos.push(`${fila.archivo} (páginas ${fila.desde}–${fila.hasta}): ${err.message || err}`);
       }
     }
 
+    expedientesLoteFilas = expedientesLoteFilas.filter((f) => !f.guardada);
+    renderExpedientesLote();
     await loadNotas();
     if (fallos.length) {
       statusEl.textContent = `Se archivaron ${guardados} de ${aGuardar.length}.`;
       errEl.innerHTML = `No se pudieron archivar ${fallos.length}:<br>${fallos.map(escapeHtml).join("<br>")}`;
       errEl.classList.remove("hidden");
     } else {
-      cerrarExpedientesLote();
+      $("modalExpedientesLote").classList.add("hidden");
       toast(`Se archivaron ${guardados} expediente(s).`);
     }
   } finally {
+    ocuparExpedientesLote(false);
     ocuparBoton(btn, false);
   }
 });
@@ -5969,9 +6329,10 @@ $("btnGuardarExpLote")?.addEventListener("click", async (e) => {
 
 const MEMORIA_OFICIO = "faltos.oficio.firmas";
 let notaDelOficio = null;
+let generandoOficio = false;
 
 function recordadoDelOficio() {
-  try { return JSON.parse(localStorage.getItem(MEMORIA_OFICIO) || "{}"); } catch { return {}; }
+  return leerFirmantesOficio();
 }
 function recordarDelOficio(datos) {
   try { localStorage.setItem(MEMORIA_OFICIO, JSON.stringify({ ...datos, confirmado: hoyLima() })); } catch { /* sin memoria, se escribe cada vez */ }
@@ -5991,6 +6352,7 @@ function quienRedacta() {
 }
 
 function abrirOficio(nota) {
+  if (generandoOficio) return;
   notaDelOficio = nota;
   const previo = recordadoDelOficio();
   $("ofCaso").textContent = `Expediente de ${nombreInvestigadoVisible(nota, true)} · ${nota.codigo_infraccion || "sin código"}`;
@@ -6002,6 +6364,7 @@ function abrirOficio(nota) {
   $("ofComisarioNombre").value = previo.comisarioNombre || "";
   $("ofComisarioOa").value = previo.comisarioOa || "";
   $("ofComisarioCargo").value = previo.comisarioCargo || "COMISARIO DE VENTANILLA";
+  $("ofConfirmarFirmantes").checked = false;
   $("ofJefeDesde").textContent = previo.confirmado
     ? `Confirmado por última vez el ${formatDate(previo.confirmado)}. Si cambiaron, corríjalo aquí.`
     : "Todavía no se ha confirmado ninguno: escríbalos y quedarán recordados.";
@@ -6038,6 +6401,7 @@ function refrescarResumenOficio() {
   if (!notaDelOficio) return;
   const datos = datosDelOficioEnPantalla();
   const falta = faltaParaElOficio(datos);
+  if (!$("ofConfirmarFirmantes").checked) falta.push("confirmar los firmantes actuales");
   $("ofResumen").textContent = falta.length
     ? `Falta ${falta.join(", ")}.`
     : `Se remite: orden de sanción con ${datos.sancion}, ${datos.documentos}.`;
@@ -6045,27 +6409,43 @@ function refrescarResumenOficio() {
 }
 
 ["ofNumero", "ofJefeGrado", "ofJefeNombre", "ofJefeCargo", "ofComisarioGrado", "ofComisarioNombre", "ofComisarioOa", "ofComisarioCargo"]
-  .forEach((id) => $(id)?.addEventListener("input", refrescarResumenOficio));
+  .forEach((id) => $(id)?.addEventListener("input", () => {
+    if (id !== "ofNumero") $("ofConfirmarFirmantes").checked = false;
+    refrescarResumenOficio();
+  }));
+$("ofConfirmarFirmantes")?.addEventListener("change", refrescarResumenOficio);
 
 $("btnCerrarModalOficio")?.addEventListener("click", cerrarOficio);
 $("btnCancelarOficio")?.addEventListener("click", cerrarOficio);
-function cerrarOficio() { $("modalOficio").classList.add("hidden"); notaDelOficio = null; }
+function cerrarOficio() {
+  if (generandoOficio) return;
+  $("modalOficio").classList.add("hidden"); notaDelOficio = null;
+}
 
 $("btnGenerarOficio")?.addEventListener("click", async (e) => {
   if (!notaDelOficio) return;
   const btn = e.currentTarget;
+  if (btn.disabled || generandoOficio) return;
   const errEl = $("ofError");
+  const nota = notaDelOficio;
+  const datosIniciales = datosDelOficioEnPantalla();
   errEl.classList.add("hidden");
+  generandoOficio = true;
+  const controles = $("modalOficio").querySelectorAll("input, #btnCancelarOficio, #btnCerrarModalOficio");
+  controles.forEach(el => { el.disabled = true; });
   ocuparBoton(btn, true, "Generando...");
   try {
+    const falta = faltaParaElOficio(datosIniciales);
+    if (!$("ofConfirmarFirmantes").checked) falta.push("confirmar los firmantes actuales");
+    if (falta.length) throw new Error(`Falta ${falta.join(", ")}.`);
     // Las piezas se leen del legajo ya registrado, para anunciar lo que el
     // expediente trae de verdad y no una lista fija.
-    const piezas = await piezasDelLegajoFirmado(notaDelOficio);
-    const datos = { ...datosDelOficioEnPantalla(), documentos: documentosRemitidos(piezas, notaDelOficio.codigo_infraccion) };
+    const piezas = await piezasDelLegajoFirmado(nota);
+    const datos = { ...datosIniciales, documentos: documentosRemitidos(piezas, nota.codigo_infraccion) };
     const blob = await renderizarOficioRemisionDocx(datos);
-    const nombreArchivo = nombreArchivoDocumento("OFICIO REMISION", notaDelOficio);
+    const nombreArchivo = nombreArchivoDocumento("OFICIO REMISION", nota);
     saveAs(blob, nombreArchivo);
-    registrarVersionDocumento(notaDelOficio.id, "oficio_remision", blob, nombreArchivo);
+    registrarVersionDocumento(nota.id, "oficio_remision", blob, nombreArchivo);
     recordarDelOficio({
       jefeGrado: $("ofJefeGrado").value.trim(),
       jefeNombre: $("ofJefeNombre").value.trim(),
@@ -6075,6 +6455,7 @@ $("btnGenerarOficio")?.addEventListener("click", async (e) => {
       comisarioOa: $("ofComisarioOa").value.trim(),
       comisarioCargo: $("ofComisarioCargo").value.trim(),
     });
+    generandoOficio = false;
     cerrarOficio();
     toast("Oficio generado. Adjúntelo en Recepción junto con la Hoja de Trámite cuando la reciba.");
   } catch (err) {
@@ -6082,7 +6463,10 @@ $("btnGenerarOficio")?.addEventListener("click", async (e) => {
     errEl.textContent = "No se pudo generar el oficio: " + (err.message || err);
     errEl.classList.remove("hidden");
   } finally {
+    generandoOficio = false;
+    controles.forEach(el => { el.disabled = false; });
     ocuparBoton(btn, false);
+    refrescarResumenOficio();
   }
 });
 

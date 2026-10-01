@@ -1,286 +1,168 @@
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import "jsr:@supabase/functions-js@2.117.2/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2.117.2";
+import { avisoAdminPorRecibir, avisoDeNota, fechaLima, leerPaginas, tokenNoRegistrado } from "./logica.mjs";
 
-// Avisos nativos de la aplicación Android (FCM HTTP v1).
-//
-// Qué viaja al teléfono: únicamente `user_id` y `tipo`. Nunca nombres, CIP, códigos de
-// infracción, sanciones, fechas ni texto libre: el texto lo arma el propio teléfono a
-// partir del tipo, y descarta el mensaje si no es para la cuenta que tiene abierta.
-//
-// Sobre los plazos: el cálculo de días hábiles de aquí solo salta sábados y domingos, no
-// conoce feriados. Por eso jamás se anuncia un plazo como vencido; el único aviso es
-// «revise el plazo», que es una invitación a comprobarlo en el expediente.
-
+// Datos mínimos: usuario, tipo y un identificador opaco para evitar duplicados.
+// No envía nombres, CIP, documentos ni el texto de la sanción.
 const URL_SUPABASE = Deno.env.get("SUPABASE_URL") || "";
 const SERVICIO = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const CUENTA_FCM = Deno.env.get("FCM_CUENTA_SERVICIO") || "";
 const SECRETO_CRON = Deno.env.get("AVISOS_CRON_SECRET") || "";
-
-const cors = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-avisos-cron-secret",
-};
-const json = (cuerpo: unknown, status = 200) =>
-  new Response(JSON.stringify(cuerpo), { status, headers: { ...cors, "Content-Type": "application/json" } });
-
-// ---------- Fechas (zona de Lima) ----------
-
-const hoyLima = () => {
-  const partes = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(new Date());
-  const v = (t: string) => partes.find((p) => p.type === t)?.value || "";
-  return `${v("year")}-${v("month")}-${v("day")}`;
-};
-
-/** Solo salta fin de semana: sirve para avisar, nunca para declarar un plazo vencido. */
-const siguienteDiaHabil = (fecha: string) => {
-  const d = new Date(`${fecha}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
-  while ([0, 6].includes(d.getUTCDay())) d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
-};
-
-const diasDesde = (instante: string, hoy: string) =>
-  Math.floor((Date.parse(`${hoy}T12:00:00Z`) - Date.parse(instante)) / 86400000);
-
-// ---------- Credencial de Google para FCM ----------
-
+const json = (cuerpo: unknown, status = 200) => new Response(JSON.stringify(cuerpo), {
+  status, headers: {"Content-Type":"application/json"},
+});
+type Fila = Record<string, string | null>;
+type Cuenta = {client_email:string; private_key:string; project_id:string};
 const base64url = (datos: ArrayBuffer | string) => {
   const bytes = typeof datos === "string" ? new TextEncoder().encode(datos) : new Uint8Array(datos);
   let binario = "";
   for (const b of bytes) binario += String.fromCharCode(b);
-  return btoa(binario).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binario).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
 };
-
-const clavePrivada = async (pem: string) => {
-  const cuerpo = pem.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
-  const binario = atob(cuerpo);
-  const bytes = new Uint8Array(binario.length);
-  for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
-  return await crypto.subtle.importKey("pkcs8", bytes.buffer,
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
-};
-
-/** Token de acceso de la cuenta de servicio, con el permiso mínimo de mensajería. */
-async function tokenDeAcceso(cuenta: { client_email: string; private_key: string }) {
-  const ahora = Math.floor(Date.now() / 1000);
-  const cabecera = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const cuerpo = base64url(JSON.stringify({
-    iss: cuenta.client_email,
-    scope: "https://www.googleapis.com/auth/firebase.messaging",
-    aud: "https://oauth2.googleapis.com/token",
-    iat: ahora,
-    exp: ahora + 3600,
-  }));
-  const firma = await crypto.subtle.sign("RSASSA-PKCS1-v1_5",
-    await clavePrivada(cuenta.private_key), new TextEncoder().encode(`${cabecera}.${cuerpo}`));
-  const respuesta = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion: `${cabecera}.${cuerpo}.${base64url(firma)}`,
-    }),
+async function tokenDeAcceso(cuenta: Cuenta) {
+  const pem = cuenta.private_key.replace(/-----[^-]+-----/g,"").replace(/\s+/g,"");
+  const bytes = Uint8Array.from(atob(pem),c=>c.charCodeAt(0));
+  const clave = await crypto.subtle.importKey("pkcs8", bytes.buffer,
+    {name:"RSASSA-PKCS1-v1_5",hash:"SHA-256"},false,["sign"]);
+  const ahora = Math.floor(Date.now()/1000);
+  const cabecera = base64url(JSON.stringify({alg:"RS256",typ:"JWT"}));
+  const cuerpo = base64url(JSON.stringify({iss:cuenta.client_email,
+    scope:"https://www.googleapis.com/auth/firebase.messaging",aud:"https://oauth2.googleapis.com/token",
+    iat:ahora,exp:ahora+3600}));
+  const firma = await crypto.subtle.sign("RSASSA-PKCS1-v1_5",clave,new TextEncoder().encode(`${cabecera}.${cuerpo}`));
+  const respuesta = await fetch("https://oauth2.googleapis.com/token",{
+    method:"POST",signal:AbortSignal.timeout(20000),
+    headers:{"Content-Type":"application/x-www-form-urlencoded"},
+    body:new URLSearchParams({grant_type:"urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion:`${cabecera}.${cuerpo}.${base64url(firma)}`}),
   });
-  if (!respuesta.ok) throw new Error(`No se pudo obtener el token de FCM (${respuesta.status})`);
+  if (!respuesta.ok) throw new Error("Credencial de mensajería rechazada");
   const datos = await respuesta.json();
+  if (!datos.access_token) throw new Error("Sin credencial de mensajería");
   return datos.access_token as string;
 }
-
-// ---------- Qué corresponde avisar de cada expediente ----------
-
-type Nota = Record<string, string | null>;
-
-/** Devuelve el tipo que entiende el teléfono y una clave de estado para no repetir. */
-function avisoDeNota(nota: Nota, hoy: string): { tipo: string; clave: string } | null {
-  if (!nota.oficial_constato_cip) return null;
-  if (nota.archivo_leve_generada_at) return null; // Expediente cerrado.
-
-  if (nota.created_at && diasDesde(nota.created_at, hoy) <= 1
-      && !nota.imputacion_generada_at && !nota.fecha_descargo) {
-    return { tipo: "caso_nuevo", clave: nota.created_at.slice(0, 10) };
-  }
-  if (nota.imputacion_generada_at && !nota.fecha_descargo && !nota.orden_sancion_generada_at) {
-    const limite = siguienteDiaHabil(nota.imputacion_generada_at.slice(0, 10));
-    // Se avisa una sola vez por plazo: la clave es la fecha límite, no el día de hoy.
-    if (hoy >= limite || siguienteDiaHabil(hoy) === limite) {
-      return { tipo: "plazo_descargo", clave: limite };
-    }
-  }
-  if (nota.fecha_descargo && !nota.orden_sancion_generada_at) {
-    return { tipo: "documento_recibido", clave: nota.fecha_descargo.slice(0, 10) };
-  }
-  if ((nota.orden_sancion_generada_at && !nota.orden_notificada_at)
-      || (nota.fecha_reincorporacion && !nota.imputacion_generada_at)) {
-    return { tipo: "pasos_pendientes", clave: hoy };
-  }
-  return null;
+async function huella(valor:string) {
+  const digest = await crypto.subtle.digest("SHA-256",new TextEncoder().encode(valor));
+  return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,"0")).join("");
+}
+function enviar(cuenta:Cuenta, acceso:string, token:string, usuario:string, tipo:string, id:string) {
+  return fetch(`https://fcm.googleapis.com/v1/projects/${cuenta.project_id}/messages:send`,{
+    method:"POST",signal:AbortSignal.timeout(20000),
+    headers:{Authorization:`Bearer ${acceso}`,"Content-Type":"application/json"},
+    body:JSON.stringify({message:{token,data:{user_id:usuario,tipo,aviso_id:id},
+      android:{priority:"HIGH",ttl:"86400s"}}}),
+  });
 }
 
-// ---------- Envío ----------
-
-Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
-  if (!URL_SUPABASE || !SERVICIO || !SECRETO_CRON) {
-    return json({ error: "Faltan secretos de Supabase para los avisos." }, 503);
-  }
-  if (!CUENTA_FCM) {
-    return json({ error: "Falta el secreto FCM_CUENTA_SERVICIO con la cuenta de servicio." }, 503);
-  }
-  if (req.headers.get("x-avisos-cron-secret") !== SECRETO_CRON) {
-    return json({ error: "No autorizado." }, 403);
-  }
-
+Deno.serve(async(req:Request)=>{
+  if (req.method !== "POST") return json({error:"Use POST."},405);
+  if (!SECRETO_CRON || req.headers.get("x-avisos-cron-secret") !== SECRETO_CRON)
+    return json({error:"No autorizado."},403);
+  if (!URL_SUPABASE || !SERVICIO || !CUENTA_FCM) return json({error:"Configuración incompleta."},503);
   try {
-    const cuenta = JSON.parse(CUENTA_FCM) as
-      { client_email: string; private_key: string; project_id: string };
-    const admin = createClient(URL_SUPABASE, SERVICIO);
-    const hoy = hoyLima();
-
-    // Comprobación: solo verifica que la credencial de Google sirve. No envía nada.
-    // Existe porque el envío pide la credencial únicamente cuando hay algo que mandar,
-    // y hace falta poder validar la puesta en marcha sin molestar a ningún teléfono.
-    let cuerpoPeticion: Record<string, unknown> = {};
-    try { cuerpoPeticion = await req.json(); } catch { /* Sin cuerpo: envío normal. */ }
-    if (cuerpoPeticion?.comprobar === true) {
-      const token = await tokenDeAcceso(cuenta);
-      const { count } = await admin.from("dispositivos_android")
-        .select("token", { count: "exact", head: true });
-      return json({
-        credencial: token ? "ok" : "sin token",
-        proyectoFcm: cuenta.project_id,
-        dispositivosRegistrados: count ?? 0,
-        enviado: false,
-      });
+    const cuenta = JSON.parse(CUENTA_FCM) as Cuenta;
+    const admin = createClient(URL_SUPABASE,SERVICIO,{
+      auth:{persistSession:false,autoRefreshToken:false},
+      global:{fetch:(input,init)=>fetch(input,{...init,signal:AbortSignal.timeout(20000)})},
+    });
+    let cuerpo:Record<string,unknown> = {};
+    const texto = await req.text();
+    if (texto) {
+      try { cuerpo = JSON.parse(texto); } catch { return json({error:"JSON inválido."},400); }
+      if (!cuerpo || typeof cuerpo !== "object" || Array.isArray(cuerpo)) return json({error:"Objeto requerido."},400);
     }
-
-    // Prueba de entrega: manda un aviso al ÚLTIMO teléfono registrado y a ninguno más.
-    // Así se comprueba la cadena completa sin molestar al resto y sin tocar el registro
-    // de avisos enviados, que es lo que decide los envíos de verdad.
-    if (cuerpoPeticion?.probarEnvio === true) {
-      const { data: ultimo } = await admin.from("dispositivos_android")
-        .select("token, user_id").order("actualizado_at", { ascending: false })
-        .limit(1).maybeSingle();
-      if (!ultimo) return json({ error: "Todavía no hay ningún teléfono registrado." }, 409);
-      const acceso = await tokenDeAcceso(cuenta);
-      const respuesta = await fetch(
-        `https://fcm.googleapis.com/v1/projects/${cuenta.project_id}/messages:send`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${acceso}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: {
-              token: String(ultimo.token),
-              data: { user_id: String(ultimo.user_id), tipo: "caso_nuevo" },
-              android: { priority: "HIGH" },
-            },
-          }),
-        },
-      );
-      return json({
-        prueba: respuesta.ok ? "enviado" : "rechazado por FCM",
-        estado: respuesta.status,
-        soloAlUltimoTelefonoRegistrado: true,
-      });
+    if (cuerpo.comprobar === true) {
+      await tokenDeAcceso(cuenta);
+      const {count,error} = await admin.from("dispositivos_android").select("token",{count:"exact",head:true});
+      if (error) throw error;
+      return json({credencial:"ok",proyectoFcm:cuenta.project_id,dispositivosRegistrados:count,enviado:false});
     }
-
-    const { data: notas, error: errorNotas } = await admin
-      .from("notas_informativas")
-      .select("id, oficial_constato_cip, created_at, fecha_reincorporacion, imputacion_generada_at,"
-        + " fecha_descargo, orden_sancion_generada_at, orden_notificada_at, archivo_leve_generada_at");
-    if (errorNotas) throw errorNotas;
-
-    // Solo cuentas aprobadas reciben avisos; el CIP es lo que enlaza expediente y persona.
-    const { data: perfiles, error: errorPerfiles } = await admin
-      .from("profiles").select("id, cip").eq("estado", "aprobado").not("cip", "is", null);
-    if (errorPerfiles) throw errorPerfiles;
-    const usuarioPorCip = new Map<string, string>();
-    for (const p of perfiles || []) usuarioPorCip.set(String(p.cip), String(p.id));
-
-    const { data: dispositivos, error: errorDisp } = await admin
-      .from("dispositivos_android").select("token, user_id");
-    if (errorDisp) throw errorDisp;
-    const tokensPorUsuario = new Map<string, string[]>();
-    for (const d of dispositivos || []) {
-      const lista = tokensPorUsuario.get(String(d.user_id)) || [];
-      lista.push(String(d.token));
-      tokensPorUsuario.set(String(d.user_id), lista);
+    // Nunca elige automáticamente el último teléfono de producción.
+    if (cuerpo.probarEnvio === true) {
+      if (typeof cuerpo.usuarioPrueba !== "string" || !/^[0-9a-f-]{36}$/i.test(cuerpo.usuarioPrueba))
+        return json({error:"Indique usuarioPrueba explícitamente."},400);
+      const {data:perfil,error:ePerfil} = await admin.from("profiles").select("id")
+        .eq("id",cuerpo.usuarioPrueba).eq("estado","aprobado").maybeSingle();
+      if (ePerfil) throw ePerfil;
+      if (!perfil) return json({error:"La cuenta de prueba no está aprobada."},409);
+      const {data:dispositivo,error} = await admin.from("dispositivos_android").select("token,user_id")
+        .eq("user_id",cuerpo.usuarioPrueba).order("actualizado_at",{ascending:false}).limit(1).maybeSingle();
+      if (error) throw error;
+      if (!dispositivo) return json({error:"La cuenta de prueba no tiene un teléfono registrado."},409);
+      const respuesta = await enviar(cuenta,await tokenDeAcceso(cuenta),dispositivo.token,
+        dispositivo.user_id,"prueba",await huella(crypto.randomUUID()));
+      return json({prueba:respuesta.ok?"aceptada por FCM":"rechazada",estado:respuesta.status,
+        entregaEnTelefonoVerificada:false},respuesta.ok?200:502);
     }
-
-    let acceso: string | null = null;
-    const pasosAvisadosHoy = new Set<string>();
-    let enviados = 0, omitidos = 0, tokensRetirados = 0;
-
-    for (const fila of notas || []) {
-      const nota = fila as unknown as Nota;
-      const aviso = avisoDeNota(nota, hoy);
-      if (!aviso) { omitidos++; continue; }
-
-      const usuario = usuarioPorCip.get(String(nota.oficial_constato_cip));
-      if (!usuario) { omitidos++; continue; }
-      const tokens = tokensPorUsuario.get(usuario) || [];
-      if (tokens.length === 0) { omitidos++; continue; }
-
-      // Un solo aviso de pasos pendientes por persona y día, aunque tenga varios casos.
-      if (aviso.tipo === "pasos_pendientes") {
-        if (pasosAvisadosHoy.has(usuario)) { omitidos++; continue; }
-      }
-
-      const marca = `android:${aviso.tipo}`;
-      const { data: anterior } = await admin.from("alertas_movil_enviadas")
-        .select("id").eq("nota_id", nota.id).eq("tipo", marca)
-        .eq("clave_estado", aviso.clave).maybeSingle();
-      if (anterior) {
-        if (aviso.tipo === "pasos_pendientes") pasosAvisadosHoy.add(usuario);
-        omitidos++;
-        continue;
-      }
-
-      if (!acceso) acceso = await tokenDeAcceso(cuenta);
-
-      let entregas = 0;
-      for (const token of tokens) {
-        const respuesta = await fetch(
-          `https://fcm.googleapis.com/v1/projects/${cuenta.project_id}/messages:send`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${acceso}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              message: {
-                token,
-                // Solo datos: el teléfono decide si lo muestra y con qué texto.
-                data: { user_id: usuario, tipo: aviso.tipo },
-                android: { priority: "HIGH" },
-              },
-            }),
-          },
-        );
-        if (respuesta.ok) { entregas++; continue; }
-
-        const detalle = await respuesta.text();
-        // El teléfono desinstaló la app o el token caducó: se retira del registro.
-        if (respuesta.status === 404 || detalle.includes("UNREGISTERED")
-            || detalle.includes("INVALID_ARGUMENT")) {
-          await admin.from("dispositivos_android").delete().eq("token", token);
-          tokensRetirados++;
+    const hoy = fechaLima(new Date().toISOString());
+    const notas:Fila[] = await leerPaginas((a:number,b:number)=>admin.from("notas_informativas")
+      .select("id,oficial_constato_cip,created_at,fecha_reincorporacion,imputacion_generada_at,fecha_descargo,orden_sancion_generada_at,orden_notificada_at,archivo_leve_generada_at,archivo_orden_notificacion_path")
+      .order("id").range(a,b));
+    const perfiles:Fila[] = await leerPaginas((a:number,b:number)=>admin.from("profiles")
+      .select("id,cip").eq("estado","aprobado").not("cip","is",null).order("id").range(a,b));
+    const dispositivos:Fila[] = await leerPaginas((a:number,b:number)=>admin.from("dispositivos_android")
+      .select("token,user_id").order("token").range(a,b));
+    const recepciones = await leerPaginas((a:number,b:number)=>admin.from("recepciones_fisicas")
+      .select("nota_id,recibido_at,conformidad_verificada").order("nota_id").range(a,b));
+    const recibidas = new Map(recepciones.map(r=>[r.nota_id,r]));
+    const usuariosPorCip = new Map<string,string[]>();
+    for (const p of perfiles) usuariosPorCip.set(String(p.cip),[...(usuariosPorCip.get(String(p.cip))||[]),String(p.id)]);
+    const tokensPorUsuario = new Map<string,string[]>();
+    for (const d of dispositivos) tokensPorUsuario.set(String(d.user_id),[...(tokensPorUsuario.get(String(d.user_id))||[]),String(d.token)]);
+    let acceso:string|null = null;
+    let enviados = 0, omitidos = 0, fallidos = 0, tokensRetirados = 0;
+    // Un aviso por usuario y dispositivo; la reserva evita repetirlo el mismo día.
+    const entregar = async (usuario:string, token:string, aviso:{tipo:string;clave:string}, evento:string) => {
+      const clave = await huella(JSON.stringify([evento,aviso.tipo,aviso.clave,usuario,token]));
+      const {data:reserva,error} = await admin.rpc("reservar_entrega_android",{p_clave:clave,p_usuario:usuario});
+      if (error) throw error;
+      if (!reserva?.reservada) { omitidos++; return; }
+      try {
+        if (!acceso) acceso = await tokenDeAcceso(cuenta);
+        const respuesta = await enviar(cuenta,acceso,token,usuario,aviso.tipo,clave);
+        if (respuesta.ok) {
+          const {error:guardar} = await admin.from("entregas_android")
+            .update({enviado_at:new Date().toISOString()}).eq("clave",clave).eq("intento_id",reserva.intento_id);
+          if (guardar) throw guardar;
+          enviados++;
         } else {
-          // Nunca se registra el token ni el destinatario.
-          console.error("Envío rechazado por FCM:", respuesta.status);
+          const detalle = await respuesta.json().catch(()=>null);
+          if (tokenNoRegistrado(detalle)) {
+            const {error:retirar} = await admin.from("dispositivos_android").delete().eq("token",token).eq("user_id",usuario);
+            if (retirar) throw retirar;
+            tokensRetirados++;
+          }
+          fallidos++;
+          // La reserva vence: un fallo temporal podrá reintentarse sin marcarlo enviado.
+        }
+      } catch { fallidos++; }
+    };
+    for (const nota of notas) {
+      const aviso = avisoDeNota(nota,hoy,recibidas.get(nota.id));
+      if (!aviso) { omitidos++; continue; }
+      for (const usuario of usuariosPorCip.get(String(nota.oficial_constato_cip))||[]) {
+        for (const token of tokensPorUsuario.get(usuario)||[]) {
+          // Pendientes: un aviso por usuario/dispositivo/día, aunque tenga varios casos.
+          const evento = aviso.tipo === "pasos_pendientes" ? "pendientes" : nota.id;
+          await entregar(usuario,token,aviso,String(evento));
         }
       }
-
-      if (entregas > 0) {
-        await admin.from("alertas_movil_enviadas")
-          .insert({ nota_id: nota.id, tipo: marca, clave_estado: aviso.clave });
-        if (aviso.tipo === "pasos_pendientes") pasosAvisadosHoy.add(usuario);
-        enviados += entregas;
-      } else omitidos++;
     }
-
-    return json({ fecha: hoy, enviados, omitidos, tokensRetirados });
-  } catch (error) {
-    console.error("Fallo al procesar los avisos:", error instanceof Error ? error.message : error);
-    return json({ error: "No se pudieron procesar los avisos de Android." }, 500);
+    // Solo administradores: expedientes subidos que esperan la recepción física.
+    const porRecibir = avisoAdminPorRecibir(notas,recibidas,hoy);
+    if (porRecibir) {
+      const administradores:Fila[] = await leerPaginas((a:number,b:number)=>admin.from("profiles")
+        .select("id").eq("estado","aprobado").eq("role","admin").order("id").range(a,b));
+      for (const adm of administradores) {
+        for (const token of tokensPorUsuario.get(String(adm.id))||[]) {
+          await entregar(String(adm.id),token,porRecibir,"por-recibir");
+        }
+      }
+    }
+    return json({fecha:hoy,aceptadosPorFcm:enviados,omitidos,fallidos,tokensRetirados},fallidos?207:200);
+  } catch {
+    // Ni las credenciales ni los cuerpos de error con datos de expedientes se registran.
+    console.error("Fallo al procesar los avisos Android; revise configuración y migraciones.");
+    return json({error:"No se pudieron procesar los avisos de Android."},500);
   }
 });

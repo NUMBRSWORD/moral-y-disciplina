@@ -44,7 +44,7 @@
     <nav class="tabs">
       <button class="tab-btn active" data-view="dashboard">Expedientes</button>
       <button id="tabSeguimiento" class="tab-btn" data-view="seguimiento">Seguimiento</button>
-      <button class="tab-btn" data-view="cumplimiento">Cumplimiento</button>
+      <button class="tab-btn admin-only hidden" data-view="cumplimiento">Cumplimiento</button>
       <button class="tab-btn admin-only hidden" data-view="efectivos">Efectivos</button>
       <button class="tab-btn admin-only hidden" data-view="roles">Roles</button>
       <button class="tab-btn admin-only hidden" data-view="directivas">Directivas</button>
@@ -58,6 +58,8 @@
       <button id="btnPaletaBuscar" class="btn-ghost palette-hint" type="button" title="Buscar expediente (Ctrl + K)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>Buscar <kbd>Ctrl</kbd><kbd>K</kbd></button>
       <span id="userEmail"></span>
       <span id="userRole" class="badge"></span>
+      <button id="btnInicioSencillo" class="btn-ghost hidden" type="button">Inicio</button>
+      <button id="btnActivarToken" class="btn-ghost hidden" type="button">Activar token</button>
       <button id="btnCambiarClave" class="btn-ghost" type="button">Cambiar clave</button>
       <button id="btnLogout" class="btn-ghost">Salir</button>
     </div>
@@ -105,7 +107,7 @@
       <div class="brand center">
         <span class="brand-badge lg">F</span>
         <h1>Código del token</h1>
-        <p class="muted">Abra la aplicación <strong>Faltos</strong> en su celular y escriba el código de 6 dígitos que le muestra.</p>
+        <p class="muted">Escriba el código de 6 dígitos que le muestra la app <strong>Faltos</strong> (Android) o su app de códigos (<strong>Google Authenticator</strong>, <strong>Microsoft Authenticator</strong> o <strong>Contraseñas</strong> en iPhone).</p>
       </div>
       <label>Código
         <input type="text" id="tokenCodigo" required inputmode="numeric" autocomplete="one-time-code"
@@ -114,7 +116,73 @@
       <p id="tokenError" class="error hidden" role="alert"></p>
       <button type="submit" class="btn-primary">Verificar</button>
       <button type="button" id="tokenSalir" class="btn-ghost">Cancelar y salir</button>
+      <button type="button" id="tokenPerdido" class="btn-ghost">Perdí mi celular: usar un código de recuperación</button>
+      <div id="tokenRecuperacion" class="hidden">
+        <label>Código de recuperación
+          <input type="text" id="tokenRecuperacionCodigo" autocomplete="off" autocapitalize="characters" placeholder="ABCDE-FGHJK" />
+        </label>
+        <p class="muted small">Cada código sirve una sola vez. Quita el token anterior; después deberá activar uno nuevo.</p>
+        <button type="button" id="tokenRecuperacionUsar" class="btn-secondary">Usar código</button>
+      </div>
     </form>
+  </section>
+
+  <!-- POLÍTICAS AL ENTRAR (web; la app Android las pide en su propia pantalla) -->
+  <section id="view-politicas" class="view hidden">
+    <div class="view-header">
+      <div>
+        <span class="eyebrow">Antes de continuar</span>
+        <h2>Políticas de uso</h2>
+        <p class="muted view-subtitle">Lea cada documento y fírmelo con su propia cuenta. Solo podrá continuar cuando todos estén firmados en su versión vigente.</p>
+      </div>
+    </div>
+    <p id="politicasEstado" class="muted" role="status" aria-live="polite"></p>
+    <div id="politicasLista"></div>
+    <div class="politicas-acciones">
+      <button type="button" id="politicasContinuar" class="btn-primary" disabled>Continuar</button>
+      <button type="button" id="politicasReintentar" class="btn-secondary hidden">Reintentar</button>
+      <button type="button" id="politicasSalir" class="btn-ghost">Salir</button>
+    </div>
+  </section>
+
+  <!-- INICIO SENCILLO EN CELULAR (mismo inicio que la app Android para usuarios) -->
+  <section id="view-inicio" class="view hidden">
+    <div class="inicio-hero">
+      <span class="eyebrow">Faltos</span>
+      <h2>Sus expedientes</h2>
+      <p class="muted">Revise lo pendiente y cargue el expediente completo cuando corresponda.</p>
+    </div>
+    <div id="inicioAvisoToken" class="inicio-aviso hidden">
+      <div>
+        <strong>Active su Token Digital</strong>
+        <p class="muted small">Protege su cuenta aunque alguien conozca su clave. Toma dos minutos.</p>
+      </div>
+      <button type="button" id="inicioActivarToken" class="btn-primary">Activar</button>
+    </div>
+    <div class="inicio-accesos">
+      <button type="button" class="inicio-acceso" id="inicioPendientes">
+        <strong>Pasos pendientes</strong>
+        <span class="muted">Vea lo completado y lo que falta</span>
+      </button>
+      <button type="button" class="inicio-acceso" id="inicioSubir">
+        <strong>Subir expediente</strong>
+        <span class="muted">Consulte su caso y cargue el PDF firmado</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- SUBIR EXPEDIENTE: lista de los casos propios para abrir y cargar el PDF -->
+  <section id="view-subir" class="view hidden">
+    <div class="view-header">
+      <div>
+        <span class="eyebrow">Mi expediente</span>
+        <h2>Subir expediente</h2>
+        <p class="muted view-subtitle">Abra su caso y use «Subir expediente» para cargar el PDF firmado. El envío digital no confirma la recepción física.</p>
+      </div>
+    </div>
+    <label>Buscar <input id="subirBuscar" type="search" placeholder="Nombre o número de nota" autocomplete="off" /></label>
+    <p id="subirEstado" class="muted" role="status" aria-live="polite"></p>
+    <div id="subirLista" class="subir-lista"></div>
   </section>
 
   <!-- DASHBOARD: NOTAS INFORMATIVAS -->
@@ -736,6 +804,7 @@
         <label>Cargo del comisario<input type="text" id="ofComisarioCargo" value="COMISARIO DE VENTANILLA" /></label>
       </div>
       <p class="muted small">Confírmelo cada vez: de aquí salen las iniciales y el bloque de firma del pie.</p>
+      <label class="checkbox"><input type="checkbox" id="ofConfirmarFirmantes" /> Confirmo que el jefe y el comisario indicados son los actuales.</label>
       <p id="ofResumen" class="muted small"></p>
       <p id="ofError" class="error hidden" role="alert"></p>
       <div class="modal-actions">
@@ -812,6 +881,44 @@
 </div>
 
 <!-- MODAL EDITAR CONTENIDO DE DOCUMENTO INSTITUCIONAL (admin) -->
+<div id="modalToken" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Activar Token Digital</h3>
+      <button type="button" id="btnCerrarModalToken" class="btn-ghost" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="tokenPasoQr">
+        <ol class="token-pasos">
+          <li>Instale en su celular <strong>Google Authenticator</strong> o <strong>Microsoft Authenticator</strong> (gratis). En iPhone también sirve la app <strong>Contraseñas</strong>.</li>
+          <li><strong>Active el respaldo en la nube</strong> de esa app: en Google Authenticator, inicie sesión con su cuenta de Google; en Microsoft Authenticator, active «Copia de seguridad en la nube»; Contraseñas de iPhone se respalda sola con iCloud. Así, si pierde el celular, al instalar la app en el nuevo sus códigos vuelven solos.</li>
+          <li>En esa app pulse <strong>+</strong> y escanee este código. Si abrió esta página en el mismo celular, copie la clave y péguela en la app.</li>
+          <li>Escriba abajo el código de 6 dígitos que le muestra.</li>
+        </ol>
+        <div class="token-qr"><img id="tokenQrImagen" alt="Código QR del token" /></div>
+        <p class="small">Clave para ingresar a mano: <code id="tokenSecreto"></code> <button type="button" id="tokenCopiarSecreto" class="btn-ghost">Copiar</button></p>
+        <label>Código de 6 dígitos
+          <input type="text" id="tokenNuevoCodigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" />
+        </label>
+        <p id="tokenActivarError" class="error hidden" role="alert"></p>
+        <div class="modal-actions">
+          <button type="button" id="btnCancelarToken" class="btn-ghost">Cancelar</button>
+          <button type="button" id="btnConfirmarToken" class="btn-primary">Activar</button>
+        </div>
+      </div>
+      <div id="tokenPasoCodigos" class="hidden">
+        <p><strong>Token activado.</strong> Guarde estos códigos de recuperación en papel o en un lugar seguro. Cada uno sirve <strong>una sola vez</strong> si pierde su celular. No se volverán a mostrar.</p>
+        <ul id="tokenCodigosLista" class="token-codigos"></ul>
+        <p id="tokenCodigosError" class="error hidden" role="alert"></p>
+        <div class="modal-actions">
+          <button type="button" id="tokenCopiarCodigos" class="btn-secondary">Copiar códigos</button>
+          <button type="button" id="btnTerminarToken" class="btn-primary">Ya los guardé</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="modalDocumentoInstitucional" class="modal-overlay hidden">
   <div class="modal">
     <div class="modal-header">
