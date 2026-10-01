@@ -1,6 +1,8 @@
 {
-  "versionCode": 6,
-  "versionName": "1.5",
+  "versionCode": 8,
+  "versionName": "1.7",
   "url": "https://numbrsword.github.io/moral-y-disciplina/descargar.html",
-  "notas": "Terminos y politica de datos definitivos, con responsable y contacto."
+  "apk": "faltos-1.7.apk",
+  "sha256": "35c8fcf11840f107ed78f83a42c14ed2467d814c7c930f1a53989699bbde5e0f",
+  "notas": "El Token Digital pasa a una app de códigos (Google Authenticator o Microsoft Authenticator), con respaldo en la nube: si pierde el celular, sus códigos vuelven solos. El acceso ya no puede quedarse cargando sin salida."
 }
