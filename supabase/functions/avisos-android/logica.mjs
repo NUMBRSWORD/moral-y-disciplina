@@ -40,6 +40,17 @@ export function avisoDeNota(nota, hoy, recepcion) {
   return null;
 }
 
+/**
+ * Solo para administradores: hay expedientes subidos (orden notificada y PDF cargado)
+ * que todavía no tienen recepción física con conformidad. Mismo criterio que la lista
+ * «Recepción física» de la app. No lleva cifras ni nombres: basta saber que hay algo.
+ */
+export function avisoAdminPorRecibir(notas, recibidas, hoy) {
+  const hay = notas.some(n => n.orden_notificada_at && n.archivo_orden_notificacion_path
+    && recibidas.get(n.id)?.conformidad_verificada !== true);
+  return hay ? {tipo:'documentos_por_recibir', clave:hoy} : null;
+}
+
 /** INVALID_ARGUMENT puede ser un error del mensaje, no prueba de token caducado. */
 export function tokenNoRegistrado(cuerpo) {
   return cuerpo?.error?.details?.some(d => d['@type'] === 'type.googleapis.com/google.firebase.fcm.v1.FcmError'

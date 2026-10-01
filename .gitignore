@@ -1,7 +1,29 @@
+# Android / Gradle
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Claves de firma y credenciales de publicación (también si se crean por error aquí).
+*.jks
+*.keystore
+*.p12
+*.pfx
+.private/
+# Configuración local de Firebase (cada instalación puede tener un proyecto distinto).
+/app/google-services.json
+
+# --- Del repositorio web (moral-y-disciplina) ---
 .devserver.ps1
 devserver.cjs
 node_modules/
-.DS_Store
 preview/
 
 # Skills de IA instalados con `npx skills add` / `npx impeccable install`
@@ -22,3 +44,8 @@ plantillas/*_ejemplo.docx
 .env.*
 supabase/.temp/
 supabase/.branches/
+
+# Oficio: datos reales de firmantes y oficios generados (repositorio publico)
+oficio/datos.json
+oficio/OFICIO_*.docx
+OFICIO_PLANTILLA_CASO_HIPOTETICO*.docx

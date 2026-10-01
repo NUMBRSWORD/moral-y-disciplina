@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js@2.117.2/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2.117.2";
-import { avisoDeNota, fechaLima, leerPaginas, tokenNoRegistrado } from "./logica.mjs";
+import { avisoAdminPorRecibir, avisoDeNota, fechaLima, leerPaginas, tokenNoRegistrado } from "./logica.mjs";
 
 // Datos mínimos: usuario, tipo y un identificador opaco para evitar duplicados.
 // No envía nombres, CIP, documentos ni el texto de la sanción.
@@ -96,7 +96,7 @@ Deno.serve(async(req:Request)=>{
     }
     const hoy = fechaLima(new Date().toISOString());
     const notas:Fila[] = await leerPaginas((a:number,b:number)=>admin.from("notas_informativas")
-      .select("id,oficial_constato_cip,created_at,fecha_reincorporacion,imputacion_generada_at,fecha_descargo,orden_sancion_generada_at,orden_notificada_at,archivo_leve_generada_at")
+      .select("id,oficial_constato_cip,created_at,fecha_reincorporacion,imputacion_generada_at,fecha_descargo,orden_sancion_generada_at,orden_notificada_at,archivo_leve_generada_at,archivo_orden_notificacion_path")
       .order("id").range(a,b));
     const perfiles:Fila[] = await leerPaginas((a:number,b:number)=>admin.from("profiles")
       .select("id,cip").eq("estado","aprobado").not("cip","is",null).order("id").range(a,b));
@@ -111,6 +111,32 @@ Deno.serve(async(req:Request)=>{
     for (const d of dispositivos) tokensPorUsuario.set(String(d.user_id),[...(tokensPorUsuario.get(String(d.user_id))||[]),String(d.token)]);
     let acceso:string|null = null;
     let enviados = 0, omitidos = 0, fallidos = 0, tokensRetirados = 0;
+    // Un aviso por usuario y dispositivo; la reserva evita repetirlo el mismo día.
+    const entregar = async (usuario:string, token:string, aviso:{tipo:string;clave:string}, evento:string) => {
+      const clave = await huella(JSON.stringify([evento,aviso.tipo,aviso.clave,usuario,token]));
+      const {data:reserva,error} = await admin.rpc("reservar_entrega_android",{p_clave:clave,p_usuario:usuario});
+      if (error) throw error;
+      if (!reserva?.reservada) { omitidos++; return; }
+      try {
+        if (!acceso) acceso = await tokenDeAcceso(cuenta);
+        const respuesta = await enviar(cuenta,acceso,token,usuario,aviso.tipo,clave);
+        if (respuesta.ok) {
+          const {error:guardar} = await admin.from("entregas_android")
+            .update({enviado_at:new Date().toISOString()}).eq("clave",clave).eq("intento_id",reserva.intento_id);
+          if (guardar) throw guardar;
+          enviados++;
+        } else {
+          const detalle = await respuesta.json().catch(()=>null);
+          if (tokenNoRegistrado(detalle)) {
+            const {error:retirar} = await admin.from("dispositivos_android").delete().eq("token",token).eq("user_id",usuario);
+            if (retirar) throw retirar;
+            tokensRetirados++;
+          }
+          fallidos++;
+          // La reserva vence: un fallo temporal podrá reintentarse sin marcarlo enviado.
+        }
+      } catch { fallidos++; }
+    };
     for (const nota of notas) {
       const aviso = avisoDeNota(nota,hoy,recibidas.get(nota.id));
       if (!aviso) { omitidos++; continue; }
@@ -118,29 +144,18 @@ Deno.serve(async(req:Request)=>{
         for (const token of tokensPorUsuario.get(usuario)||[]) {
           // Pendientes: un aviso por usuario/dispositivo/día, aunque tenga varios casos.
           const evento = aviso.tipo === "pasos_pendientes" ? "pendientes" : nota.id;
-          const clave = await huella(JSON.stringify([evento,aviso.tipo,aviso.clave,usuario,token]));
-          const {data:reserva,error} = await admin.rpc("reservar_entrega_android",{p_clave:clave,p_usuario:usuario});
-          if (error) throw error;
-          if (!reserva?.reservada) { omitidos++; continue; }
-          try {
-            if (!acceso) acceso = await tokenDeAcceso(cuenta);
-            const respuesta = await enviar(cuenta,acceso,token,usuario,aviso.tipo,clave);
-            if (respuesta.ok) {
-              const {error:guardar} = await admin.from("entregas_android")
-                .update({enviado_at:new Date().toISOString()}).eq("clave",clave).eq("intento_id",reserva.intento_id);
-              if (guardar) throw guardar;
-              enviados++;
-            } else {
-              const detalle = await respuesta.json().catch(()=>null);
-              if (tokenNoRegistrado(detalle)) {
-                const {error:retirar} = await admin.from("dispositivos_android").delete().eq("token",token).eq("user_id",usuario);
-                if (retirar) throw retirar;
-                tokensRetirados++;
-              }
-              fallidos++;
-              // La reserva vence: un fallo temporal podrá reintentarse sin marcarlo enviado.
-            }
-          } catch { fallidos++; }
+          await entregar(usuario,token,aviso,String(evento));
+        }
+      }
+    }
+    // Solo administradores: expedientes subidos que esperan la recepción física.
+    const porRecibir = avisoAdminPorRecibir(notas,recibidas,hoy);
+    if (porRecibir) {
+      const administradores:Fila[] = await leerPaginas((a:number,b:number)=>admin.from("profiles")
+        .select("id").eq("estado","aprobado").eq("role","admin").order("id").range(a,b));
+      for (const adm of administradores) {
+        for (const token of tokensPorUsuario.get(String(adm.id))||[]) {
+          await entregar(String(adm.id),token,porRecibir,"por-recibir");
         }
       }
     }

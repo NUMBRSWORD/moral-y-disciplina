@@ -6,3 +6,8 @@
 # que emite google-drive-conectar y que aquí se valida contra la base.
 [functions.google-drive-callback]
 verify_jwt = false
+
+# Cron no tiene sesión de usuario. avisos-android exige POST y valida el secreto
+# x-avisos-cron-secret antes de acceder a datos o enviar mensajes (rechaza si falta).
+[functions.avisos-android]
+verify_jwt = false

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {fechaLima, avisoDeNota, tokenNoRegistrado, leerPaginas} from '../supabase/functions/avisos-android/logica.mjs';
+import {fechaLima, avisoDeNota, avisoAdminPorRecibir, tokenNoRegistrado, leerPaginas} from '../supabase/functions/avisos-android/logica.mjs';
 const nota = {id:'qa', oficial_constato_cip:'qa', created_at:'2026-09-01T12:00:00Z'};
 test('Un descargo NO equivale a recepción física', () => {
   assert.equal(avisoDeNota({...nota, fecha_descargo:'2026-09-27'}, '2026-09-28'), null);
@@ -32,4 +32,16 @@ test('Lee más de 1000 filas y propaga errores de páginas intermedias',async()=
   const datos=Array.from({length:1205},(_,id)=>({id}));
   assert.equal((await leerPaginas(async(a,b)=>({data:datos.slice(a,b+1)}))).length,1205);
   await assert.rejects(leerPaginas(async(a,b)=>a===100?{error:new Error('sin red')}:{data:datos.slice(a,b+1)}),/sin red/);
+});
+test('Aviso al administrador: solo con expedientes subidos sin recepción física conforme', () => {
+  const subida = {id:'a', orden_notificada_at:'2026-09-20', archivo_orden_notificacion_path:'x.pdf'};
+  const vacio = new Map();
+  assert.deepEqual(avisoAdminPorRecibir([subida], vacio, '2026-09-30'), {tipo:'documentos_por_recibir', clave:'2026-09-30'});
+  // Sin PDF subido o sin orden notificada: todavía no hay nada que recibir.
+  assert.equal(avisoAdminPorRecibir([{...subida, archivo_orden_notificacion_path:null}], vacio, '2026-09-30'), null);
+  assert.equal(avisoAdminPorRecibir([{...subida, orden_notificada_at:null}], vacio, '2026-09-30'), null);
+  // Con conformidad física explícita ya está recibido; sin conformidad sigue pendiente.
+  assert.equal(avisoAdminPorRecibir([subida], new Map([['a',{conformidad_verificada:true}]]), '2026-09-30'), null);
+  assert.equal(avisoAdminPorRecibir([subida], new Map([['a',{conformidad_verificada:false}]]), '2026-09-30').tipo, 'documentos_por_recibir');
+  assert.equal(avisoAdminPorRecibir([], vacio, '2026-09-30'), null);
 });

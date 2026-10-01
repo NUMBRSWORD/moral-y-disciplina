@@ -1,6 +1,8 @@
 {
-  "versionCode": 6,
-  "versionName": "1.5",
+  "versionCode": 7,
+  "versionName": "1.6",
   "url": "https://numbrsword.github.io/moral-y-disciplina/descargar.html",
-  "notas": "Terminos y politica de datos definitivos, con responsable y contacto."
+  "apk": "faltos-1.6.apk",
+  "sha256": "131dfa6425f24e6ad25ed9f3979c8d99ac697d23453091b152609e831e24ac9c",
+  "notas": "Web y Android sincronizados, expedientes en lote, recepción física, avisos al administrador y mejoras de modo oscuro."
 }

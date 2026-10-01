@@ -22,6 +22,7 @@ import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
 import { prepararLote, revisarFila, filasGuardables, resumenDelLote, filaARegistroDeExpediente, necesitaAyudaDeIA, aplicarLecturaDeIA, marcarRepetidos } from "./lib/loteExpedientes.js";
 import { estadoDeRemision, esperaOficio, esperaHojaDeTramite } from "./lib/remision.js";
 import { datosDelOficio, documentosRemitidos, faltaParaElOficio, renderizarOficioRemisionDocx } from "./lib/oficioRemision.js";
+import { leerFirmantesOficio } from "./lib/firmantesOficio.js";
 import { piezasDelExpediente } from "./lib/expedienteFirmado.js";
 import { leerTodasLasPaginas, cargaCompartida, puedeActualizar } from "./lib/cargaDatos.js";
 
@@ -2241,6 +2242,7 @@ async function renderNotaDetail(nota) {
       `}
     </div>
     ` : ""}
+
 
     ${isAdmin ? `
     <div class="detail-card">
@@ -5256,7 +5258,30 @@ function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
   let titulo = "Complete los datos de la falta";
   let detalle = "Registre el código de infracción para poder continuar con el trámite.";
   let tono = "is-pending";
-  if (!nota.codigo_infraccion) {
+  if (nota.archivo_leve_generada_at) {
+    icono = "check"; titulo = "Trámite concluido (archivado)"; tono = "is-done";
+    detalle = "El caso se archivó sin sanción: la conducta no se adecuaba a ningún código del Anexo I.";
+  } else if (orden && notif) {
+    icono = "check"; tono = "is-done";
+    titulo = "Expediente subido";
+    detalle = "Consulte el estado de recepción física. Subir el PDF no confirma que el administrador recibió el documento físico.";
+    if (isAdmin) {
+      tono = "is-ready";
+      if (esperaOficio(nota, state.remisiones || [])) {
+        titulo = "Genere el oficio de remisión";
+        detalle = "El expediente firmado ya está subido. Genere el oficio y adjúntelo en Recepción; la Hoja de Trámite puede incorporarse cuando sea devuelta.";
+      } else if (esperaHojaDeTramite(nota, state.remisiones || [])) {
+        titulo = "Adjunte la Hoja de Trámite";
+        detalle = "El oficio ya está adjunto. Registre la Hoja de Trámite cuando sea devuelta recepcionada.";
+      } else {
+        titulo = "Revise recepción y archivo";
+        detalle = "Compruebe los documentos de cierre y confirme la recepción física solo después de verificar el original.";
+      }
+    }
+  } else if (orden) {
+    icono = "firmar"; titulo = "Cargue el expediente firmado";
+    detalle = "Suba el legajo completo firmado en un PDF y confirme la fecha de notificación.";
+  } else if (!nota.codigo_infraccion) {
     // valores por defecto
   } else if (!leve) {
     const codigoNormalizado = (nota.codigo_infraccion || "").trim().toUpperCase().replace(/\s+/g, "");
@@ -5269,9 +5294,6 @@ function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
       icono = "info"; titulo = "Falta grave o muy grave";
       detalle = "Todavía no hay texto legal verificado en la app para este código, así que el Informe Administrativo no está disponible aquí. Continúe el trámite según el procedimiento que corresponde.";
     }
-  } else if (nota.archivo_leve_generada_at) {
-    icono = "check"; titulo = "Trámite concluido (archivado)"; tono = "is-done";
-    detalle = "El caso se archivó sin sanción: la conducta no se adecuaba a ningún código del Anexo I.";
   } else if (!nota.fecha_reincorporacion) {
     titulo = "Registre la reincorporación";
     detalle = "Complete fecha, hora y N.º de nota de reincorporación para habilitar la Imputación.";
@@ -5290,15 +5312,6 @@ function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
   } else if (listoDescargo && !orden) {
     icono = "descargar"; titulo = "Genere la Orden de Sanción"; tono = "is-ready";
     detalle = "La evaluación está lista. Revise los datos y descargue la Orden.";
-  } else if (orden && !notif) {
-    icono = "firmar"; titulo = "Cargue el expediente firmado";
-    detalle = "Suba el legajo completo firmado en un PDF (la IA revisa que esté completo) y confirme la fecha de notificación.";
-  } else if (orden && notif && isAdmin) {
-    icono = "check"; titulo = "Registre el expediente cerrado"; tono = "is-ready";
-    detalle = "En Recepción, adjunte el expediente firmado, la HT y el Oficio para archivarlo y respaldarlo en Drive.";
-  } else if (orden && notif) {
-    icono = "check"; titulo = "Trámite concluido"; tono = "is-done";
-    detalle = "La Orden fue notificada. El cierre administrativo lo realiza el administrador en Recepción.";
   }
   return `<aside class="next-action ${tono}" aria-label="Siguiente acción recomendada">
     <span class="next-action-icon">${svgIco(icono)}</span>
@@ -6053,9 +6066,10 @@ $("btnGuardarExpLote")?.addEventListener("click", async (e) => {
 
 const MEMORIA_OFICIO = "faltos.oficio.firmas";
 let notaDelOficio = null;
+let generandoOficio = false;
 
 function recordadoDelOficio() {
-  try { return JSON.parse(localStorage.getItem(MEMORIA_OFICIO) || "{}"); } catch { return {}; }
+  return leerFirmantesOficio();
 }
 function recordarDelOficio(datos) {
   try { localStorage.setItem(MEMORIA_OFICIO, JSON.stringify({ ...datos, confirmado: hoyLima() })); } catch { /* sin memoria, se escribe cada vez */ }
@@ -6075,6 +6089,7 @@ function quienRedacta() {
 }
 
 function abrirOficio(nota) {
+  if (generandoOficio) return;
   notaDelOficio = nota;
   const previo = recordadoDelOficio();
   $("ofCaso").textContent = `Expediente de ${nombreInvestigadoVisible(nota, true)} · ${nota.codigo_infraccion || "sin código"}`;
@@ -6086,6 +6101,7 @@ function abrirOficio(nota) {
   $("ofComisarioNombre").value = previo.comisarioNombre || "";
   $("ofComisarioOa").value = previo.comisarioOa || "";
   $("ofComisarioCargo").value = previo.comisarioCargo || "COMISARIO DE VENTANILLA";
+  $("ofConfirmarFirmantes").checked = false;
   $("ofJefeDesde").textContent = previo.confirmado
     ? `Confirmado por última vez el ${formatDate(previo.confirmado)}. Si cambiaron, corríjalo aquí.`
     : "Todavía no se ha confirmado ninguno: escríbalos y quedarán recordados.";
@@ -6122,6 +6138,7 @@ function refrescarResumenOficio() {
   if (!notaDelOficio) return;
   const datos = datosDelOficioEnPantalla();
   const falta = faltaParaElOficio(datos);
+  if (!$("ofConfirmarFirmantes").checked) falta.push("confirmar los firmantes actuales");
   $("ofResumen").textContent = falta.length
     ? `Falta ${falta.join(", ")}.`
     : `Se remite: orden de sanción con ${datos.sancion}, ${datos.documentos}.`;
@@ -6129,27 +6146,43 @@ function refrescarResumenOficio() {
 }
 
 ["ofNumero", "ofJefeGrado", "ofJefeNombre", "ofJefeCargo", "ofComisarioGrado", "ofComisarioNombre", "ofComisarioOa", "ofComisarioCargo"]
-  .forEach((id) => $(id)?.addEventListener("input", refrescarResumenOficio));
+  .forEach((id) => $(id)?.addEventListener("input", () => {
+    if (id !== "ofNumero") $("ofConfirmarFirmantes").checked = false;
+    refrescarResumenOficio();
+  }));
+$("ofConfirmarFirmantes")?.addEventListener("change", refrescarResumenOficio);
 
 $("btnCerrarModalOficio")?.addEventListener("click", cerrarOficio);
 $("btnCancelarOficio")?.addEventListener("click", cerrarOficio);
-function cerrarOficio() { $("modalOficio").classList.add("hidden"); notaDelOficio = null; }
+function cerrarOficio() {
+  if (generandoOficio) return;
+  $("modalOficio").classList.add("hidden"); notaDelOficio = null;
+}
 
 $("btnGenerarOficio")?.addEventListener("click", async (e) => {
   if (!notaDelOficio) return;
   const btn = e.currentTarget;
+  if (btn.disabled || generandoOficio) return;
   const errEl = $("ofError");
+  const nota = notaDelOficio;
+  const datosIniciales = datosDelOficioEnPantalla();
   errEl.classList.add("hidden");
+  generandoOficio = true;
+  const controles = $("modalOficio").querySelectorAll("input, #btnCancelarOficio, #btnCerrarModalOficio");
+  controles.forEach(el => { el.disabled = true; });
   ocuparBoton(btn, true, "Generando...");
   try {
+    const falta = faltaParaElOficio(datosIniciales);
+    if (!$("ofConfirmarFirmantes").checked) falta.push("confirmar los firmantes actuales");
+    if (falta.length) throw new Error(`Falta ${falta.join(", ")}.`);
     // Las piezas se leen del legajo ya registrado, para anunciar lo que el
     // expediente trae de verdad y no una lista fija.
-    const piezas = await piezasDelLegajoFirmado(notaDelOficio);
-    const datos = { ...datosDelOficioEnPantalla(), documentos: documentosRemitidos(piezas, notaDelOficio.codigo_infraccion) };
+    const piezas = await piezasDelLegajoFirmado(nota);
+    const datos = { ...datosIniciales, documentos: documentosRemitidos(piezas, nota.codigo_infraccion) };
     const blob = await renderizarOficioRemisionDocx(datos);
-    const nombreArchivo = nombreArchivoDocumento("OFICIO REMISION", notaDelOficio);
+    const nombreArchivo = nombreArchivoDocumento("OFICIO REMISION", nota);
     saveAs(blob, nombreArchivo);
-    registrarVersionDocumento(notaDelOficio.id, "oficio_remision", blob, nombreArchivo);
+    registrarVersionDocumento(nota.id, "oficio_remision", blob, nombreArchivo);
     recordarDelOficio({
       jefeGrado: $("ofJefeGrado").value.trim(),
       jefeNombre: $("ofJefeNombre").value.trim(),
@@ -6159,6 +6192,7 @@ $("btnGenerarOficio")?.addEventListener("click", async (e) => {
       comisarioOa: $("ofComisarioOa").value.trim(),
       comisarioCargo: $("ofComisarioCargo").value.trim(),
     });
+    generandoOficio = false;
     cerrarOficio();
     toast("Oficio generado. Adjúntelo en Recepción junto con la Hoja de Trámite cuando la reciba.");
   } catch (err) {
@@ -6166,7 +6200,10 @@ $("btnGenerarOficio")?.addEventListener("click", async (e) => {
     errEl.textContent = "No se pudo generar el oficio: " + (err.message || err);
     errEl.classList.remove("hidden");
   } finally {
+    generandoOficio = false;
+    controles.forEach(el => { el.disabled = false; });
     ocuparBoton(btn, false);
+    refrescarResumenOficio();
   }
 });
 
