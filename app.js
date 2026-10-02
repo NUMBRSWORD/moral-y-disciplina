@@ -25,6 +25,7 @@ import { datosDelOficio, documentosRemitidos, faltaParaElOficio, renderizarOfici
 import { leerFirmantesOficio } from "./lib/firmantesOficio.js";
 import { piezasDelExpediente } from "./lib/expedienteFirmado.js";
 import { leerTodasLasPaginas, cargaCompartida, puedeActualizar } from "./lib/cargaDatos.js";
+import { normalizarNumeroOficio, codigoDeArchivo, listoParaArchivar, casosPorArchivar, compararCodigos, piezasDelLegajo, datosDelRotulo, faltaParaArchivar } from "./lib/archivo.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
 
@@ -415,7 +416,7 @@ function showView(id) {
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $(id).classList.remove("hidden");
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-  const map = { "view-dashboard": "dashboard", "view-seguimiento": "seguimiento", "view-cumplimiento": "cumplimiento", "view-efectivos": "efectivos", "view-roles": "roles", "view-directivas": "directivas", "view-agenda": "agenda", "view-documentos": "documentos", "view-recepcion": "recepcion", "view-panel": "panel", "view-historial": "historial" };
+  const map = { "view-dashboard": "dashboard", "view-seguimiento": "seguimiento", "view-cumplimiento": "cumplimiento", "view-efectivos": "efectivos", "view-roles": "roles", "view-directivas": "directivas", "view-agenda": "agenda", "view-documentos": "documentos", "view-recepcion": "recepcion", "view-panel": "panel", "view-historial": "historial", "view-archivo": "archivo" };
   if (map[id]) {
     document.querySelector(`.tab-btn[data-view="${map[id]}"]`)?.classList.add("active");
   }
@@ -435,6 +436,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (target === "recepcion") { showView("view-recepcion"); loadNotas().then(loadExpedientesRemitidos); }
     if (target === "panel") { showView("view-panel"); actualizarVistaCompartida(); }
     if (target === "historial") { showView("view-historial"); loadHistorial(); }
+    if (target === "archivo") { showView("view-archivo"); void abrirArchivo(); }
   });
 });
 
@@ -2264,6 +2266,7 @@ async function renderNotaDetail(nota) {
 
 
     ${isAdmin ? `
+    <div id="archivoCaso"></div>
     <div class="detail-card">
       <h3>Expediente</h3>
       ${esperaOficio(nota, state.remisiones || []) ? `
@@ -2352,6 +2355,7 @@ async function renderNotaDetail(nota) {
   $("btnVerificarNotifIA")?.addEventListener("click", () => verificarNotificacionOrdenIA(nota));
   $("ordenNotifForm")?.addEventListener("submit", (e) => submitNotificacionOrden(e, nota));
   $("btnGenerarOficioCaso")?.addEventListener("click", () => abrirOficio(nota));
+  if (isAdmin) void pintarArchivoDelCaso(nota);
 
   // Si no hubo descargo, al elegir el tercio se rellena el "Análisis y
   // Evaluación" con el párrafo estándar (venció el plazo...) cerrando según
@@ -5364,6 +5368,308 @@ $("tokenRecuperacionUsar").addEventListener("click", async (e) => {
   }
 });
 
+// ---------- Archivo: un folder manila por caso ----------
+// El código del folder es el N.º de oficio de remisión (o de la Resolución si se
+// archivó sin sanción). El legajo PDF lleva el mismo código, así que el físico y
+// el digital se encuentran el uno al otro.
+const MEMORIA_UBICACION = "archivo-ubicacion";
+let casoQueSeArchiva = null;
+let archivando = false;
+
+// Tabla aún no creada en el servidor: se avisa en vez de fallar en silencio.
+const faltaTablaArchivo = (error) => ["42P01", "PGRST205", "PGRST200"].includes(error?.code);
+
+/** Un número de oficio no se repite entre casos: dos folders con el mismo rótulo se confunden. */
+async function comprobarOficioLibre(notaId, numero) {
+  const { data, error } = await supabase.from("expedientes")
+    .select("nota_id").eq("numero_oficio", numero).neq("nota_id", notaId).limit(1);
+  if (error) throw new Error("No se pudo comprobar si el número de oficio ya se usó. Reintente.");
+  if (data?.length) throw new Error(`El oficio ${numero} ya figura en otro caso. Revise el número.`);
+}
+
+/** El número escrito al generar el oficio queda en el caso: de ahí sale el rótulo del folder. */
+async function guardarNumeroOficio(notaId, numero) {
+  try {
+    const { data: previo, error: errPrevio } = await supabase.from("expedientes")
+      .select("id").eq("nota_id", notaId).maybeSingle();
+    if (errPrevio) throw errPrevio;
+    const { error } = previo
+      ? await supabase.from("expedientes").update({ numero_oficio: numero }).eq("id", previo.id)
+      : await supabase.from("expedientes").insert({ nota_id: notaId, numero_oficio: numero });
+    if (error) throw error;
+  } catch (err) {
+    console.error("No se pudo guardar el número de oficio:", err);
+    toast(`El oficio se generó, pero su número no quedó guardado en el caso. Anótelo en «Completar o corregir el expediente»: ${numero}.`, "error", 12000);
+  }
+}
+
+async function leerArchivados() {
+  const { data, error } = await supabase.from("archivo_expedientes").select("*");
+  if (error) throw error;
+  return data || [];
+}
+
+async function abrirArchivo() {
+  const estado = $("archivoEstado");
+  estado.textContent = "Consultando el archivo…";
+  const ok = await loadNotas();
+  try {
+    state.archivados = await leerArchivados();
+    estado.textContent = ok === false ? "No se pudieron actualizar los expedientes; lo mostrado puede no estar al día." : "";
+  } catch (err) {
+    state.archivados = [];
+    estado.textContent = faltaTablaArchivo(err)
+      ? "El archivo todavía no está activado en el servidor. Falta aplicar la actualización «archivo-expedientes»."
+      : "No se pudo consultar el archivo. Compruebe su conexión y vuelva a intentar.";
+  }
+  pintarArchivo();
+}
+
+function filaDeArchivo(nota, extra) {
+  return `<article class="archivo-item">
+    <div>
+      <strong>${escapeHtml(nombreInvestigadoVisible(nota, true))}</strong>
+      <p class="muted small">Falta: ${escapeHtml(formatDate(nota.fecha_falta))} · ${escapeHtml(nota.codigo_infraccion || "sin código")}</p>
+    </div>
+    ${extra}
+  </article>`;
+}
+
+function pintarArchivo() {
+  const notas = state.notas || [];
+  const archivados = state.archivados || [];
+  const pendientes = casosPorArchivar(notas, state.remisiones || [], archivados)
+    .map((n) => ({ n, codigo: codigoDeArchivo(n, n.expedientes?.[0]) }))
+    .sort((a, b) => compararCodigos(a.codigo, b.codigo));
+  $("archivoPendientesN").textContent = String(pendientes.length);
+  $("archivoPendientes").innerHTML = pendientes.map(({ n, codigo }) => filaDeArchivo(n, `
+      <span class="pill ${codigo ? "pill-yes" : "pill-warning"}">${escapeHtml(codigo || "sin número")}</span>
+      <button type="button" class="btn-primary" data-archivar="${escapeHtml(n.id)}">Archivar</button>`)).join("")
+    || `<p class="muted">No hay casos terminados esperando su folder.</p>`;
+  $("archivoPendientes").querySelectorAll("[data-archivar]").forEach((b) =>
+    b.addEventListener("click", () => abrirArchivar(notas.find((n) => n.id === b.dataset.archivar))));
+
+  const porId = new Map(notas.map((n) => [n.id, n]));
+  const q = $("archivoBuscar").value.trim().toLocaleLowerCase("es");
+  const filas = archivados
+    .map((a) => ({ a, n: porId.get(a.nota_id) || { id: a.nota_id } }))
+    .filter(({ a, n }) => !q || `${a.codigo} ${nombreInvestigadoVisible(n, true)} ${n.investigado_cip || ""} ${a.ubicacion || ""}`
+      .toLocaleLowerCase("es").includes(q))
+    .sort((x, y) => compararCodigos(x.a.codigo, y.a.codigo));
+  $("archivoLista").innerHTML = filas.map(({ a, n }) => filaDeArchivo(n, `
+      <span class="pill pill-yes">${escapeHtml(a.codigo)}</span>
+      <span class="muted small">${escapeHtml(a.ubicacion || "sin ubicación")} · ${escapeHtml(String(a.folios))} folios</span>
+      <span class="archivo-acciones">
+        <button type="button" class="btn-secondary" data-legajo="${escapeHtml(a.id)}">Legajo</button>
+        <button type="button" class="btn-ghost" data-rotulo="${escapeHtml(a.id)}">Rótulo</button>
+      </span>`)).join("")
+    || `<p class="muted">${archivados.length ? "Sin coincidencias." : "Todavía no hay expedientes archivados."}</p>`;
+  $("archivoLista").querySelectorAll("[data-legajo]").forEach((b) => b.addEventListener("click", () =>
+    abrirLegajo(archivados.find((a) => a.id === b.dataset.legajo))));
+  $("archivoLista").querySelectorAll("[data-rotulo]").forEach((b) => b.addEventListener("click", () => {
+    const a = archivados.find((x) => x.id === b.dataset.rotulo);
+    imprimirRotulo(porId.get(a.nota_id) || {}, a);
+  }));
+}
+$("archivoBuscar").addEventListener("input", pintarArchivo);
+
+/** Tarjeta «Archivo» dentro del caso: dónde está el folder, o el botón para archivarlo. */
+async function pintarArchivoDelCaso(nota) {
+  const caja = $("archivoCaso");
+  if (!caja) return;
+  const { data, error } = await supabase.from("archivo_expedientes").select("*").eq("nota_id", nota.id).maybeSingle();
+  if (!caja.isConnected || state.currentNotaId && state.currentNotaId !== nota.id) return;
+  if (error) { caja.innerHTML = ""; return; }
+  if (data) {
+    caja.innerHTML = `<div class="detail-card">
+      <h3>Archivo</h3>
+      <div class="detail-grid">
+        <div class="detail-field"><div class="label">Folder</div><div class="value">${escapeHtml(data.codigo)}</div></div>
+        <div class="detail-field"><div class="label">Ubicación</div><div class="value">${escapeHtml(data.ubicacion || "-")}</div></div>
+        <div class="detail-field"><div class="label">Folios</div><div class="value">${escapeHtml(String(data.folios))}</div></div>
+        <div class="detail-field"><div class="label">Archivado</div><div class="value">${escapeHtml(formatDate(data.archivado_at))}</div></div>
+      </div>
+      <div class="archivo-acciones">
+        <button type="button" class="btn-secondary" id="btnLegajoCaso">Descargar legajo</button>
+        <button type="button" class="btn-ghost" id="btnRotuloCaso">Imprimir rótulo</button>
+      </div>
+    </div>`;
+    $("btnLegajoCaso").addEventListener("click", () => abrirLegajo(data));
+    $("btnRotuloCaso").addEventListener("click", () => imprimirRotulo(nota, data));
+  } else if (listoParaArchivar(nota, state.remisiones || [])) {
+    caja.innerHTML = `<div class="detail-card">
+      <h3>Archivo</h3>
+      <p class="muted small">El trámite terminó. Guárdelo en su folder manila: se arma el legajo PDF y se imprime el rótulo.</p>
+      <button type="button" class="btn-primary" id="btnArchivarCaso">Archivar</button>
+    </div>`;
+    $("btnArchivarCaso").addEventListener("click", () => abrirArchivar(nota));
+  } else caja.innerHTML = "";
+}
+
+function abrirArchivar(nota) {
+  if (!nota || archivando) return;
+  casoQueSeArchiva = nota;
+  const codigo = codigoDeArchivo(nota, nota.expedientes?.[0]);
+  const [tipo, numero] = codigo ? codigo.split(" ") : [nota.archivo_leve_generada_at ? "RES" : "OF", ""];
+  $("arCaso").textContent = `${nombreInvestigadoVisible(nota, true)} · falta del ${formatDate(nota.fecha_falta)}`;
+  $("arTipo").value = tipo;
+  $("arNumero").value = numero;
+  let ubicacion = "";
+  try { ubicacion = localStorage.getItem(MEMORIA_UBICACION) || ""; } catch { /* sin memoria */ }
+  $("arUbicacion").value = ubicacion;
+  $("arFolios").value = "";
+  $("arObservacion").value = "";
+  $("arError").classList.add("hidden");
+  const piezas = piezasDelLegajo(nota, (state.remisiones || []).find((r) => r.nota_id === nota.id));
+  $("arPiezas").textContent = piezas.length
+    ? `El legajo unirá: ${piezas.map((p) => p.titulo).join(", ")}.`
+    : "Este caso no tiene documentos en PDF para armar el legajo.";
+  $("modalArchivar").classList.remove("hidden");
+  $("arNumero").focus();
+}
+
+function cerrarArchivar() {
+  if (archivando) return;
+  $("modalArchivar").classList.add("hidden");
+  casoQueSeArchiva = null;
+}
+$("btnCerrarArchivar").addEventListener("click", cerrarArchivar);
+$("btnCancelarArchivar").addEventListener("click", cerrarArchivar);
+
+/** Texto apto para la fuente estándar del PDF: sin caracteres que no puede dibujar. */
+const textoPdf = (t) => String(t ?? "").normalize("NFC").replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
+  .replace(/[–—]/g, "-").replace(/[^\x20-\x7E\xA0-\xFF]/g, "?");
+
+/** Une las piezas en un solo PDF con portada e índice. */
+async function armarLegajo(nota, piezas, archivo) {
+  const { PDFDocument, StandardFonts } = await import("https://esm.sh/pdf-lib@1.17.1");
+  const legajo = await PDFDocument.create();
+  const fuente = await legajo.embedFont(StandardFonts.Helvetica);
+  const negrita = await legajo.embedFont(StandardFonts.HelveticaBold);
+  const portada = legajo.addPage([595, 842]);
+  const indice = [];
+  for (const pieza of piezas) {
+    const { data, error } = await supabase.storage.from(pieza.bucket).download(pieza.ruta);
+    if (error || !data) throw new Error(`No se pudo leer «${pieza.titulo}». No se archivó nada.`);
+    const origen = await PDFDocument.load(await data.arrayBuffer(), { ignoreEncryption: true });
+    const desde = legajo.getPageCount() + 1;
+    const paginas = await legajo.copyPages(origen, origen.getPageIndices());
+    paginas.forEach((p) => legajo.addPage(p));
+    const hasta = legajo.getPageCount();
+    indice.push(`${pieza.titulo}  ·  ${desde === hasta ? `pág. ${desde}` : `págs. ${desde} a ${hasta}`}`);
+  }
+  const rotulo = datosDelRotulo(nota, archivo);
+  let y = 780;
+  const linea = (texto, tam = 11, f = fuente) => { portada.drawText(textoPdf(texto), { x: 56, y, size: tam, font: f }); y -= tam + 10; };
+  linea("LEGAJO DE ARCHIVO", 18, negrita);
+  linea(archivo.codigo, 26, negrita);
+  y -= 6;
+  linea(`Investigado: ${rotulo.investigado}`);
+  linea(`Fecha de la falta: ${formatDate(rotulo.fecha_falta)}   ·   Infracción: ${rotulo.infraccion || "-"}`);
+  linea(`Ubicación del físico: ${rotulo.ubicacion || "-"}   ·   Folios: ${rotulo.folios}`);
+  linea(`Archivado el ${formatDate(hoyLima())} por ${state.email || ""}`);
+  y -= 10;
+  linea("Contenido", 13, negrita);
+  indice.forEach((t) => linea(`- ${t}`));
+  return legajo.save();
+}
+
+async function huellaSha256(bytes) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+$("btnConfirmarArchivar").addEventListener("click", async (e) => {
+  const nota = casoQueSeArchiva;
+  if (!nota || archivando) return;
+  const errEl = $("arError");
+  errEl.classList.add("hidden");
+  const numero = normalizarNumeroOficio($("arNumero").value);
+  const archivo = {
+    codigo: numero ? `${$("arTipo").value} ${numero}` : "",
+    ubicacion: $("arUbicacion").value.trim() || null,
+    folios: Number($("arFolios").value),
+    observacion: $("arObservacion").value.trim() || null,
+  };
+  const piezas = piezasDelLegajo(nota, (state.remisiones || []).find((r) => r.nota_id === nota.id));
+  const falta = faltaParaArchivar({ codigo: archivo.codigo, folios: archivo.folios, piezas });
+  if (falta.length) { errEl.textContent = `Falta ${falta.join(", ")}.`; errEl.classList.remove("hidden"); return; }
+  const btn = e.currentTarget;
+  archivando = true;
+  ocuparBoton(btn, true, "Armando el legajo...");
+  let subido = null;
+  try {
+    const bytes = await armarLegajo(nota, piezas, archivo);
+    if (bytes.byteLength > 50 * 1024 * 1024) throw new Error("El legajo supera 50 MB. Reduzca la resolución de los escaneos.");
+    const sha = await huellaSha256(bytes);
+    const nombre = `LEGAJO ${archivo.codigo} - ${nombreInvestigadoVisible(nota, true)}.pdf`.replace(/[\\/:*?"<>|]/g, "-");
+    const ruta = `archivo/${archivo.codigo.replace(/\s+/g, "_")}_${crypto.randomUUID()}.pdf`;
+    const { error: errSubida } = await supabase.storage.from("expedientes-terminados-pnp")
+      .upload(ruta, new Blob([bytes], { type: "application/pdf" }), { upsert: false, contentType: "application/pdf" });
+    if (errSubida) throw new Error("No se pudo guardar el legajo: " + errSubida.message);
+    subido = ruta;
+    const { data: fila, error } = await supabase.from("archivo_expedientes").insert({
+      nota_id: nota.id, codigo: archivo.codigo, ubicacion: archivo.ubicacion, folios: archivo.folios,
+      observacion: archivo.observacion, legajo_path: ruta, legajo_nombre: nombre, legajo_sha256: sha,
+    }).select().single();
+    if (error) {
+      if (error.code === "23505") throw new Error(`El folder ${archivo.codigo} ya existe, o este caso ya fue archivado.`);
+      if (faltaTablaArchivo(error)) throw new Error("El archivo todavía no está activado en el servidor.");
+      throw new Error(error.message);
+    }
+    subido = null;
+    try { localStorage.setItem(MEMORIA_UBICACION, archivo.ubicacion || ""); } catch { /* sin memoria */ }
+    archivando = false;
+    cerrarArchivar();
+    toast(`Archivado como ${archivo.codigo}. Imprima el rótulo y péguelo en el folder.`, "ok", 9000);
+    imprimirRotulo(nota, fila);
+    if (!$("view-archivo").classList.contains("hidden")) await abrirArchivo();
+    if (state.currentNotaId === nota.id) void pintarArchivoDelCaso(nota);
+  } catch (err) {
+    console.error("No se pudo archivar:", err);
+    errEl.textContent = err.message || String(err);
+    errEl.classList.remove("hidden");
+  } finally {
+    // Sin registro no debe quedar un legajo suelto en el almacenamiento.
+    if (subido) await supabase.storage.from("expedientes-terminados-pnp").remove([subido]).catch(() => {});
+    archivando = false;
+    ocuparBoton(btn, false);
+  }
+});
+
+async function abrirLegajo(archivo) {
+  if (!archivo) return;
+  const { data, error } = await supabase.storage.from("expedientes-terminados-pnp").createSignedUrl(archivo.legajo_path, 300);
+  if (error || !data?.signedUrl) { toast("No se pudo abrir el legajo. Compruebe su conexión."); return; }
+  window.open(data.signedUrl, "_blank", "noopener");
+}
+
+/** Rótulo para pegar en el folder manila: se imprime desde el navegador. */
+function imprimirRotulo(nota, archivo) {
+  const r = datosDelRotulo(nota, archivo);
+  const ventana = window.open("", "_blank", "width=520,height=420");
+  if (!ventana) { toast("El navegador bloqueó la ventana del rótulo. Permita ventanas emergentes e inténtelo de nuevo."); return; }
+  ventana.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Rótulo ${escapeHtml(r.codigo)}</title>
+    <style>
+      @page { size: 10cm 6cm; margin: 0; }
+      body { margin: 0; font-family: Arial, sans-serif; color: #000; }
+      .rotulo { box-sizing: border-box; width: 10cm; height: 6cm; padding: 0.5cm; border: 2px solid #000; display: flex; flex-direction: column; gap: 4px; }
+      .codigo { font-size: 26pt; font-weight: 700; letter-spacing: 1px; }
+      .persona { font-size: 12pt; font-weight: 700; }
+      .dato { font-size: 10pt; }
+    </style></head><body>
+    <div class="rotulo">
+      <div class="dato">EXPEDIENTE DISCIPLINARIO</div>
+      <div class="codigo">${escapeHtml(r.codigo)}</div>
+      <div class="persona">${escapeHtml(r.investigado)}</div>
+      <div class="dato">Falta: ${escapeHtml(formatDate(r.fecha_falta))} · Infracción: ${escapeHtml(r.infraccion || "-")}</div>
+      <div class="dato">Folios: ${escapeHtml(r.folios)} · ${escapeHtml(r.ubicacion || "")}</div>
+    </div>
+    <script>window.onload = () => { window.print(); };<\/script>
+    </body></html>`);
+  ventana.document.close();
+}
+
 // ---------- Asistente de consulta flotante ----------
 function agregarMensajeAsistente(role, texto) {
   state.asistenteHistorial.push({ role, texto });
@@ -6438,6 +6744,9 @@ $("btnGenerarOficio")?.addEventListener("click", async (e) => {
     const falta = faltaParaElOficio(datosIniciales);
     if (!$("ofConfirmarFirmantes").checked) falta.push("confirmar los firmantes actuales");
     if (falta.length) throw new Error(`Falta ${falta.join(", ")}.`);
+    const numeroOficio = normalizarNumeroOficio(datosIniciales.numero_oficio);
+    if (!numeroOficio) throw new Error("Escriba el número de oficio como correlativo y año, por ejemplo 045-2026.");
+    await comprobarOficioLibre(nota.id, numeroOficio);
     // Las piezas se leen del legajo ya registrado, para anunciar lo que el
     // expediente trae de verdad y no una lista fija.
     const piezas = await piezasDelLegajoFirmado(nota);
@@ -6446,6 +6755,7 @@ $("btnGenerarOficio")?.addEventListener("click", async (e) => {
     const nombreArchivo = nombreArchivoDocumento("OFICIO REMISION", nota);
     saveAs(blob, nombreArchivo);
     registrarVersionDocumento(nota.id, "oficio_remision", blob, nombreArchivo);
+    await guardarNumeroOficio(nota.id, numeroOficio);
     recordarDelOficio({
       jefeGrado: $("ofJefeGrado").value.trim(),
       jefeNombre: $("ofJefeNombre").value.trim(),

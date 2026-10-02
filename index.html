@@ -51,6 +51,7 @@
       <button class="tab-btn admin-only hidden" data-view="agenda">Agenda</button>
       <button class="tab-btn admin-only hidden" data-view="documentos">Documentos</button>
       <button class="tab-btn admin-only hidden" data-view="recepcion">Recepción</button>
+      <button class="tab-btn admin-only hidden" data-view="archivo">Archivo</button>
       <button class="tab-btn admin-only hidden" data-view="panel">Panel</button>
       <button class="tab-btn admin-only hidden" data-view="historial">Historial</button>
     </nav>
@@ -504,6 +505,31 @@
     <p id="cumplimientoEmpty" class="muted hidden">No hay documentos institucionales registrados todavía.</p>
   </section>
 
+  <!-- ARCHIVO: un folder manila por caso, rotulado con su N.º de oficio -->
+  <section id="view-archivo" class="view hidden">
+    <div class="view-header">
+      <div>
+        <h2>Archivo</h2>
+        <p class="muted view-subtitle">Un folder manila por caso, rotulado con su <strong>número de oficio</strong> (o de Resolución si se archivó sin sanción). Al archivar se arma un legajo PDF único con todo el caso y se imprime el rótulo del folder.</p>
+      </div>
+    </div>
+    <p id="archivoEstado" class="muted" role="status" aria-live="polite"></p>
+    <section class="detail-card">
+      <div class="detail-card-header">
+        <h3>Por archivar</h3>
+        <span id="archivoPendientesN" class="badge"></span>
+      </div>
+      <div id="archivoPendientes" class="archivo-lista"></div>
+    </section>
+    <section class="detail-card">
+      <div class="detail-card-header">
+        <h3>Archivados</h3>
+        <input id="archivoBuscar" type="search" placeholder="N.º de oficio, nombre o CIP" autocomplete="off" />
+      </div>
+      <div id="archivoLista" class="archivo-lista"></div>
+    </section>
+  </section>
+
   <!-- PANEL DE METRICAS -->
   <section id="view-panel" class="view hidden">
     <div class="view-header">
@@ -914,6 +940,38 @@
           <button type="button" id="tokenCopiarCodigos" class="btn-secondary">Copiar códigos</button>
           <button type="button" id="btnTerminarToken" class="btn-primary">Ya los guardé</button>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modalArchivar" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Archivar expediente</h3>
+      <button type="button" id="btnCerrarArchivar" class="btn-ghost" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="arCaso" class="muted"></p>
+      <div class="grid-2">
+        <label>Tipo
+          <select id="arTipo">
+            <option value="OF">Oficio de remisión</option>
+            <option value="RES">Resolución de archivo</option>
+          </select>
+        </label>
+        <label>Número <input type="text" id="arNumero" placeholder="045-2026" autocomplete="off" /></label>
+      </div>
+      <div class="grid-2">
+        <label>Dónde queda el folder <input type="text" id="arUbicacion" maxlength="200" placeholder="Archivador 1, cajón 2" /></label>
+        <label>Folios <input type="number" id="arFolios" min="1" step="1" /></label>
+      </div>
+      <label>Observación (opcional) <textarea id="arObservacion" rows="2" maxlength="1000"></textarea></label>
+      <p id="arPiezas" class="muted small"></p>
+      <p id="arError" class="error hidden" role="alert"></p>
+      <div class="modal-actions">
+        <button type="button" id="btnCancelarArchivar" class="btn-ghost">Cancelar</button>
+        <button type="button" id="btnConfirmarArchivar" class="btn-primary">Archivar y armar el legajo</button>
       </div>
     </div>
   </div>

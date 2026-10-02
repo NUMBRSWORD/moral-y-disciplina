@@ -840,3 +840,12 @@ body.modo-sencillo #btnPaletaBuscar { display: none; }
 .token-codigos { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; font-family: ui-monospace, monospace; }
 .token-codigos li { padding: 8px; border: 1px solid var(--border); border-radius: 8px; text-align: center; }
 #tokenRecuperacion { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+
+/* ---------- Archivo: folder manila por caso ---------- */
+.archivo-lista { display: grid; gap: 10px; margin-top: 12px; }
+.archivo-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); }
+.archivo-item > div:first-child { flex: 1 1 220px; min-width: 0; }
+.archivo-item p { margin: 2px 0 0; }
+.archivo-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.archivo-item .archivo-acciones { margin-top: 0; }
+#archivoBuscar { max-width: 280px; }
