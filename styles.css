@@ -52,6 +52,9 @@ body {
 
 .hidden { display: none !important; }
 .muted { color: var(--text-muted); }
+/* Enlaces con el color del tema (sin esto el navegador los pinta azul/morado). */
+a { color: var(--accent); text-underline-offset: 2px; }
+a:hover { color: var(--accent-hover); }
 .small { font-size: 0.85rem; }
 .error { color: var(--danger); background: var(--danger-soft); padding: 8px 12px; border-radius: 8px; }
 
