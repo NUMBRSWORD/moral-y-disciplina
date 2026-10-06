@@ -62,6 +62,7 @@
       <button id="btnInicioSencillo" class="btn-ghost hidden" type="button">Inicio</button>
       <button id="btnActivarToken" class="btn-ghost hidden" type="button">Activar token</button>
       <button id="btnCambiarClave" class="btn-ghost" type="button">Cambiar clave</button>
+      <button id="btnRestablecerClave" class="btn-ghost admin-only hidden" type="button" title="Clave temporal para un usuario que olvidó la suya">Restablecer clave</button>
       <button id="btnLogout" class="btn-ghost">Salir</button>
     </div>
   </div>
@@ -86,6 +87,8 @@
       </label>
       <p id="loginError" class="error hidden" role="alert"></p>
       <button type="submit" class="btn-primary">Ingresar</button>
+      <p class="muted small" style="margin-top:8px; text-align:center"><button type="button" id="btnOlvideClave" class="btn-ghost" aria-expanded="false" aria-controls="olvideClaveAyuda">¿Olvidó su clave?</button></p>
+      <p id="olvideClaveAyuda" class="ai-box hidden">Comuníquese con el administrador de Faltos y dígale su CIP; le dará una <strong>clave temporal</strong>. Ingrese con su CIP y esa clave, y la aplicación le pedirá elegir una clave nueva. Si tiene el token activado, lo seguirá necesitando.</p>
       <!-- La aplicación Android oculta este bloque: Google no permite iniciar sesión
            dentro de una vista web incrustada, allí se usa su botón propio. -->
       <div id="accesoGoogle">
@@ -1094,6 +1097,32 @@
       <div class="modal-actions">
         <button type="button" id="btnSalirCambiarClave" class="btn-ghost">Cerrar sesión</button>
         <button type="submit" id="btnGuardarClave" class="btn-primary">Guardar clave nueva</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- RESTABLECER CLAVE DE UN USUARIO (solo administrador) -->
+<div id="modalRestablecerClave" class="modal-overlay hidden">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="restablecerClaveTitulo">
+    <div class="modal-header">
+      <h3 id="restablecerClaveTitulo">Restablecer clave de un usuario</h3>
+      <button type="button" id="btnCerrarRestablecerClave" class="btn-ghost">✕</button>
+    </div>
+    <form id="restablecerClaveForm" class="modal-body">
+      <p class="muted small">Para quien olvidó su clave. Se genera una clave temporal, se cierran sus sesiones abiertas y, al ingresar, se le obliga a elegir una clave nueva. Entréguela en persona. Queda registrado en el historial.</p>
+      <label>CIP del usuario
+        <input type="text" id="rcCip" required inputmode="numeric" pattern="[0-9]{4,10}" autocomplete="off" />
+      </label>
+      <p id="rcError" class="error hidden" role="alert"></p>
+      <div id="rcResultado" class="ai-box hidden">
+        <p>Clave temporal del CIP <strong id="rcResultadoCip"></strong>:</p>
+        <p><code id="rcClave" style="font-size:1.4rem; letter-spacing:.08em; user-select:all"></code></p>
+        <p class="muted small">No se volverá a mostrar. Si se pierde, restablezca otra vez.</p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="btnCopiarClaveTemporal" class="btn-secondary hidden">Copiar</button>
+        <button type="submit" id="btnRestablecerConfirmar" class="btn-primary">Generar clave temporal</button>
       </div>
     </form>
   </div>

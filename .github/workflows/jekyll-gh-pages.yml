@@ -1,7 +1,7 @@
 name: Verificar y publicar Faltos
 on:
   push:
-    branches: ["main", "combinado", "codex/**"]
+    branches: ["main"]
   pull_request:
   workflow_dispatch:
 permissions:

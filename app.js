@@ -729,6 +729,7 @@ async function onAuthed(session) {
 
 function onSignedOut() {
   state.session = null;
+  cerrarRestablecerClave();
   state.role = null;
   state.notas = []; state.efectivos = []; state.remisiones = [];
   state.expedientesRemitidos = []; state.currentNotaId = null;
@@ -877,6 +878,70 @@ function cerrarCambioClave() {
 }
 
 $("btnCambiarClave").addEventListener("click", () => abrirCambioClave());
+
+// ¿Olvidó su clave? Las cuentas son "{cip}@moralydisciplina.local": no hay correo al
+// que enviar un enlace, así que la clave temporal la genera un administrador.
+$("btnOlvideClave").addEventListener("click", (e) => {
+  const ayuda = $("olvideClaveAyuda");
+  const abrir = ayuda.classList.contains("hidden");
+  ayuda.classList.toggle("hidden", !abrir);
+  e.currentTarget.setAttribute("aria-expanded", String(abrir));
+});
+
+function abrirRestablecerClave() {
+  $("restablecerClaveForm").reset();
+  $("rcError").classList.add("hidden");
+  $("rcResultado").classList.add("hidden");
+  $("rcClave").textContent = "";
+  $("btnCopiarClaveTemporal").classList.add("hidden");
+  $("modalRestablecerClave").classList.remove("hidden");
+  $("rcCip").focus();
+}
+function cerrarRestablecerClave() {
+  $("modalRestablecerClave").classList.add("hidden");
+  // La clave temporal no se deja en la página después de cerrar.
+  $("rcClave").textContent = "";
+  $("restablecerClaveForm").reset();
+}
+$("btnRestablecerClave").addEventListener("click", abrirRestablecerClave);
+$("btnCerrarRestablecerClave").addEventListener("click", cerrarRestablecerClave);
+$("restablecerClaveForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errEl = $("rcError");
+  errEl.classList.add("hidden");
+  const cip = $("rcCip").value.trim();
+  if (!/^\d{4,10}$/.test(cip)) {
+    errEl.textContent = "Escriba el CIP del usuario (solo números).";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  if (!confirm(`¿Restablecer la clave del CIP ${cip}? Su clave actual dejará de funcionar y se cerrarán sus sesiones abiertas.`)) return;
+  const btn = $("btnRestablecerConfirmar");
+  ocuparBoton(btn, true, "Generando...");
+  try {
+    const { data, error } = await supabase.rpc("restablecer_clave_usuario", { p_cip: cip });
+    if (error || !data) {
+      errEl.textContent = "No se pudo restablecer: " + (error?.message || "respuesta vacía") + ".";
+      errEl.classList.remove("hidden");
+      return;
+    }
+    $("rcResultadoCip").textContent = cip;
+    $("rcClave").textContent = data;
+    $("rcResultado").classList.remove("hidden");
+    $("btnCopiarClaveTemporal").classList.remove("hidden");
+    toast(`Clave del CIP ${cip} restablecida.`, "ok");
+  } finally {
+    ocuparBoton(btn, false);
+  }
+});
+$("btnCopiarClaveTemporal").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("rcClave").textContent);
+    toast("Clave temporal copiada.", "ok");
+  } catch {
+    toast("No se pudo copiar; selecciónela y cópiela a mano.");
+  }
+});
 
 // Aviso de privacidad (Ley 29733): visible desde el acceso y desde Cumplimiento.
 document.querySelectorAll("[data-abrir-aviso]").forEach((b) => b.addEventListener("click", () => $("modalAviso").classList.remove("hidden")));
