@@ -19,7 +19,7 @@ export function createClient(){
       return {data:null,error:{message:'RPC deshabilitada en QA'}};
     },
     from:table=>{
-      let rows=table==='profiles'?[{role:'admin',email:session.user.email}]:table==='notas_informativas'?notas:table==='efectivos'?personas:[];
+      let rows=table==='profiles'?[{role:'admin',estado:'aprobado',email:session.user.email}]:table==='notas_informativas'?notas:table==='efectivos'?personas:[];
       let single=false;
       const query={select(){return query;},order(){return query;},eq(k,v){rows=rows.filter(r=>r[k]===v||(table==='profiles'&&k==='id'));return query;},
         in(k,v){rows=rows.filter(r=>v.includes(r[k]));return query;},limit(n){rows=rows.slice(0,n);return query;},

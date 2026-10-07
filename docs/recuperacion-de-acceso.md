@@ -2,19 +2,33 @@
 
 `moral-y-disciplina` — Supabase proyecto `tndjulaitywtoocqeeiy`.
 
-Hoy hay **un solo usuario administrador**. Si ese CIP se pierde, se bloquea o la
-persona se va, **nadie más puede administrar** (crear notas, generar documentos,
-gestionar efectivos, ver Recepción). Esto es un punto único de fallo que una
-auditoría marca. Solución: tener siempre **al menos dos** admins y dejar
-documentado cómo se recupera el acceso.
+Hay **dos administradores** (comprobado el 06/10/2026, ambos con token). Mantener
+siempre al menos dos: si solo queda uno y se bloquea, **nadie más puede
+administrar** (crear notas, generar documentos, gestionar efectivos, ver
+Recepción).
 
 ## Cómo funciona el acceso
 
-- Los usuarios se crean en **Supabase → Authentication → Users**.
-- Cada usuario tiene una fila en la tabla `public.profiles` con `role` =
-  `'admin'` o `'viewer'`. Solo `role='admin'` habilita todo.
-- Los oficiales inician sesión con su **CIP** (el sistema le agrega
-  `@moralydisciplina.local` por dentro); la clave la fija el administrador.
+Desde el 07/10/2026 **se entra con Google**. Cada forma de entrar (Google o CIP y
+clave) es una cuenta distinta en Supabase, con su propio token: por eso se usa una
+sola por persona.
+
+1. La persona pulsa **Continuar con Google** (en la app Android o en la web) y llena su
+   solicitud: grado, nombres, CIP, DNI y teléfono.
+2. Un administrador la aprueba en la pestaña **Cuentas**. El CIP queda en su cuenta y
+   con él ve sus mismos expedientes.
+3. Si esa persona tenía una cuenta antigua de CIP, se **retira** al aprobar (queda
+   como «rechazada»: no se borra porque figura como autora de notas y documentos).
+   Si entra con ella, la app le dice que ahora entra con Google.
+4. Quien aún entra con CIP ve un aviso para pasar a Google, y no se le pide activar
+   el token en esa cuenta.
+
+Los **administradores conservan su cuenta de CIP** como acceso de emergencia
+(«Entrar con CIP y clave», plegado en la pantalla de ingreso).
+
+- Cada usuario tiene una fila en `public.profiles` con `role` (`admin` o `viewer`),
+  `estado` (`pendiente`, `aprobado`, `rechazado`) y `cip`.
+- Las cuentas de CIP son `<CIP>@moralydisciplina.local`; la clave la fija el administrador.
 
 ## Crear una cuenta para firmar documentos (Comisario u otro mando, sin ser admin)
 
@@ -41,11 +55,42 @@ entrar y firmar — no hace falta el paso 2.
 > Recomendado: 2 admins fijos (jefe de la unidad + su suplente), y revisar la
 > lista cada vez que hay cambio de destino.
 
+## Un usuario olvidó su clave
+
+Las cuentas son `<CIP>@moralydisciplina.local`: no tienen un correo real, así que
+el *Reset password* de Supabase (que manda un enlace por correo) **no sirve**.
+
+1. Un administrador entra a la web con su token y pulsa **Restablecer clave**
+   (barra superior).
+2. Escribe el CIP del usuario y pulsa **Generar clave temporal**.
+3. Entrega en persona la clave que aparece (tipo `ABCD-EF23`). No se vuelve a
+   mostrar.
+4. El usuario entra con su CIP y esa clave; la app le exige elegir una nueva
+   antes de ver nada. Si tenía token, lo sigue necesitando.
+
+Queda registrado en **Historial** (quién y a qué CIP, nunca la clave). Se cierran
+las sesiones abiertas de ese usuario. Función: `restablecer_clave_usuario`
+(migración `20261006120000_restablecer_clave_por_admin`).
+
 ## Recuperar acceso de un admin bloqueado
 
-- **Olvidó la clave:** otro admin (o el dueño del proyecto Supabase) entra a
-  **Authentication → Users**, abre el usuario y usa *Reset password* / define
-  una nueva.
+El botón no restablece la clave de otro administrador (para que ninguno pueda
+tomar la cuenta del otro). Se hace desde el **SQL Editor** de Supabase con una
+clave temporal; al entrar se le exigirá cambiarla:
+
+```sql
+with u as (
+  update auth.users
+     set encrypted_password = extensions.crypt('CLAVE-TEMPORAL', extensions.gen_salt('bf', 10)),
+         updated_at = now()
+   where email = '<CIP>@moralydisciplina.local'
+  returning id, encrypted_password
+)
+insert into public.cambios_clave_pendientes (user_id, hash_al_marcar)
+select id, encrypted_password from u
+on conflict (user_id) do update set hash_al_marcar = excluded.hash_al_marcar, marcado_at = now();
+```
+
 - **No hay ningún admin disponible:** entrar al **panel de Supabase** con la
   cuenta dueña del proyecto (`hanshidalgo98@gmail.com`) y:
   1. En *Authentication → Users*, resetear la clave del usuario, o crear uno

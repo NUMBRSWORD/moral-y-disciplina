@@ -8,7 +8,6 @@ const candidatos = [
   "app.js",
   "config.js",
   "sw.js",
-  "devserver.cjs",
   ...readdirSync("lib").filter((f) => f.endsWith(".js")).map((f) => `lib/${f}`),
 ];
 const files = candidatos.filter((f) => existsSync(f));

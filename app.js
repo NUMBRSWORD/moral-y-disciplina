@@ -19,6 +19,7 @@ import { restaurarNombres, seudonimizarInvestigados } from "./lib/privacidad.js"
 import { fechaLima, hoyLima, horaLima } from "./lib/fechas.js";
 import { DIAS_MINIMOS, INDETERMINADO, INICIO_INFORME, REMUNERACION, cumpleMinimo, descuentoDeNotas, formatearSoles, textoDescuento, textoDias } from "./lib/descuento.js";
 import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
+import { esCuentaCip, cipDeCuenta, vistaDeAcceso, validarSolicitud, organizarCuentas } from "./lib/cuentas.js";
 import { prepararLote, revisarFila, filasGuardables, resumenDelLote, filaARegistroDeExpediente, necesitaAyudaDeIA, aplicarLecturaDeIA, marcarRepetidos } from "./lib/loteExpedientes.js";
 import { estadoDeRemision, esperaOficio, esperaHojaDeTramite } from "./lib/remision.js";
 import { datosDelOficio, documentosRemitidos, faltaParaElOficio, renderizarOficioRemisionDocx } from "./lib/oficioRemision.js";
@@ -36,6 +37,7 @@ const EN_APP_ANDROID = !!window.__faltosConfig;
 
 const state = {
   session: null,
+  cuentas: { porAprobar: [], porRetirar: [], porMigrar: [], sinSolicitud: [] },
   role: null,
   email: null,
   cip: null,
@@ -416,7 +418,7 @@ function showView(id) {
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $(id).classList.remove("hidden");
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-  const map = { "view-dashboard": "dashboard", "view-seguimiento": "seguimiento", "view-cumplimiento": "cumplimiento", "view-efectivos": "efectivos", "view-roles": "roles", "view-directivas": "directivas", "view-agenda": "agenda", "view-documentos": "documentos", "view-recepcion": "recepcion", "view-panel": "panel", "view-historial": "historial", "view-archivo": "archivo" };
+  const map = { "view-cuentas": "cuentas", "view-dashboard": "dashboard", "view-seguimiento": "seguimiento", "view-cumplimiento": "cumplimiento", "view-efectivos": "efectivos", "view-roles": "roles", "view-directivas": "directivas", "view-agenda": "agenda", "view-documentos": "documentos", "view-recepcion": "recepcion", "view-panel": "panel", "view-historial": "historial", "view-archivo": "archivo" };
   if (map[id]) {
     document.querySelector(`.tab-btn[data-view="${map[id]}"]`)?.classList.add("active");
   }
@@ -437,6 +439,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (target === "panel") { showView("view-panel"); actualizarVistaCompartida(); }
     if (target === "historial") { showView("view-historial"); loadHistorial(); }
     if (target === "archivo") { showView("view-archivo"); void abrirArchivo(); }
+    if (target === "cuentas") { showView("view-cuentas"); void loadCuentasView(); }
   });
 });
 
@@ -702,9 +705,13 @@ async function onAuthed(session) {
     abrirCambioClave({ obligatorio: true });
     return;
   }
+  // Cuenta de Google aún sin aprobar, o cuenta de CIP retirada: no puede leer las
+  // políticas ni nada más, así que se le muestra su solicitud antes que ellas.
+  if (!(await cuentaAprobada(session.user))) return;
   if (!EN_APP_ANDROID && !(await politicasAlDia())) return;
   $("topbar").classList.remove("hidden");
   await loadProfile(session.user.id);
+  actualizarAvisoMigrar();
   void prepararAlertasMovil();
   const sencillo = usaInicioSencillo();
   document.body.classList.toggle("modo-sencillo", sencillo);
@@ -729,6 +736,7 @@ async function onAuthed(session) {
 
 function onSignedOut() {
   state.session = null;
+  $("avisoMigrarGoogle").classList.add("hidden");
   cerrarRestablecerClave();
   state.role = null;
   state.notas = []; state.efectivos = []; state.remisiones = [];
@@ -751,7 +759,8 @@ supabase.auth.onAuthStateChange((_event, session) => {
   // En las políticas la barra está oculta, pero repetir onAuthed borraría lo que
   // la persona ya escribió para firmar.
   const yaEnLaApp = mismaPersona && (!$("topbar").classList.contains("hidden")
-    || !$("view-politicas").classList.contains("hidden"));
+    || !$("view-politicas").classList.contains("hidden")
+    || !$("view-acceso").classList.contains("hidden"));
   if (yaEnLaApp) { state.session = session; return; }
   onAuthed(session);
 });
@@ -795,22 +804,121 @@ $("loginForm").addEventListener("submit", async (e) => {
 // Entrar con Google, igual que en la app Faltos. Existe porque la clave de este
 // formulario vive en Supabase y NO es la de Google: quien entró con Google no tiene
 // por qué conocerla, y antes se quedaba fuera al usar la web desde una computadora.
+async function entrarConGoogle() {
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: window.location.href.split("#")[0].split("?")[0] },
+  });
+  if (error) throw error;
+  // Sin error el navegador ya se está yendo a Google.
+}
+
 $("btnEntrarGoogle").addEventListener("click", async (e) => {
   const btn = e.currentTarget;
-  $("loginError").classList.add("hidden");
+  $("googleError").classList.add("hidden");
   ocuparBoton(btn, true, "Abriendo Google...");
   try {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: window.location.href.split("#")[0].split("?")[0] },
-    });
-    if (error) throw error;
-    // Si no hubo error el navegador ya se está yendo a Google; no se restaura el botón.
+    await entrarConGoogle();
   } catch (err) {
-    $("loginError").textContent = "No se pudo abrir el acceso con Google: " + (err.message || err);
-    $("loginError").classList.remove("hidden");
+    $("googleError").textContent = "No se pudo abrir el acceso con Google: " + (err.message || err);
+    $("googleError").classList.remove("hidden");
     ocuparBoton(btn, false);
   }
+});
+
+// Quien entró con CIP pasa a Google: se cierra esta sesión y se abre Google. Dentro de
+// la app Android Google no funciona en la vista web: se usa el botón de la aplicación.
+async function salirYEntrarConGoogle() {
+  await supabase.auth.signOut();
+  if (EN_APP_ANDROID) {
+    toast("Vuelva atrás y pulse «Continuar con Google» en la aplicación. Luego llene su solicitud con su CIP.", "ok", 12000);
+    return;
+  }
+  try { await entrarConGoogle(); } catch (err) { toast("No se pudo abrir Google: " + (err.message || err)); }
+}
+
+// ---------- Solicitud de acceso (cuenta de Google sin aprobar) ----------
+// Devuelve true si la cuenta puede seguir. Si la consulta falla NO se bloquea: el
+// servidor (RLS) ya no entrega datos a una cuenta sin aprobar.
+async function cuentaAprobada(user) {
+  try {
+    const [{ data: perfil, error }, { data: solicitudes }] = await Promise.all([
+      supabase.from("profiles").select("email, estado").eq("id", user.id).maybeSingle(),
+      supabase.from("solicitudes_acceso").select("user_id").eq("user_id", user.id),
+    ]);
+    if (error || !perfil) return true;
+    const vista = vistaDeAcceso(perfil, (solicitudes || []).length > 0);
+    if (vista === "aprobada") return true;
+    mostrarAcceso(vista);
+    return false;
+  } catch (err) {
+    console.warn("No se pudo comprobar la cuenta:", err);
+    return true;
+  }
+}
+
+function mostrarAcceso(vista) {
+  const textos = {
+    formulario: ["Solicitud de acceso", "Complete sus datos. Un administrador verificará su identidad y aprobará su cuenta; hasta entonces no verá información."],
+    en_revision: ["Solicitud en revisión", "Su solicitud fue enviada. Cuando el administrador la apruebe, pulse «Ya me aprobaron: entrar»."],
+    rechazada: ["Cuenta no aprobada", "Su solicitud de acceso no fue aprobada. Si cree que es un error, comuníquese con el administrador."],
+    retirada: ["Esta cuenta de CIP fue retirada", "Ahora se entra con Google. Cierre sesión y pulse «Continuar con Google»; si aún no lo hizo, llene su solicitud con su CIP."],
+  };
+  const [titulo, mensaje] = textos[vista] || textos.rechazada;
+  $("topbar").classList.add("hidden");
+  $("accesoTitulo").textContent = titulo;
+  $("accesoMensaje").textContent = mensaje;
+  $("solicitudForm").classList.toggle("hidden", vista !== "formulario");
+  $("btnAccesoActualizar").classList.toggle("hidden", vista !== "en_revision");
+  $("btnAccesoGoogle").classList.toggle("hidden", vista !== "retirada");
+  $("solicitudError").classList.add("hidden");
+  showView("view-acceso");
+}
+
+$("solicitudForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errEl = $("solicitudError");
+  errEl.classList.add("hidden");
+  const { datos, error: problema } = validarSolicitud({
+    grado: $("solGrado").value, apellidos: $("solApellidos").value, nombres: $("solNombres").value,
+    cip: $("solCip").value, dni: $("solDni").value, telefono: $("solTelefono").value, acepta: $("solAcepta").checked,
+  });
+  if (problema) { errEl.textContent = problema; errEl.classList.remove("hidden"); return; }
+  const btn = $("btnEnviarSolicitud");
+  ocuparBoton(btn, true, "Enviando...");
+  try {
+    const user = state.session?.user;
+    if (!user) throw new Error("La sesión se cerró; vuelva a entrar.");
+    // Misma versión de términos que registra la app Android (ConfigSupabase.VERSION_TERMINOS).
+    const { error: errTerminos } = await supabase.from("aceptaciones_terminos")
+      .upsert({ user_id: user.id, version: "3" }, { onConflict: "user_id,version", ignoreDuplicates: true });
+    if (errTerminos) throw errTerminos;
+    const { error } = await supabase.from("solicitudes_acceso")
+      .upsert({ user_id: user.id, email: user.email, ...datos }, { onConflict: "user_id" });
+    if (error) throw error;
+    mostrarAcceso("en_revision");
+  } catch (err) {
+    errEl.textContent = "No se pudo enviar la solicitud: " + (err.message || err) + ".";
+    errEl.classList.remove("hidden");
+  } finally {
+    ocuparBoton(btn, false);
+  }
+});
+$("btnAccesoActualizar").addEventListener("click", () => { if (state.session) onAuthed(state.session); });
+$("btnAccesoGoogle").addEventListener("click", salirYEntrarConGoogle);
+$("btnAccesoSalir").addEventListener("click", () => supabase.auth.signOut());
+
+// Aviso a quien todavía entra con su cuenta de CIP (los administradores la conservan).
+function actualizarAvisoMigrar() {
+  let pospuesto = false;
+  try { pospuesto = sessionStorage.getItem("faltos.migrarLuego") === "1"; } catch (_) {}
+  const mostrar = esCuentaCip(state.email) && state.role !== "admin" && !pospuesto;
+  $("avisoMigrarGoogle").classList.toggle("hidden", !mostrar);
+}
+$("btnMigrarGoogle").addEventListener("click", salirYEntrarConGoogle);
+$("btnMigrarLuego").addEventListener("click", () => {
+  try { sessionStorage.setItem("faltos.migrarLuego", "1"); } catch (_) {}
+  $("avisoMigrarGoogle").classList.add("hidden");
 });
 
 $("tokenForm").addEventListener("submit", async (e) => {
@@ -904,6 +1012,100 @@ function cerrarRestablecerClave() {
   $("restablecerClaveForm").reset();
 }
 $("btnRestablecerClave").addEventListener("click", abrirRestablecerClave);
+$("btnCuentasRestablecer").addEventListener("click", abrirRestablecerClave);
+
+// Dentro de la app Android esta página solo se abre al elegir «Ingresar con correo o
+// CIP»: el formulario se muestra ya desplegado.
+if (EN_APP_ANDROID) $("accesoCip").open = true;
+
+// ---------- Cuentas (administrador) ----------
+async function loadCuentasView() {
+  const estadoEl = $("cuentasEstado");
+  estadoEl.textContent = "Cargando cuentas...";
+  try {
+    const [perfiles, solicitudes] = await Promise.all([
+      supabase.from("profiles").select("id, email, role, estado, cip"),
+      supabase.from("solicitudes_acceso").select("user_id, email, grado, apellidos, nombres, cip, dni, telefono, creado_at"),
+    ]);
+    if (perfiles.error) throw perfiles.error;
+    if (solicitudes.error) throw solicitudes.error;
+    state.cuentas = organizarCuentas(perfiles.data || [], solicitudes.data || []);
+    estadoEl.textContent = state.cuentas.sinSolicitud.length
+      ? `${state.cuentas.sinSolicitud.length} cuenta(s) de Google entraron pero aún no llenaron su solicitud.`
+      : "";
+    renderCuentas();
+  } catch (err) {
+    console.error(err);
+    estadoEl.textContent = "No se pudieron cargar las cuentas: " + (err.message || err);
+  }
+}
+
+function renderCuentas() {
+  const { porAprobar, porRetirar, porMigrar } = state.cuentas;
+  $("cuentasPorAprobarN").textContent = porAprobar.length;
+  $("cuentasPorRetirarN").textContent = porRetirar.length;
+  $("cuentasPorMigrarN").textContent = porMigrar.length;
+  $("cuentasPorAprobar").innerHTML = porAprobar.length ? porAprobar.map(({ perfil, solicitud: s, cuentaCip }) => `
+    <div class="cuenta-item" data-id="${escapeHtml(perfil.id)}">
+      <div>
+        <strong>${escapeHtml(`${s.grado} ${s.apellidos}, ${s.nombres}`)}</strong>
+        <p class="muted small">CIP ${escapeHtml(s.cip)} · DNI ${escapeHtml(s.dni)} · Tel. ${escapeHtml(s.telefono)} · ${escapeHtml(s.email || perfil.email || "")}</p>
+        <p class="muted small">${cuentaCip ? "Tiene una cuenta antigua de CIP: se retirará al aprobar." : "No tiene cuenta antigua de CIP."}</p>
+      </div>
+      <div class="cuenta-acciones">
+        <button type="button" class="btn-ghost btn-cuenta-rechazar">Rechazar</button>
+        <button type="button" class="btn-primary btn-cuenta-aprobar">Aprobar</button>
+      </div>
+    </div>`).join("") : `<p class="muted small">No hay solicitudes pendientes.</p>`;
+  $("cuentasPorRetirar").innerHTML = porRetirar.length ? porRetirar.map(({ cuentaCip, cuentaGoogle }) => `
+    <div class="cuenta-item" data-id="${escapeHtml(cuentaCip.id)}">
+      <div>
+        <strong>CIP ${escapeHtml(cipDeCuenta(cuentaCip))}</strong>
+        <p class="muted small">Ya entra con Google: ${escapeHtml(cuentaGoogle.email || "")}</p>
+      </div>
+      <div class="cuenta-acciones"><button type="button" class="btn-secondary btn-cuenta-retirar">Retirar cuenta de CIP</button></div>
+    </div>`).join("") : `<p class="muted small">Nada por retirar.</p>`;
+  $("cuentasPorMigrar").innerHTML = porMigrar.length
+    ? `<div class="cuentas-cips">${porMigrar.map((p) => `<span class="badge">CIP ${escapeHtml(cipDeCuenta(p))}</span>`).join("")}</div>`
+    : `<p class="muted small">Todos los usuarios ya entran con Google.</p>`;
+}
+
+async function accionCuenta(btn, rpcs, mensajeOk) {
+  ocuparBoton(btn, true, "Guardando...");
+  try {
+    for (const [nombre, args] of rpcs) {
+      const { error } = await supabase.rpc(nombre, args);
+      if (error) throw error;
+    }
+    toast(mensajeOk, "ok");
+    await loadCuentasView();
+  } catch (err) {
+    toast("No se pudo completar: " + (err.message || err));
+    ocuparBoton(btn, false);
+  }
+}
+
+$("view-cuentas").addEventListener("click", (e) => {
+  const btn = e.target.closest("button");
+  const item = btn?.closest(".cuenta-item");
+  if (!item) return;
+  const id = item.dataset.id;
+  if (btn.classList.contains("btn-cuenta-aprobar")) {
+    const x = state.cuentas.porAprobar.find((c) => c.perfil.id === id);
+    if (!x) return;
+    const nombre = `${x.solicitud.grado} ${x.solicitud.apellidos}, ${x.solicitud.nombres} (CIP ${x.solicitud.cip})`;
+    if (!confirm(`¿Aprobar a ${nombre}?${x.cuentaCip ? "\n\nSu cuenta antigua de CIP se retirará: desde ahora entrará solo con Google." : ""}`)) return;
+    const rpcs = [["aprobar_solicitud", { p_user_id: id, p_rol: "viewer" }]];
+    if (x.cuentaCip) rpcs.push(["rechazar_solicitud", { p_user_id: x.cuentaCip.id }]);
+    void accionCuenta(btn, rpcs, "Cuenta aprobada.");
+  } else if (btn.classList.contains("btn-cuenta-rechazar")) {
+    if (!confirm("¿Rechazar esta solicitud? La persona no podrá ver información.")) return;
+    void accionCuenta(btn, [["rechazar_solicitud", { p_user_id: id }]], "Solicitud rechazada.");
+  } else if (btn.classList.contains("btn-cuenta-retirar")) {
+    if (!confirm("¿Retirar esta cuenta de CIP? Su dueño seguirá entrando con Google; lo que hizo con ella se conserva.")) return;
+    void accionCuenta(btn, [["rechazar_solicitud", { p_user_id: id }]], "Cuenta de CIP retirada.");
+  }
+});
 $("btnCerrarRestablecerClave").addEventListener("click", cerrarRestablecerClave);
 $("restablecerClaveForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -1043,9 +1245,9 @@ function renderResumenRapidoNotas() {
 
 function diasHastaFecha(fecha) {
   if (!fecha) return null;
-  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-  const destino = new Date(`${fecha}T12:00:00`); destino.setHours(0, 0, 0, 0);
-  return Math.round((destino - hoy) / 86400000);
+  // Días de calendario de Lima, no del reloj del aparato (que puede estar en otra zona).
+  const dia = (iso) => Date.UTC(...iso.slice(0, 10).split("-").map((n, i) => Number(n) - (i === 1 ? 1 : 0)));
+  return Math.round((dia(fechaLima(fecha)) - dia(hoyLima())) / 86400000);
 }
 
 function obtenerAccionesPrioritariasNotas() {
@@ -1144,12 +1346,13 @@ function renderAgendaNotas() {
 $("buscarAgenda").addEventListener("input", renderAgendaNotas);
 
 function exportarAgendaCalendario() {
-  const fechaIcs = (fecha) => String(fecha || hoyLima()).slice(0, 10).replaceAll("-", "");
+  // created_at es un instante UTC: pasado por fechaLima para que lo creado de noche no caiga al día siguiente.
+  const fechaIcs = (fecha) => fechaLima(fecha || hoyLima()).replaceAll("-", "");
   const escaparIcs = (texto) => String(texto || "").replace(/[\\,;]/g, "\\$&").replace(/\n/g, "\\n");
   const eventos = obtenerAccionesPrioritariasNotas().map((accion, index) => {
     const fecha = accion.tipo === "Plazo vencido" ? fechaLimiteDescargo(accion.nota) : (accion.nota.created_at || new Date().toISOString());
     const stamp = `${Date.now()}-${index}@moral-y-disciplina`;
-    return ["BEGIN:VEVENT", `UID:${stamp}`, `DTSTAMP:${fechaIcs(new Date().toISOString())}T000000Z`, `DTSTART;VALUE=DATE:${fechaIcs(fecha)}`, `SUMMARY:${escaparIcs(`${accion.tipo}: ${accion.nombre}`)}`, `DESCRIPTION:${escaparIcs(accion.detalle)}`, "END:VEVENT"].join("\r\n");
+    return ["BEGIN:VEVENT", `UID:${stamp}`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}Z`, `DTSTART;VALUE=DATE:${fechaIcs(fecha)}`, `SUMMARY:${escaparIcs(`${accion.tipo}: ${accion.nombre}`)}`, `DESCRIPTION:${escaparIcs(accion.detalle)}`, "END:VEVENT"].join("\r\n");
   });
   const contenido = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Moral y Disciplina//Agenda//ES", ...eventos, "END:VCALENDAR"].join("\r\n");
   saveAs(new Blob([contenido], { type: "text/calendar;charset=utf-8" }), `agenda_moral_disciplina_${hoyLima()}.ics`);
@@ -1191,9 +1394,7 @@ function segmentoRuta(texto, fallback = "sin-dato") {
   return (limpio || fallback).slice(0, 90);
 }
 function datosRutaExpedienteCerrado(nota, archivoNombre) {
-  const ahora = new Date();
-  const anio = String(ahora.getFullYear());
-  const mes = String(ahora.getMonth() + 1).padStart(2, "0");
+  const [anio, mes] = hoyLima().split("-");
   const investigado = ubicarInvestigadoEnEfectivos(nota, state.efectivos);
   const cipInvestigado = investigado?.cip || "SIN-CIP";
   const carpeta = [
@@ -4109,11 +4310,11 @@ $("notaForm").addEventListener("submit", async (e) => {
     if (file && inserted?.length) {
       const path = `${inserted[0].id}/${Date.now()}_${file.name}`;
       const { error: upErr } = await supabase.storage.from("notas").upload(path, file);
-      if (!upErr) {
-        await supabase.from("notas_informativas")
-          .update({ archivo_nota_path: path, archivo_nota_nombre: file.name })
-          .in("id", inserted.map((n) => n.id));
-      }
+      const { error: linkErr } = upErr ? { error: upErr } : await supabase.from("notas_informativas")
+        .update({ archivo_nota_path: path, archivo_nota_nombre: file.name })
+        .in("id", inserted.map((n) => n.id));
+      // La nota ya quedó guardada: solo falta su PDF. Antes esto fallaba en silencio.
+      if (linkErr) toast(`La nota se guardó, pero su archivo no se pudo adjuntar (${linkErr.message || "error de red"}). Adjúntelo desde el expediente.`, "error", 12000);
     }
 
     pdfCandidates = [];
@@ -4866,13 +5067,16 @@ $("btnGuardarFaltasLote").addEventListener("click", async (e) => {
     }
     inserted = data || [];
 
+    let sinArchivo = 0;
     for (let i = 0; i < inserted.length; i++) {
       const archivo = archivosSubidos.get(registros[i].file);
       if (!archivo) continue;
-      await supabase.from("notas_informativas")
+      const { error: linkErr } = await supabase.from("notas_informativas")
         .update({ archivo_nota_path: archivo.path, archivo_nota_nombre: archivo.nombre })
         .eq("id", inserted[i].id);
+      if (linkErr) { sinArchivo++; console.error(linkErr); }
     }
+    if (sinArchivo) toast(`${sinArchivo} nota(s) se guardaron sin su PDF por un error al enlazarlo. Adjúntelo desde cada expediente.`, "error", 12000);
   }
 
   // "Continúa faltando": se suma a `seguimiento_faltas` del expediente al que
@@ -5293,7 +5497,10 @@ async function tokenVerificado() {
 }
 
 async function actualizarAvisoToken() {
-  const falta = !EN_APP_ANDROID && (await tokenVerificado()) === false;
+  // Quien aún entra con su cuenta de CIP la va a cambiar por Google: activar un token
+  // en una cuenta que se retirará solo lo confundiría después.
+  const cuentaPorRetirar = esCuentaCip(state.email) && state.role !== "admin";
+  const falta = !EN_APP_ANDROID && !cuentaPorRetirar && (await tokenVerificado()) === false;
   $("btnActivarToken").classList.toggle("hidden", !falta);
   $("inicioAvisoToken").classList.toggle("hidden", !falta);
 }
