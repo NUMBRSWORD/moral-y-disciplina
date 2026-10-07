@@ -852,3 +852,24 @@ body.modo-sencillo #btnPaletaBuscar { display: none; }
 .archivo-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .archivo-item .archivo-acciones { margin-top: 0; }
 #archivoBuscar { max-width: 280px; }
+
+/* Ingreso: Google es la entrada principal; CIP y clave quedan plegados. */
+.acceso-cip { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.acceso-cip > summary { cursor: pointer; text-align: center; color: var(--text-muted); font-size: 0.9rem; padding: 6px 0; }
+.acceso-cip[open] > summary { margin-bottom: 8px; }
+.check-line { display: flex; gap: 8px; align-items: flex-start; font-size: 0.9rem; line-height: 1.4; }
+.check-line input { width: auto; margin-top: 3px; flex: none; }
+.check-line .btn-ghost { padding: 0; min-height: 0; font-size: inherit; text-decoration: underline; }
+
+/* Aviso a quien todavía entra con CIP. */
+.aviso-migrar { margin: 16px auto 0; max-width: 1100px; }
+.aviso-migrar p { margin: 0 0 10px; }
+.aviso-migrar-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Pestaña Cuentas. */
+.cuentas-lista { display: grid; gap: 10px; margin-top: 12px; }
+.cuenta-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); }
+.cuenta-item > div:first-child { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.cuenta-item p { margin: 2px 0 0; }
+.cuenta-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+.cuentas-cips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
