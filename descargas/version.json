@@ -1,8 +1,8 @@
 {
-  "versionCode": 9,
-  "versionName": "1.7.1",
+  "versionCode": 10,
+  "versionName": "1.7.2",
   "url": "https://numbrsword.github.io/moral-y-disciplina/descargar.html",
-  "apk": "faltos-1.7.1.apk",
-  "sha256": "8607a07e370b46f7f0d46ccea2bb585657316e16c2ea89f3f1846d870dcee110",
-  "notas": "Arregla la activación del Token Digital: cerrar el aviso ya no deja la pantalla sin salida y, si se interrumpe a medias, se retoma donde iba. En el celular, la web conserva lo escrito al volver a la pestaña y el botón de volver regresa a la pantalla correcta."
+  "apk": "faltos-1.7.2.apk",
+  "sha256": "6b0dda2af6db37203cdba9a9a026be04711281f0b201392ee234b35fceb1359b",
+  "notas": "Se entra con Google: el acceso con CIP y clave queda solo para administradores."
 }
