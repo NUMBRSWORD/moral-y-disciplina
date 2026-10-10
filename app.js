@@ -20,6 +20,7 @@ import { fechaLima, hoyLima, horaLima } from "./lib/fechas.js";
 import { DIAS_MINIMOS, INDETERMINADO, INICIO_INFORME, REMUNERACION, cumpleMinimo, descuentoDeNotas, formatearSoles, textoDescuento, textoDias } from "./lib/descuento.js";
 import { esClaveInicial, validarClaveNueva } from "./lib/acceso.js";
 import { esCuentaCip, cipDeCuenta, vistaDeAcceso, validarSolicitud, organizarCuentas } from "./lib/cuentas.js";
+import { normalizarError, crearLimitador, sinParametros } from "./lib/errores.js";
 import { prepararLote, revisarFila, filasGuardables, resumenDelLote, filaARegistroDeExpediente, necesitaAyudaDeIA, aplicarLecturaDeIA, marcarRepetidos } from "./lib/loteExpedientes.js";
 import { estadoDeRemision, esperaOficio, esperaHojaDeTramite } from "./lib/remision.js";
 import { datosDelOficio, documentosRemitidos, faltaParaElOficio, renderizarOficioRemisionDocx } from "./lib/oficioRemision.js";
@@ -250,7 +251,42 @@ async function enviarAlertaSancionPendiente(notaId) {
 // Reemplaza los `console.error(...)` mudos de las cargas: si algo falla (red,
 // permisos, sesión vencida) el oficial ve un aviso en pantalla en vez de creer
 // que simplemente "no hay casos".
+// ---------- Registro de errores ----------
+// Lo que falla en el navegador de un usuario llega a errores_app (lo ve el
+// administrador en Historial). Sin sesión se guarda en cola hasta que entre.
+const pasaError = crearLimitador(20);
+const erroresPendientes = [];
+const VERSION_APP = EN_APP_ANDROID ? `android ${window.__faltosConfig?.version || ""}`.trim() : "web";
+function reportarError(tipo, datos) {
+  const fila = normalizarError(tipo, datos);
+  if (!pasaError(fila)) return;
+  erroresPendientes.push(fila);
+  void enviarErrores();
+}
+async function enviarErrores() {
+  if (!state.session) return;
+  while (erroresPendientes.length) {
+    const f = erroresPendientes.shift();
+    try {
+      await supabase.rpc("registrar_error_app", {
+        p_tipo: f.tipo, p_mensaje: f.mensaje, p_origen: f.origen,
+        p_ruta: sinParametros(location.href), p_version: VERSION_APP, p_agente: navigator.userAgent,
+      });
+    } catch (_) { /* sin red: no se insiste, para no generar más errores */ }
+  }
+}
+window.addEventListener("error", (e) => reportarError("error", { mensaje: e.message, archivo: e.filename, linea: e.lineno, columna: e.colno }));
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e.reason;
+  reportarError("promesa", { mensaje: r?.message || String(r ?? ""), pila: r?.stack });
+});
+document.addEventListener("securitypolicyviolation", (e) => reportarError("csp", {
+  mensaje: `${e.effectiveDirective || e.violatedDirective} bloqueó ${sinParametros(e.blockedURI) || "código en línea"}`,
+  archivo: e.sourceFile, linea: e.lineNumber,
+}));
+
 function toast(mensaje, tipo = "error", ms = 6000) {
+  if (tipo === "error") reportarError("aviso", { mensaje });
   const cont = $("toasts");
   if (!cont) { console[tipo === "error" ? "error" : "log"](mensaje); return; }
   const el = document.createElement("div");
@@ -437,7 +473,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (target === "documentos") { showView("view-documentos"); loadDocumentosGenerados(); }
     if (target === "recepcion") { showView("view-recepcion"); loadNotas().then(loadExpedientesRemitidos); }
     if (target === "panel") { showView("view-panel"); actualizarVistaCompartida(); }
-    if (target === "historial") { showView("view-historial"); loadHistorial(); }
+    if (target === "historial") { showView("view-historial"); loadHistorial(); void loadErroresApp(); }
     if (target === "archivo") { showView("view-archivo"); void abrirArchivo(); }
     if (target === "cuentas") { showView("view-cuentas"); void loadCuentasView(); }
   });
@@ -687,6 +723,7 @@ async function necesitaCambiarClave() {
 
 async function onAuthed(session) {
   state.session = session;
+  void enviarErrores();
   if (await faltaElToken()) {
     $("topbar").classList.add("hidden");
     $("tokenError").classList.add("hidden");
@@ -5937,9 +5974,12 @@ function imprimirRotulo(nota, archivo) {
       <div class="dato">Falta: ${escapeHtml(formatDate(r.fecha_falta))} · Infracción: ${escapeHtml(r.infraccion || "-")}</div>
       <div class="dato">Folios: ${escapeHtml(r.folios)} · ${escapeHtml(r.ubicacion || "")}</div>
     </div>
-    <script>window.onload = () => { window.print(); };<\/script>
     </body></html>`);
   ventana.document.close();
+  // Se imprime desde aquí: la política de seguridad (CSP) de la página, que hereda
+  // esta ventana, no deja ejecutar scripts escritos dentro de ella.
+  ventana.focus();
+  ventana.print();
 }
 
 // ---------- Asistente de consulta flotante ----------
@@ -6545,6 +6585,38 @@ async function loadHistorial() {
     .limit(200);
   if (error) { console.error(error); return; }
   renderHistorialTable(data || []);
+}
+
+const TIPOS_ERROR = { error: "Programa", promesa: "Programa", aviso: "Mensaje", csp: "Protección" };
+async function loadErroresApp() {
+  const estado = $("erroresEstado");
+  const desde = new Date(Date.now() - 7 * 86400000).toISOString();
+  const [{ data, error }, { data: perfiles }] = await Promise.all([
+    supabase.from("errores_app").select("user_id, tipo, mensaje, origen, ruta, version, veces, ultimo_at")
+      .gte("ultimo_at", desde).order("ultimo_at", { ascending: false }).limit(200),
+    supabase.from("profiles").select("id, email, cip"),
+  ]);
+  const tbody = $("erroresTableBody");
+  tbody.innerHTML = "";
+  if (error) {
+    $("erroresN").textContent = "";
+    estado.textContent = "El registro de errores aún no está activado en Supabase.";
+    return;
+  }
+  const quien = new Map((perfiles || []).map((p) => [p.id, p.cip ? `CIP ${p.cip}` : (esCuentaCip(p.email) ? `CIP ${cipDeCuenta(p)}` : p.email)]));
+  $("erroresN").textContent = String((data || []).length);
+  estado.textContent = (data || []).length ? "" : "Sin errores en los últimos 7 días.";
+  for (const e of data || []) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${formatFechaHora(fechaLima(e.ultimo_at), horaLima(e.ultimo_at))}</td>
+      <td>${escapeHtml(quien.get(e.user_id) || "-")}</td>
+      <td><span class="pill pill-inactive">${escapeHtml(TIPOS_ERROR[e.tipo] || e.tipo)}</span></td>
+      <td class="small">${escapeHtml(e.mensaje)}</td>
+      <td class="small">${escapeHtml([e.origen, e.version].filter(Boolean).join(" · ") || "-")}</td>
+      <td>${escapeHtml(e.veces)}</td>`;
+    tbody.appendChild(tr);
+  }
 }
 
 // Para UPDATE, arma una lista legible de "campo: antes → después" comparando
