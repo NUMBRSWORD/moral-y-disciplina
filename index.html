@@ -3,6 +3,21 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script>
+  // Política de seguridad (CSP): la página solo carga programas de este sitio y de
+  // esm.sh, y solo se conecta con Supabase. Si alguien lograra meter código en un
+  // dato (un nombre, una nota), el navegador no lo ejecuta. Los dos scripts en línea
+  // de abajo van autorizados por su huella (sha256): si se edita uno, hay que
+  // recalcularla (lo comprueba tests/csp.test.mjs). No se aplica dentro de la app
+  // Android: allí la página recibe código propio de la aplicación.
+  (function () {
+    if (window.__faltosConfig) return;
+    var m = document.createElement("meta");
+    m.httpEquiv = "Content-Security-Policy";
+    m.content = "default-src 'self'; script-src 'self' https://esm.sh 'sha256-Y1Qpoo+P+EfU17Sbi/X4AhdW1OmNfugQ6qLpZnGfw30=' 'sha256-6kIKsxN+h38cyZJ1RGdjktXG8w6eU3Y+SgQ00A8LaII='; worker-src 'self' blob: https://esm.sh; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tndjulaitywtoocqeeiy.supabase.co; font-src 'self' data:; connect-src 'self' https://esm.sh https://tndjulaitywtoocqeeiy.supabase.co wss://tndjulaitywtoocqeeiy.supabase.co; frame-src 'self' blob: https://tndjulaitywtoocqeeiy.supabase.co; media-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
+    document.head.appendChild(m);
+  })();
+</script>
 <meta name="description" content="Faltos: herramienta independiente para organizar expedientes por infracciones Leves (Ley N.° 30714) —notas informativas, imputación, descargos y órdenes de sanción— con asistencia de IA supervisada. No pertenece a ninguna entidad pública." />
 <meta name="robots" content="noindex, nofollow" />
 <script>if (window.top !== window.self) { document.documentElement.style.display = "none"; window.top.location = window.self.location; }</script>
@@ -672,6 +687,17 @@
     <div class="view-header">
       <h2>Historial de actividad</h2>
     </div>
+    <section class="detail-card errores-card">
+      <div class="detail-card-header"><h3>Errores de los usuarios (últimos 7 días)</h3><span id="erroresN" class="badge"></span></div>
+      <p class="muted small">Lo que falló en la web o en la app de alguien: un error del programa, un mensaje de error que vio o algo que bloqueó la protección de la página. Si el mismo error se repite el mismo día, se suma en «Veces». Se guardan 30 días.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Último</th><th>Quién</th><th>Tipo</th><th>Mensaje</th><th>Dónde</th><th>Veces</th></tr></thead>
+          <tbody id="erroresTableBody"></tbody>
+        </table>
+      </div>
+      <p id="erroresEstado" class="muted small"></p>
+    </section>
     <p class="muted small">Registro automático e inalterable de cambios en notas informativas, expedientes, efectivos y directivas — quién, qué y cuándo. Se genera solo, no depende de que nadie lo marque.</p>
     <div class="table-wrap">
       <table>
