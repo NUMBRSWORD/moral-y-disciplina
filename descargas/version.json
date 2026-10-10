@@ -1,8 +1,8 @@
 {
-  "versionCode": 10,
-  "versionName": "1.7.2",
+  "versionCode": 11,
+  "versionName": "1.7.3",
   "url": "https://numbrsword.github.io/moral-y-disciplina/descargar.html",
-  "apk": "faltos-1.7.2.apk",
-  "sha256": "6b0dda2af6db37203cdba9a9a026be04711281f0b201392ee234b35fceb1359b",
-  "notas": "Se entra con Google: el acceso con CIP y clave queda solo para administradores."
+  "apk": "faltos-1.7.3.apk",
+  "sha256": "fc900ed4300c26fa191f219438df6518bee785cfe9c394900097962f56239d10",
+  "notas": "Colores nuevos, iguales a la web."
 }

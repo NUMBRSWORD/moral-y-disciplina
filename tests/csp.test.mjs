@@ -8,7 +8,11 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 
 const raiz = new URL("../", import.meta.url);
-const html = await readFile(new URL("index.html", raiz), "utf8");
+// Se comparan huellas de lo que RECIBE EL NAVEGADOR, y el sitio sirve el archivo tal
+// como está en Git: con saltos de línea LF. En Windows la copia de trabajo sale con
+// CRLF, que cambia la huella de cualquier script de varias líneas. Sin normalizar,
+// esta prueba fallaría en Windows y pasaría en CI, siendo correcta la política.
+const html = (await readFile(new URL("index.html", raiz), "utf8")).replace(/\r\n/g, "\n");
 const politica = html.match(/m\.content = "([^"]+)";/)?.[1];
 
 test("index.html declara su política de seguridad, salvo dentro de Android", () => {
