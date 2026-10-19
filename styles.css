@@ -880,3 +880,7 @@ body.modo-sencillo #btnPaletaBuscar { display: none; }
 .cuenta-item p { margin: 2px 0 0; }
 .cuenta-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
 .cuentas-cips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+
+/* Código sugerido por los días de «Continúan faltos». */
+.sugerencia-codigo { margin: 12px 0 18px; }
+.sugerencia-codigo p { margin: 0 0 10px; }
