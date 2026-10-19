@@ -12,7 +12,7 @@ import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva, subirArchivoDirectiva } from "./lib/directivas.js";
 import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocumento, actualizarContenidoDocumentoInstitucional } from "./lib/cumplimiento.js";
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible } from "./lib/utils.js";
-import { clasificarNotaEntrante, entradasSeguimiento } from "./lib/seguimiento.js";
+import { clasificarNotaEntrante, entradasSeguimiento, codigoSugeridoPorSeguimiento } from "./lib/seguimiento.js";
 import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo } from "./lib/nombresNota.js";
 import { PERIODO_ACUMULADO, agruparPersonas, buscarPersonas, formatearDuracionHoras, resumenDelMes, resumenPersona } from "./lib/personas.js";
 import { restaurarNombres, seudonimizarInvestigados } from "./lib/privacidad.js";
@@ -2317,6 +2317,7 @@ async function renderNotaDetail(nota) {
   const opcionesSancion = opcionesTercio(nota.codigo_infraccion) || [];
   const puedeArchivo = puedeGenerarArchivoLeve(nota, state.efectivos);
   const avisoConsistencia = verificarConsistenciaCodigo(nota);
+  const sugerenciaCodigo = codigoSugeridoPorSeguimiento(nota);
   const puedeInformeAdmin = puedeGenerarInformeAdministrativo(nota, state.efectivos);
   const yoMismoInforme = state.cip ? state.efectivos.find((ef) => ef.cip === state.cip) : null;
   const severidadInforme = INFRACCIONES_GRAVES[String(nota.codigo_infraccion || "").toUpperCase().replace(/\s+/g, "")]?.severidad || "GRAVE";
@@ -2336,6 +2337,10 @@ async function renderNotaDetail(nota) {
         ${cronologiaNotaHtml(nota)}
       </div>
       ${avisoConsistencia ? `<p class="error small">⚠ Según las horas transcurridas entre la falta y la reincorporación (${formatearHorasFalto(nota)}), el código esperado sería <strong>${avisoConsistencia.sugerido}</strong>, pero el registrado es <strong>${escapeHtml(avisoConsistencia.actual)}</strong>. Verifique la fecha/hora de falta y de reincorporación (pueden venir mal leídas de un PDF/OCR) antes de generar los documentos.</p>` : ""}
+      ${sugerenciaCodigo && isAdmin ? `<div class="ai-box ai-box-warning sugerencia-codigo">
+        <p>Código sugerido: <strong>${sugerenciaCodigo.codigo}</strong>. Con los «Continúan faltos» registrados, la ausencia ya consta en <strong>${sugerenciaCodigo.dias} días</strong> (${sugerenciaCodigo.codigo === "MG32" ? "3 días o más: infracción muy grave" : "2 días consecutivos: infracción grave"})${sugerenciaCodigo.actual ? `, pero el código registrado es ${escapeHtml(sugerenciaCodigo.actual)}` : ""}. Con este código se habilita el Informe Administrativo.</p>
+        <button type="button" class="btn-primary" id="btnUsarCodigoSugerido" data-codigo="${sugerenciaCodigo.codigo}">Usar ${sugerenciaCodigo.codigo}</button>
+      </div>` : ""}
       ${codigoEsLeve && !puedeDescargar ? `<p class="muted small">Para poder generar el documento, complete la reincorporación (fecha, hora y N.º de nota) y verifique que el oficial que constató la falta ("${escapeHtml(nota.oficial_constato || "")}") esté registrado en Efectivos.</p>` : ""}
       <div class="detail-grid">
         <div class="detail-field"><div class="label">Fecha de falta</div><div class="value">${formatDate(nota.fecha_falta)}</div></div>
@@ -2698,6 +2703,14 @@ async function renderNotaDetail(nota) {
   if (isAdmin) {
     $("btnEliminarNota")?.addEventListener("click", () => eliminarNota(nota.id));
     $("codigoInfraccionForm")?.addEventListener("submit", (e) => submitCodigoInfraccion(e, nota.id));
+    // El código sugerido no se guarda solo: lo confirma quien pulsa el botón, y se
+    // guarda por el mismo camino que si lo hubiera escrito.
+    $("btnUsarCodigoSugerido")?.addEventListener("click", (e) => {
+      const codigo = e.currentTarget.dataset.codigo;
+      if (!confirm(`¿Registrar el código ${codigo} en este expediente?`)) return;
+      $("fCodigoInfraccionEdit").value = codigo;
+      $("codigoInfraccionForm").requestSubmit();
+    });
     $("puestoRolForm")?.addEventListener("submit", (e) => submitPuestoRol(e, nota.id));
     $("reincForm")?.addEventListener("submit", (e) => submitReincorporacion(e, nota.id));
     $("informeAdminForm")?.addEventListener("submit", (e) => submitInformeAdministrativo(e, nota));
@@ -6194,6 +6207,8 @@ function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
     icono = "descargar"; titulo = "Genere la Orden de Sanción"; tono = "is-ready";
     detalle = "La evaluación está lista. Revise los datos y descargue la Orden.";
   }
+  const sugerido = isAdmin && titulo === "Complete los datos de la falta" ? codigoSugeridoPorSeguimiento(nota) : null;
+  if (sugerido) detalle = `Por los días de ausencia registrados (${sugerido.dias}) corresponde ${sugerido.codigo}. Use el botón «Usar ${sugerido.codigo}» de abajo o escríbalo en «Código de infracción».`;
   return `<aside class="next-action ${tono}" aria-label="Siguiente acción recomendada">
     <span class="next-action-icon">${svgIco(icono)}</span>
     <div><span class="eyebrow">Siguiente paso</span><strong>${escapeHtml(titulo)}</strong><p>${escapeHtml(detalle)}</p></div>
