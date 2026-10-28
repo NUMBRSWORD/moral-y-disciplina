@@ -82,6 +82,30 @@ const SYSTEM_PROMPT_SEPARADO = `${SYSTEM_PROMPT}
 
 ADEMÁS, y esto es obligatorio: escribe la marca ${MARCA_DE_PAGINA} entre una página y la siguiente, en una línea aparte. Va SOLO entre páginas: si te dan N páginas, la marca aparece exactamente N-1 veces, nunca al principio ni al final. Si una página está en blanco o es ilegible entera, deja su hueco vacío pero pon igual su marca: el orden y la cantidad tienen que coincidir con las imágenes dadas.`;
 
+// La respuesta debería ser {"texto": "..."}, pero no se pierde la lectura si
+// llega distinta: JSON válido → su "texto"; JSON cortado (se acabó el margen) →
+// lo que alcanzó a escribir; texto suelto → ese texto. Antes cualquiera de esos
+// casos devolvía 502 y la nota quedaba "sin detectar".
+function textoDeLaRespuesta(bruto: string): string {
+  const limpio = bruto.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const match = limpio.match(/\{[\s\S]*\}/);
+  if (match) {
+    try {
+      const obj = JSON.parse(match[0]);
+      if (typeof obj?.texto === "string") return obj.texto;
+    } catch (_) { /* sigue abajo */ }
+  }
+  const inicio = limpio.match(/^\{\s*"texto"\s*:\s*"/);
+  if (inicio) {
+    let resto = limpio.slice(inicio[0].length).replace(/"\s*\}\s*$/, "");
+    try { resto = JSON.parse(`"${resto.replace(/\\?$/, "")}"`); } catch (_) {
+      resto = resto.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+    }
+    return resto;
+  }
+  return limpio;
+}
+
 Deno.serve(async (req: Request) => {
   const cors = corsHeaders(req);
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -129,10 +153,10 @@ Deno.serve(async (req: Request) => {
       },
     ];
 
-    // ~900 tokens de salida por página (una página densa de texto legal
-    // ronda los 500-800 palabras) más un margen -- suficiente para el
-    // tamaño de lote que usa el cliente (hasta 8 páginas).
-    const maxTokens = Math.min(8000, 900 * paginas.length + 400);
+    // ~2000 tokens de salida por página más un margen. Con 900 por página, una
+    // nota con tabla, distribución y sellos se cortaba antes de cerrar el JSON y
+    // la lectura fallaba con 502 ("formato no reconocible").
+    const maxTokens = Math.min(16000, 2000 * paginas.length + 500);
 
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -160,14 +184,15 @@ Deno.serve(async (req: Request) => {
 
     const data = await resp.json();
     const text = (data.content || []).map((b: { text?: string }) => b.text || "").join("");
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) {
-      return new Response(JSON.stringify({ error: "La IA no devolvió un formato reconocible. Intente de nuevo." }), {
-        status: 502,
+    // Solo datos de diagnóstico, nunca el contenido (trae datos personales).
+    console.log(JSON.stringify({ lectura: true, paginas: paginas.length, stop_reason: data.stop_reason, caracteres: text.length }));
+    if (data.stop_reason === "refusal" || !text.trim()) {
+      return new Response(JSON.stringify({ error: "La IA no pudo leer este documento. Pruebe con un escaneo más nítido o complete los datos a mano." }), {
+        status: 422,
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
-    const parsed = JSON.parse(match[0]);
+    const parsed: { texto: string; paginas?: string[] | null } = { texto: textoDeLaRespuesta(text) };
 
     if (separar) {
       // Se devuelve el corte SOLO si la cuenta cuadra con las imágenes que se
