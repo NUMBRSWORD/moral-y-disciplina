@@ -4,7 +4,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY, VAPID_PUBLIC_KEY } from "./config.js";
 import saveAs from "https://esm.sh/file-saver@2.0.5";
 import { renderizarImputacionDocx, construirDatosImputacion, puedeGenerarImputacion, buscarOficialConstato, tokens } from "./lib/imputacion.js";
 import { renderizarActaNoDescargoDocx, construirDatosActaNoDescargo, puedeGenerarActaNoDescargo, plazoDescargoVencido, fechaLimiteDescargo } from "./lib/actaNoDescargo.js";
-import { renderizarOrdenSancionDocx, construirDatosOrdenSancion, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault } from "./lib/ordenSancion.js";
+import { renderizarOrdenSancionDocx, construirDatosOrdenSancion, puedeGenerarOrdenSancion, opcionesTercio, buildCasoConcreto, analisisSinDescargoDefault, ordenSinDescargoDesactualizada, textoInicialSancion } from "./lib/ordenSancion.js";
 import { renderizarArchivoLeveDocx, puedeGenerarArchivoLeve } from "./lib/archivoLeve.js";
 import { renderizarInformeAdministrativoDocx, puedeGenerarInformeAdministrativo, diasDeAusencia, INFRACCIONES_GRAVES } from "./lib/informeAdministrativo.js";
 import { cargarDocxDeps } from "./lib/docxDeps.js";
@@ -2461,6 +2461,7 @@ async function renderNotaDetail(nota) {
     ${codigoEsLeve && (nota.fecha_descargo || plazoVencido) && !nota.archivo_leve_generada_at ? `
     <div class="detail-card">
       <h3>Orden de Sanción</h3>
+      ${ordenSinDescargoDesactualizada(nota) ? `<p class="error small" role="alert">La Orden generada el ${formatDate(fechaLima(nota.orden_sancion_generada_at))} dice que el investigado no presentó descargo, pero ahora el descargo está registrado (${formatDate(nota.fecha_descargo)}). Analice el descargo, revise la sanción y vuelva a generar la Orden; la anterior y el Acta de No Descargo ya no valen.</p>` : ""}
       ${puedeSancion ? `
         <form id="sancionForm">
           <div class="label" style="margin-bottom:8px">Sanción a imponer (la elige usted evaluando el descargo${nota.fecha_descargo ? "; la IA solo puede sugerir una, sin marcarla" : ""})</div>
@@ -2471,10 +2472,10 @@ async function renderNotaDetail(nota) {
           }).join("")}
           <p id="sancionSugerenciaIA" class="muted small hidden" role="status"></p>
           <label>Descargo del investigado (resumen de puntos relevantes y argumentos de defensa${nota.fecha_descargo ? " — deje en blanco y presione \"Redactar con IA\" para que se lea solo del archivo subido" : ""})
-            <textarea id="sSancionDescargo" rows="4" placeholder="${nota.fecha_descargo ? "Primero use 'Redactar con IA' o escriba un resumen propio. No copie el descargo completo." : ""}">${escapeHtml(nota.sancion_descargo_resumen || (nota.fecha_descargo ? "" : "El investigado no presentó su descargo por escrito dentro del plazo de un (01) día hábil establecido por ley, conforme acta respectiva, precluyendo su derecho a la defensa en la presente etapa procedimental."))}</textarea>
+            <textarea id="sSancionDescargo" rows="4" placeholder="${nota.fecha_descargo ? "Primero use 'Redactar con IA' o escriba un resumen propio. No copie el descargo completo." : ""}">${escapeHtml(textoInicialSancion(nota, "sancion_descargo_resumen"))}</textarea>
           </label>
           <label>Análisis y evaluación ${nota.fecha_descargo ? "(notas sueltas o texto final)" : "(se completa solo al elegir el tercio; puede editarlo si lo desea)"}
-            <textarea id="sSancionAnalisis" rows="6" required placeholder="Anote en sus palabras: qué se acredita, qué alega el investigado, y por qué corresponde el tercio elegido... o escriba el texto final directamente.">${escapeHtml(nota.sancion_analisis || "")}</textarea>
+            <textarea id="sSancionAnalisis" rows="6" required placeholder="Anote en sus palabras: qué se acredita, qué alega el investigado, y por qué corresponde el tercio elegido... o escriba el texto final directamente.">${escapeHtml(textoInicialSancion(nota, "sancion_analisis"))}</textarea>
           </label>
           ${nota.fecha_descargo ? `
           <div class="modal-actions" style="justify-content:flex-start; margin-bottom:10px">
@@ -2551,6 +2552,8 @@ async function renderNotaDetail(nota) {
         <p class="muted small">Registrado el ${formatDate(fechaLima(nota.orden_notificada_at))}.</p>
         ${ordenNotifArchivo ? `<div class="detail-field"><div class="label">Legajo firmado</div><div class="value">${ordenNotifArchivo}</div></div>` : ""}
         ${nota.archivo_descargo_path ? `<div class="detail-field"><div class="label">Descargo firmado (adjunto)</div><div class="value">${descargoArchivo}</div></div>` : ""}
+      ` : ordenSinDescargoDesactualizada(nota) ? `
+        <p class="muted small">Primero vuelva a generar la Orden de Sanción con el descargo (arriba); después suba aquí el legajo firmado.</p>
       ` : `
         <p class="muted small">Suba el legajo completo firmado en un solo PDF: Imputación, notificación de la imputación, ${nota.fecha_descargo ? "descargo del investigado" : "Acta de No Descargo"}, Orden de Sanción y cargo de notificación firmado. La IA revisa que estén todos antes de guardar.</p>
         ${nota.archivo_descargo_path ? `<p class="campo-guardado">✓ El descargo firmado ya está registrado (${escapeHtml(nota.archivo_descargo_nombre || "archivo")}) y queda adjunto a este expediente — no hace falta volver a subirlo.</p>` : ""}
@@ -2944,6 +2947,12 @@ async function submitSancion(e, nota) {
   if (!analisisTexto) { errEl.textContent = "Escriba el Análisis y Evaluación."; errEl.classList.remove("hidden"); return; }
   if (nota.fecha_descargo && esResumenDescargoInsuficiente(descargoTexto)) {
     errEl.textContent = "Falta el resumen del descargo. Use «Analizar descargo y redactar con IA» o escriba los puntos relevantes y argumentos de defensa antes de generar la orden.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  // El texto "no presentó descargo" contradice el descargo registrado.
+  if (nota.fecha_descargo && ordenSinDescargoDesactualizada({ ...nota, orden_sancion_generada_at: true, sancion_descargo_resumen: descargoTexto, sancion_analisis: analisisTexto })) {
+    errEl.textContent = "El texto dice que el investigado no presentó descargo, pero sí lo presentó. Use «Analizar descargo y redactar con IA» o escriba la evaluación del descargo.";
     errEl.classList.remove("hidden");
     return;
   }
@@ -6212,6 +6221,9 @@ function siguienteAccionNotaHtml(nota, isAdmin, actaGenerada) {
         detalle = "Compruebe los documentos de cierre y confirme la recepción física solo después de verificar el original.";
       }
     }
+  } else if (orden && ordenSinDescargoDesactualizada(nota)) {
+    icono = "flecha"; titulo = "Vuelva a generar la Orden de Sanción";
+    detalle = "Se generó cuando aún no había descargo. Ahora que está registrado, evalúelo y genere la Orden de nuevo.";
   } else if (orden) {
     icono = "firmar"; titulo = "Cargue el expediente firmado";
     detalle = "Suba el legajo completo firmado en un PDF y confirme la fecha de notificación.";
@@ -6306,7 +6318,8 @@ function cronologiaNotaHtml(nota) {
 
   const exp = (nota.expedientes && nota.expedientes[0]) || null;
   const vencidoDescargo = !!nota.imputacion_generada_at && !nota.fecha_descargo && plazoDescargoVencido(nota);
-  const hayEvaluacion = !!(nota.sancion_analisis && String(nota.sancion_analisis).trim()) || !!nota.orden_sancion_generada_at;
+  const desactualizada = ordenSinDescargoDesactualizada(nota);
+  const hayEvaluacion = !desactualizada && (!!(nota.sancion_analisis && String(nota.sancion_analisis).trim()) || !!nota.orden_sancion_generada_at);
   const listoDescargo = nota.fecha_descargo || vencidoDescargo;
   const cerrado = !!(nota.orden_notificada_at || (exp && (exp.numero_oficio || exp.numero_ht)));
 
@@ -6318,7 +6331,7 @@ function cronologiaNotaHtml(nota) {
     { titulo: "Imputación / notificación", fecha: nota.imputacion_generada_at, estado: nota.imputacion_generada_at ? "completo" : (nota.fecha_reincorporacion ? "pendiente" : nd) },
     { titulo: "Descargo", fecha: nota.fecha_descargo, estado: nota.fecha_descargo ? "completo" : (!nota.imputacion_generada_at ? nd : (vencidoDescargo ? "vencido" : "pendiente")) },
     { titulo: "Evaluación del descargo", fecha: null, estado: !listoDescargo ? nd : (hayEvaluacion ? "completo" : "pendiente") },
-    { titulo: "Orden de Sanción", fecha: nota.orden_sancion_generada_at, estado: nota.orden_sancion_generada_at ? "completo" : (listoDescargo ? "pendiente" : nd) },
+    { titulo: "Orden de Sanción", fecha: desactualizada ? null : nota.orden_sancion_generada_at, estado: nota.orden_sancion_generada_at && !desactualizada ? "completo" : (listoDescargo ? "pendiente" : nd) },
     { titulo: "Cierre (notificación / expediente)", fecha: nota.orden_notificada_at, estado: cerrado ? "completo" : (nota.orden_sancion_generada_at ? "pendiente" : nd) },
   ]);
 }
