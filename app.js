@@ -3608,6 +3608,22 @@ async function blobABase64(blob) {
   return dataUrl.slice(dataUrl.indexOf(",") + 1);
 }
 
+// Una lectura con IA puede fallar de forma pasajera (la IA respondió en otro
+// formato, la red se cortó). Se reintenta una vez y, si vuelve a fallar, el
+// error lleva el motivo que dio el servidor en vez del genérico de Supabase.
+async function transcribirConReintento(cuerpo) {
+  let ultimo;
+  for (let intento = 0; intento < 2; intento++) {
+    const { data, error } = await supabase.functions.invoke("extraer-texto-vision", { body: cuerpo });
+    if (!error && !data?.error) return data?.texto || "";
+    ultimo = error ? new Error(await mensajeErrorFuncion(error)) : new Error(data.error);
+    // Sin sesión, sin permiso o sin cuota no sirve repetir.
+    const estado = error?.context?.status;
+    if ([401, 403, 413, 429].includes(estado)) break;
+  }
+  throw ultimo;
+}
+
 async function transcribirPaginasConIA(paginas, onEstado) {
   const lotes = [];
   for (let i = 0; i < paginas.length; i += PAGINAS_POR_LOTE_VISION) {
@@ -3620,12 +3636,7 @@ async function transcribirPaginasConIA(paginas, onEstado) {
     onEstado?.(paginas.length > 1
       ? `Transcribiendo con IA: página${hasta > desde ? "s" : ""} ${desde}${hasta > desde ? `-${hasta}` : ""} de ${paginas.length}...`
       : "Transcribiendo la imagen con IA...");
-    const { data, error } = await supabase.functions.invoke("extraer-texto-vision", {
-      body: { paginas: lotes[i] },
-    });
-    if (error) throw error;
-    if (data?.error) throw new Error(data.error);
-    textos.push(data?.texto || "");
+    textos.push(await transcribirConReintento({ paginas: lotes[i] }));
   }
   return textos.join("\n\n");
 }
@@ -3695,6 +3706,12 @@ async function extractPdfText(file, onEstado, { verificarSoloCabecera = false } 
       return await transcribirPdfConVisionIA(pdf, onEstado);
     } catch (err) {
       console.error("La revisión con IA con visión falló; se usa el texto ya extraído del PDF:", err);
+      // Un PDF escaneado (solo imagen) no trae texto propio: seguir con el texto
+      // vacío hacía que la app "no detectara" nada sin decir por qué.
+      const letras = (textoBase.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g) || []).length;
+      if (letras < 40) {
+        throw new Error(`Este PDF es una imagen escaneada y no se pudo leer con IA (${err?.message || err}). Intente de nuevo en un momento; si sigue fallando, complete los datos a mano.`);
+      }
       onEstado?.("No se pudo revisar con IA; se usa el texto ya extraído del PDF.");
     }
   }
@@ -3736,7 +3753,7 @@ async function transcribirLoteSeparado(imagenes) {
   const { data, error } = await supabase.functions.invoke("extraer-texto-vision", {
     body: { paginas: imagenes, separar: true },
   });
-  if (error) throw error;
+  if (error) throw new Error(await mensajeErrorFuncion(error));
   if (data?.error) throw new Error(data.error);
   const paginas = data?.paginas;
   return Array.isArray(paginas) && paginas.length === imagenes.length ? paginas : null;
@@ -4207,7 +4224,8 @@ async function autocompletarReincorporacion(file) {
     }
   } catch (err) {
     console.error(err);
-    statusEl.textContent = "No se pudo leer el PDF automáticamente. Complete el formulario manualmente.";
+    reportarError("aviso", { mensaje: err?.message || String(err) });
+    statusEl.textContent = `No se pudo leer el PDF automáticamente${err?.message ? `: ${err.message}` : "."} Complete el formulario manualmente si hace falta.`;
   }
 }
 
@@ -4263,7 +4281,8 @@ async function autocompletarDesdeArchivo(file) {
     }
   } catch (err) {
     console.error(err);
-    statusEl.textContent = "No se pudo leer el PDF automáticamente. Complete el formulario manualmente.";
+    reportarError("aviso", { mensaje: err?.message || String(err) });
+    statusEl.textContent = `No se pudo leer el PDF automáticamente${err?.message ? `: ${err.message}` : "."} Complete el formulario manualmente si hace falta.`;
   }
 }
 
@@ -4523,7 +4542,14 @@ $("rlArchivo").addEventListener("change", async (e) => {
     const filas = [];
     for (const file of files) {
       if (file.type !== "application/pdf") continue;
-      const text = await extractPdfText(file, (msg) => { statusEl.textContent = `${file.name}: ${msg}`; });
+      let text;
+      try {
+        text = await extractPdfText(file, (msg) => { statusEl.textContent = `${file.name}: ${msg}`; });
+      } catch (err) {
+        // Un archivo que no se pudo leer no debe frenar a los demás del lote.
+        toast(`${file.name}: ${err.message || err}`, "error", 12000);
+        continue;
+      }
       const norm = text.replace(/\s+/g, " ");
       let doc, candidates;
       try {
@@ -4701,7 +4727,14 @@ $("cfArchivo")?.addEventListener("change", async (e) => {
     const filas = [];
     for (const file of files) {
       if (file.type !== "application/pdf") continue;
-      const text = await extractPdfText(file, (msg) => { statusEl.textContent = `${file.name}: ${msg}`; });
+      let text;
+      try {
+        text = await extractPdfText(file, (msg) => { statusEl.textContent = `${file.name}: ${msg}`; });
+      } catch (err) {
+        // Un archivo que no se pudo leer no debe frenar a los demás del lote.
+        toast(`${file.name}: ${err.message || err}`, "error", 12000);
+        continue;
+      }
       const norm = text.replace(/\s+/g, " ");
       let doc, candidates;
       try {
@@ -4935,7 +4968,14 @@ $("flArchivo").addEventListener("change", async (e) => {
     const filas = [];
     for (const file of files) {
       if (file.type !== "application/pdf") continue;
-      const text = await extractPdfText(file, (msg) => { statusEl.textContent = `${file.name}: ${msg}`; });
+      let text;
+      try {
+        text = await extractPdfText(file, (msg) => { statusEl.textContent = `${file.name}: ${msg}`; });
+      } catch (err) {
+        // Un archivo que no se pudo leer no debe frenar a los demás del lote.
+        toast(`${file.name}: ${err.message || err}`, "error", 12000);
+        continue;
+      }
       const norm = text.replace(/\s+/g, " ");
       let doc, candidates;
       try {
