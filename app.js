@@ -11,7 +11,7 @@ import { cargarDocxDeps } from "./lib/docxDeps.js";
 import { getInfraccion, normalizarCodigoInfraccion } from "./lib/anexoI.js";
 import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva, subirArchivoDirectiva } from "./lib/directivas.js";
 import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocumento, actualizarContenidoDocumentoInstitucional } from "./lib/cumplimiento.js";
-import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible } from "./lib/utils.js";
+import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible, claveNombre } from "./lib/utils.js";
 import { clasificarNotaEntrante, entradasSeguimiento, codigoSugeridoPorSeguimiento } from "./lib/seguimiento.js";
 import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo } from "./lib/nombresNota.js";
 import { PERIODO_ACUMULADO, agruparPersonas, buscarPersonas, formatearDuracionHoras, resumenDelMes, resumenPersona } from "./lib/personas.js";
@@ -4406,15 +4406,9 @@ $("notaForm").addEventListener("submit", async (e) => {
 // ---------- Reincorporación desde PDF (uno o varios archivos) ----------
 let reincLoteFilas = [];
 
-function normalizarTexto(s) {
-  return (s || "")
-    .toUpperCase()
-    .normalize("NFD").replace(/[̀-ͯ]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+// Sin espacios: así "JARAMENOR Arturo" (PDF) coincide con "JARA MENOR Arturo".
 function normalizarNombre(apellidos, nombres) {
-  return `${normalizarTexto(apellidos)} ${normalizarTexto(nombres)}`.replace(/\s+/g, " ").trim();
+  return claveNombre(apellidos, nombres);
 }
 
 // Empareja primero por el N.º de la nota de falta original (campo REF. del PDF
@@ -4458,8 +4452,8 @@ function buscarNotaPorSeguimiento(numeroFaltaRef, candidate) {
       const objetivo = normalizarNombre(candidate.apellidos, candidate.nombres);
       const exactos = porNumero.filter((n) => normalizarNombre(n.apellidos, n.nombres) === objetivo);
       if (exactos.length === 1) return exactos[0];
-      const apellidosCand = normalizarTexto(candidate.apellidos);
-      const porApellidos = porNumero.filter((n) => normalizarTexto(n.apellidos) === apellidosCand);
+      const apellidosCand = claveNombre(candidate.apellidos);
+      const porApellidos = porNumero.filter((n) => claveNombre(n.apellidos) === apellidosCand);
       if (porApellidos.length === 1) return porApellidos[0];
     }
   }
@@ -4482,8 +4476,8 @@ function buscarNotaPendiente(numeroFaltaRef, candidate) {
   const exactos = pool.filter((n) => normalizarNombre(n.apellidos, n.nombres) === objetivo);
   if (exactos.length === 1) return exactos[0];
 
-  const apellidosCand = normalizarTexto(candidate.apellidos);
-  const porApellidos = pool.filter((n) => normalizarTexto(n.apellidos) === apellidosCand);
+  const apellidosCand = claveNombre(candidate.apellidos);
+  const porApellidos = pool.filter((n) => claveNombre(n.apellidos) === apellidosCand);
   if (porApellidos.length === 1) return porApellidos[0];
 
   return null;
@@ -4883,10 +4877,10 @@ let faltasLoteFilas = [];
 function faltaYaRegistrada(numeroNotaFalta, candidate) {
   if (!candidate || !candidate.apellidos) return null;
   const objetivo = normalizarNombre(candidate.apellidos, candidate.nombres);
-  const apellidosObj = normalizarTexto(candidate.apellidos);
+  const apellidosObj = claveNombre(candidate.apellidos);
   return state.notas.find((n) => {
     const mismoNombre = normalizarNombre(n.apellidos, n.nombres) === objetivo ||
-      (!candidate.nombres && normalizarTexto(n.apellidos) === apellidosObj);
+      (!candidate.nombres && claveNombre(n.apellidos) === apellidosObj);
     if (!mismoNombre) return false;
     if (!n.fecha_reincorporacion) return true;
     if (numeroNotaFalta && n.numero_nota_falta) return n.numero_nota_falta === numeroNotaFalta;
