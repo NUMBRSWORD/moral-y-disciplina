@@ -105,6 +105,23 @@ function extraerTexto(data: { content?: Array<{ type?: string; text?: string }> 
     .join("");
 }
 
+// Salida estructurada: la API garantiza un JSON válido con estas claves. Antes,
+// una comilla sin escapar dentro del análisis rompía JSON.parse y la web
+// mostraba "Error interno".
+const FORMATO_RESPUESTA = {
+  type: "json_schema",
+  schema: {
+    type: "object",
+    properties: {
+      descargo_texto: { type: "string" },
+      tercio_value: { type: "string" },
+      analisis_texto: { type: "string" },
+    },
+    required: ["descargo_texto", "tercio_value", "analisis_texto"],
+    additionalProperties: false,
+  },
+};
+
 async function llamarIA(system: string, userMessage: string, maxTokens: number) {
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -116,6 +133,7 @@ async function llamarIA(system: string, userMessage: string, maxTokens: number) 
     body: JSON.stringify({
       model: MODEL,
       max_tokens: maxTokens,
+      output_config: { format: FORMATO_RESPUESTA },
       system,
       messages: [{ role: "user", content: userMessage }],
     }),
@@ -144,7 +162,7 @@ Deno.serve(async (req: Request) => {
 
     let resp: Response;
     try {
-      resp = await llamarIA(SYSTEM_PROMPT, userMessage, 8000);
+      resp = await llamarIA(SYSTEM_PROMPT, userMessage, 16000);
     } catch (fetchErr) {
       console.error("redactar-analisis: fetch a Anthropic falló", String(fetchErr));
       return new Response(JSON.stringify({ error: "No se pudo contactar a la IA. Intente de nuevo." }), {
@@ -173,7 +191,7 @@ Deno.serve(async (req: Request) => {
       const reintento = await llamarIA(
         SYSTEM_PROMPT + "\n\nIMPORTANTE: responde de inmediato solo con el objeto JSON pedido, sin razonamiento previo.",
         userMessage,
-        8000,
+        16000,
       );
       if (reintento.ok) {
         const data2 = await reintento.json();
@@ -190,7 +208,18 @@ Deno.serve(async (req: Request) => {
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
-    const parsed = JSON.parse(match[0]);
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch (errJson) {
+      console.error("redactar-analisis: JSON inválido", String(errJson), "stop_reason", data.stop_reason);
+      return new Response(JSON.stringify({ error: data.stop_reason === "max_tokens"
+        ? "La respuesta de la IA salió demasiado larga y se cortó. Intente de nuevo."
+        : "La IA devolvió un texto mal formado. Intente de nuevo." }), {
+        status: 502,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...cors, "Content-Type": "application/json" },
