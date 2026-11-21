@@ -199,7 +199,7 @@ La diferencia importante es entre **llave** (sirve para encontrar el caso) y
 | Dato | Dónde está | Por qué se confía |
 |---|---|---|
 | **N.º de Nota Informativa de la falta** (12 dígitos) | Descripción del hecho, en la imputación y otra vez en la orden | Identifica **el caso**, no a la persona. Es la única llave que distingue dos faltas del mismo efectivo |
-| **CIP del investigado** (6-8 dígitos) | Impreso en la decisión de la orden («CIP N° 31447206») y en el acta | Identifica **al efectivo** sin ambigüedad: `efectivos.cip` es único |
+| **CIP del investigado** (6-8 dígitos) | Impreso en la decisión de la orden («CIP N° 31000206») y en el acta | Identifica **al efectivo** sin ambigüedad: `efectivos.cip` es único |
 | **Código de infracción** (L-24) | Descripción de la infracción y en la decisión | No identifica solo; sirve para desempatar cuando el efectivo tiene varios casos |
 | **Fecha del documento** | Al pie: «Ventanilla, 21 de agosto del 2026» | Desempate final y aviso si el expediente es de otro periodo que el caso |
 | Apellidos y nombres | En todas las páginas | **El más débil.** Ver abajo |
@@ -231,8 +231,8 @@ equivocado es un error que no se descubre hasta mucho después.
    antigua; sin ninguno de los dos, se declara no resuelto en vez de adivinar.
 
 2. **El orden del nombre cambia dentro del mismo expediente.** En un caso real la
-   imputación decía «S3 PNP SALAZAR ORTEGA, Brayan Nicolas» y el acta y la orden,
-   del mismo efectivo, «S3 PNP Brayan Nicolas SALAZAR ORTEGA». Por eso el nombre
+   imputación decía «S3 PNP CHAVEZ MORI, Kevin Arturo» y el acta y la orden,
+   del mismo efectivo, «S3 PNP Kevin Arturo CHAVEZ MORI». Por eso el nombre
    no puede ser la llave principal y la comparación es por palabras sueltas, sin
    depender del orden. Es la razón de peso para usar el CIP.
 
