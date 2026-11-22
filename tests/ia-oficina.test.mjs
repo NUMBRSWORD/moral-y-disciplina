@@ -12,6 +12,20 @@ async function cargar(ruta) {
 }
 
 const pasarela = await cargar("../supabase/functions/ia-oficina/pasarela.ts");
+const { emitirReserva, comprobarReserva } = await import("../supabase/functions/_shared/reserva.mjs");
+
+test("el comprobante de reserva vale para esa consulta, ese usuario y una sola vez", async () => {
+  const secreto = crypto.randomUUID() + crypto.randomUUID();
+  const ruta = "/ia/extraer-texto-vision", token = "Bearer prueba", cuerpo = new TextEncoder().encode('{"caso":"ficticio"}');
+  const usadas = new Map();
+  const ticket = await emitirReserva(secreto, ruta, token, cuerpo);
+  for (const [r, t, c, s] of [[ruta + "x", token, cuerpo, secreto], [ruta, token + "x", cuerpo, secreto],
+    [ruta, token, new TextEncoder().encode("{}"), secreto], [ruta, token, cuerpo, secreto + "x"]])
+    assert.equal(await comprobarReserva(ticket, s, r, t, c, usadas), false, "un cambio invalida el comprobante");
+  assert.equal(await comprobarReserva(ticket, secreto, ruta, token, cuerpo, usadas), true);
+  assert.equal(await comprobarReserva(ticket, secreto, ruta, token, cuerpo, usadas), false, "no se puede reutilizar");
+  assert.equal(await comprobarReserva("texto-cualquiera", secreto, ruta, token, cuerpo, usadas), false);
+});
 
 test("acepta la respuesta de la PC solo si es JSON propio de la pasarela", () => {
   const json = "application/json; charset=utf-8";
