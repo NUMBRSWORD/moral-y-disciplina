@@ -1,8 +1,8 @@
 {
-  "versionCode": 11,
-  "versionName": "1.7.3",
+  "versionCode": 13,
+  "versionName": "1.8.1",
   "url": "https://numbrsword.github.io/moral-y-disciplina/descargar.html",
-  "apk": "faltos-1.7.3.apk",
-  "sha256": "fc900ed4300c26fa191f219438df6518bee785cfe9c394900097962f56239d10",
-  "notas": "Colores nuevos, iguales a la web."
+  "apk": "faltos-1.8.1.apk",
+  "sha256": "b8dd720b75778a0ff4d7c1c1ecb5ddca1ebf110e6e02cd99f0ad2cef365cd9c2",
+  "notas": "Panel de entregas, revisión de expedientes y parte mensual."
 }

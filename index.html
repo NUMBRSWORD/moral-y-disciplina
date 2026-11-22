@@ -96,12 +96,14 @@
   <!-- LOGIN -->
   <section id="view-login" class="view center-view">
     <form id="loginForm" class="card login-card">
-      <div class="brand center">
+      <div class="brand center portada-faltos">
         <span class="brand-badge lg">F</span>
         <h1>Faltos</h1>
         <p class="muted">Organización de expedientes por infracciones Leves (Ley N.° 30714)</p>
         <p class="uso-interno-chip">🔒 Acceso restringido a personas autorizadas</p>
       </div>
+      <div class="ingreso-faltos">
+        <h2>Iniciar sesión</h2>
       <!-- Entrada principal desde octubre de 2026: Google. La aplicación Android oculta
            este bloque (Google no permite iniciar sesión dentro de una vista web
            incrustada); allí se usa su botón propio. -->
@@ -131,6 +133,7 @@
       </details>
       <p class="muted small" style="margin-top:6px; text-align:center"><button type="button" class="btn-ghost" data-abrir-aviso>Aviso de privacidad</button></p>
       <p class="muted small" style="margin-top:2px; text-align:center"><a href="eliminar-cuenta.html">Eliminar mi cuenta</a></p>
+      </div>
     </form>
   </section>
 
@@ -218,6 +221,7 @@
       <button type="button" id="inicioActivarToken" class="btn-primary">Activar</button>
     </div>
     <div class="inicio-accesos">
+      <button type="button" class="inicio-acceso" id="inicioJornada"><strong>Preparar mi jornada</strong><span class="muted">Ver entregas vencidas, de hoy y por confirmar</span></button>
       <button type="button" class="inicio-acceso" id="inicioPendientes">
         <strong>Pasos pendientes</strong>
         <span class="muted">Vea lo completado y lo que falta</span>
@@ -251,6 +255,8 @@
         <p class="muted view-subtitle">Expedientes pendientes: identifique la siguiente acción de cada uno. Los ya resueltos pasan a la pestaña «Seguimiento».</p>
       </div>
       <div class="view-actions">
+        <button id="btnJornada" class="btn-secondary">Preparar mi jornada</button>
+        <button id="btnParteMensual" class="btn-secondary admin-only hidden">Parte mensual</button>
         <button id="btnFaltasLote" class="btn-secondary admin-only hidden">Faltas (PDF grupal)</button>
         <button id="btnContinuanFaltosLote" class="btn-secondary admin-only hidden">Continúan faltos (PDF)</button>
         <button id="btnReincorporacionLote" class="btn-secondary admin-only hidden">Reincorporación (PDF grupal)</button>
@@ -533,6 +539,7 @@
   <!-- DETALLE / EDICION NOTA -->
   <section id="view-nota-detail" class="view hidden">
     <div class="view-header">
+      <button type="button" id="btnRevisarExpediente" class="btn-secondary">Revisar expediente</button>
       <button id="btnVolverDashboard" class="btn-ghost">&larr; Volver</button>
     </div>
     <div id="notaDetailContent"></div>

@@ -884,3 +884,53 @@ body.modo-sencillo #btnPaletaBuscar { display: none; }
 /* Código sugerido por los días de «Continúan faltos». */
 .sugerencia-codigo { margin: 12px 0 18px; }
 .sugerencia-codigo p { margin: 0 0 10px; }
+
+/* Portada y resumen, con la jerarquía visual de Carpetas Fiscales. */
+:root { --portada: #16212c; --text-muted: #9aafc0; --alerta-texto: #ff9599; --espera: #efbf73; }
+:root[data-theme="light"] { --portada: #f7f9fa; --text-muted: #5c6b78; --alerta-texto: #ad3029; --espera: #805400; }
+@media screen {
+  #view-login { min-height: min(84svh,900px); padding: clamp(8px,2vw,28px); }
+  #loginForm {
+    display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); align-items:stretch;
+    width:min(100%,960px); padding:0; overflow:hidden; border-radius:22px;
+    box-shadow:0 24px 80px rgba(var(--shadow-color),.14);
+  }
+  #loginForm .portada-faltos {
+    position:relative; isolation:isolate; overflow:hidden; min-width:0;
+    display:flex; flex-direction:column; align-items:flex-start; justify-content:center;
+    gap:14px; margin:0; padding:clamp(24px,4vw,48px); text-align:left;
+    background:var(--portada); border-right:1px solid var(--border);
+  }
+  .portada-faltos::before,.portada-faltos::after {
+    content:""; position:absolute; z-index:-1; right:-72px; top:15%; width:170px; height:115px;
+    border:1px solid color-mix(in srgb,var(--accent) 27%,transparent); border-radius:12px; transform:rotate(-14deg);
+  }
+  .portada-faltos::after { right:-58px; top:calc(15% + 11px); }
+  #loginForm .brand-badge { align-self:flex-start; border-radius:10px; }
+  .portada-faltos h1 { font-size:clamp(2.6rem,6vw,4.3rem); line-height:1; letter-spacing:-.056em; margin:0; }
+  .portada-faltos p { max-width:34ch; margin:0; line-height:1.5; }
+  .ingreso-faltos { min-width:0; align-self:center; padding:clamp(24px,4vw,48px); }
+  .ingreso-faltos h2 { margin:0 0 20px; font-size:1.65rem; letter-spacing:-.035em; }
+  .ingreso-faltos #btnEntrarGoogle,.ingreso-faltos button[type=submit] { min-height:49px; }
+  .ingreso-faltos summary { padding-block:12px; }
+  :is(#view-dashboard,#view-seguimiento,#view-recepcion) > .view-header,.inicio-hero {
+    padding:clamp(18px,3vw,36px); background-color:var(--bg-card);
+    background-image:linear-gradient(90deg,var(--bg-card) 50%,transparent),repeating-linear-gradient(128deg,transparent 0 38px,var(--border) 38px 39px);
+    border:1px solid var(--border); border-inline-start:4px solid var(--accent-fill); border-radius:12px;
+  }
+  .view-header h2,.inicio-hero h2 { font-size:clamp(1.65rem,3vw,2.35rem); line-height:1.13; letter-spacing:-.04em; }
+  .quick-summary { background:var(--bg-card); }
+  .quick-summary-stats { flex-wrap:wrap; }
+  .quick-summary-stats > div { background:var(--portada); border:1px solid var(--border); border-radius:10px; }
+  .quick-summary-stats b { font-size:clamp(1.45rem,2vw,2rem); line-height:1.15; }
+  .quick-summary-stats .is-urgent b { color:var(--alerta-texto); }
+  .quick-summary-stats .is-pending b { color:var(--espera); }
+  .quick-summary-stats .is-ready b { color:var(--accent); }
+}
+@media screen and (max-width:690px) {
+  #loginForm { grid-template-columns:minmax(0,1fr); max-width:480px; }
+  #loginForm .portada-faltos { padding:22px; gap:8px; border-right:0; border-bottom:1px solid var(--border); }
+  .portada-faltos h1 { font-size:2.6rem; }
+  .ingreso-faltos { padding:22px; }
+  .quick-summary-stats > div { flex:1 1 80px; overflow-wrap:anywhere; }
+}

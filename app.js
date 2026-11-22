@@ -1,3 +1,6 @@
+import { recorrerDocumento, mostrarCampos, confirmarDescargo } from "./lib/lectorComparado.js";
+import { prepararConsultas, comprobarPuntos, textoDelBorrador } from "./lib/revisionDescargo.js";
+import { transporteIA } from "./lib/iaOficina.js";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.116.0";
 import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, VAPID_PUBLIC_KEY } from "./config.js";
@@ -31,7 +34,7 @@ import { normalizarNumeroOficio, codigoDeArchivo, listoParaArchivar, casosPorArc
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { fetch: transporteIA(SUPABASE_URL) } });
 // Dentro de la app Android la página recibe su configuración antes de cargar.
 // Allí el inicio, las políticas y el token son pantallas nativas: la web no los repite.
 const EN_APP_ANDROID = !!window.__faltosConfig;
@@ -480,6 +483,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 });
 
 $("btnVolverDashboard").addEventListener("click", () => {
+  if (state.origenDetalle === "view-agentes" && $("view-agentes")) { showView("view-agentes"); return; }
   if (state.origenDetalle === "view-subir") { state.origenDetalle = null; abrirSubirExpediente(); return; }
   showView("view-dashboard"); loadNotas();
 });
@@ -772,6 +776,7 @@ async function onAuthed(session) {
 }
 
 function onSignedOut() {
+  $("view-agentes")?.remove();
   state.session = null;
   $("avisoMigrarGoogle").classList.add("hidden");
   cerrarRestablecerClave();
@@ -2406,8 +2411,9 @@ async function renderNotaDetail(nota) {
           <label>Observación (opcional — p.ej. descanso médico expedido por Sanidad, no se presentó físicamente)
             <textarea id="rObservacion" rows="2" placeholder="Déjelo en blanco si se reincorporó físicamente sin ninguna circunstancia particular."></textarea>
           </label>
-          <label>Archivo de reincorporación<input type="file" id="rArchivo" accept="application/pdf,image/*" /></label>
+          <label>Archivo de reincorporación<input type="file" id="rArchivo" accept="application/pdf,image/*,.md,.markdown,.txt" /></label>
           <p id="reincAutoStatus" class="muted small hidden"></p>
+          <div id="rCotejo"></div>
           <p id="reincError" class="error hidden" role="alert"></p>
           <button type="submit" class="btn-primary">Registrar reincorporación</button>
         </form>` : ""}
@@ -2464,26 +2470,26 @@ async function renderNotaDetail(nota) {
       ${ordenSinDescargoDesactualizada(nota) ? `<p class="error small" role="alert">La Orden generada el ${formatDate(fechaLima(nota.orden_sancion_generada_at))} dice que el investigado no presentó descargo, pero ahora el descargo está registrado (${formatDate(nota.fecha_descargo)}). Analice el descargo, revise la sanción y vuelva a generar la Orden; la anterior y el Acta de No Descargo ya no valen.</p>` : ""}
       ${puedeSancion ? `
         <form id="sancionForm">
-          <div class="label" style="margin-bottom:8px">Sanción a imponer (la elige usted evaluando el descargo${nota.fecha_descargo ? "; la IA solo puede sugerir una, sin marcarla" : ""})</div>
+          <div class="label" style="margin-bottom:8px">Sanción a imponer (selección del funcionario)</div>
           ${opcionesSancion.map((o) => {
             const marcado = (o.value === "amonestacion" && nota.sancion_tipo === "amonestacion") ||
               (nota.sancion_tipo === "dias" && String(nota.sancion_dias) === o.value);
             return `<label class="checkbox-row"><input type="radio" name="sancionTercio" value="${o.value}" ${marcado ? "checked" : ""} required /> ${escapeHtml(o.label)}</label>`;
           }).join("")}
-          <p id="sancionSugerenciaIA" class="muted small hidden" role="status"></p>
-          <label>Descargo del investigado (resumen de puntos relevantes y argumentos de defensa${nota.fecha_descargo ? " — deje en blanco y presione \"Redactar con IA\" para que se lea solo del archivo subido" : ""})
-            <textarea id="sSancionDescargo" rows="4" placeholder="${nota.fecha_descargo ? "Primero use 'Redactar con IA' o escriba un resumen propio. No copie el descargo completo." : ""}">${escapeHtml(textoInicialSancion(nota, "sancion_descargo_resumen"))}</textarea>
+          <label>Descargo del investigado (resumen de puntos relevantes y argumentos de defensa${nota.fecha_descargo ? " — puede editar el borrador después de revisar las citas" : ""})
+            <textarea id="sSancionDescargo" rows="4" placeholder="${nota.fecha_descargo ? "Escriba un resumen propio o revise el archivo con la IA." : ""}">${escapeHtml(textoInicialSancion(nota, "sancion_descargo_resumen"))}</textarea>
           </label>
           <label>Análisis y evaluación ${nota.fecha_descargo ? "(notas sueltas o texto final)" : "(se completa solo al elegir el tercio; puede editarlo si lo desea)"}
             <textarea id="sSancionAnalisis" rows="6" required placeholder="Anote en sus palabras: qué se acredita, qué alega el investigado, y por qué corresponde el tercio elegido... o escriba el texto final directamente.">${escapeHtml(textoInicialSancion(nota, "sancion_analisis"))}</textarea>
           </label>
           ${nota.fecha_descargo ? `
           <div class="modal-actions" style="justify-content:flex-start; margin-bottom:10px">
-            <button type="button" class="btn-secondary" id="btnRedactarIA">${svgIco("ia")}Analizar descargo y redactar con IA</button>
+            ${nota.archivo_descargo_path ? `<label class="checkbox-row"><input type="checkbox" id="sUsarResumenManual" /> Usar el resumen manual como fuente</label>` : ""}
+            <button type="button" class="btn-secondary" id="btnRedactarIA">${svgIco("ia")}Revisar descargo con fuentes</button>
           </div>
-          <p class="muted small">La IA redacta el resumen del descargo y el análisis, y puede sugerir un tercio, pero no lo marca: la sanción la elige usted. Usa las directivas internas activas como única fuente de reglas institucionales — si el descargo invoca algo que ninguna directiva regula, la IA lo dice en vez de inventarlo.</p>
+          <div id="sancionRevisionIA"></div>
           <label class="checkbox-row"><input type="checkbox" id="sSancionAvisoIA" /> Dejar constancia en la Orden de que el análisis se redactó con apoyo de inteligencia artificial y fue revisado por el funcionario firmante</label>
-          <p id="sancionIAStatus" class="muted small hidden"></p>
+          <p role="status" id="sancionIAStatus" class="muted small hidden"></p>
           ` : `
           <div class="modal-actions" style="justify-content:flex-start; margin-bottom:6px">
             <button type="button" class="btn-secondary" id="btnTextoEstandarSinDescargo">Poner texto estándar (sin descargo)</button>
@@ -2612,6 +2618,7 @@ async function renderNotaDetail(nota) {
             </div>
             <label>Días de sanción<input type="number" id="eDias" min="0" value="${exp?.dias_sancion ?? ""}" /></label>
             <label>Archivo del expediente<input type="file" id="eArchivo" /></label>
+            <p id="eOcrEstado" role="status"></p><div id="eCotejo"></div>
             <p id="expError" class="error hidden" role="alert"></p>
             <button type="submit" class="btn-primary">${exp ? "Guardar cambios" : "Registrar expediente"}</button>
           </form>
@@ -2717,7 +2724,8 @@ async function renderNotaDetail(nota) {
     $("puestoRolForm")?.addEventListener("submit", (e) => submitPuestoRol(e, nota.id));
     $("reincForm")?.addEventListener("submit", (e) => submitReincorporacion(e, nota.id));
     $("informeAdminForm")?.addEventListener("submit", (e) => submitInformeAdministrativo(e, nota));
-    $("rArchivo")?.addEventListener("change", (e) => autocompletarReincorporacion(e.target.files[0]));
+    $("rArchivo")?.addEventListener("change", (e) => cotejarAdjunto(e.target,true));
+    $("eArchivo")?.addEventListener("change", e => cotejarAdjunto(e.target,false));
     $("expForm")?.addEventListener("submit", (e) => submitExpediente(e, nota.id));
   }
 }
@@ -2733,111 +2741,161 @@ async function submitNotificacion(e, notaId) {
   openNotaDetail(notaId);
 }
 
-// Casos previos del mismo investigado ya registrados en el sistema (mismo
-// criterio de emparejamiento por nombre que usa el resto de la app: al menos
-// 2 palabras en común entre apellidos y nombres). Se le pasa a la IA como
-// posible agravante, igual que en notificacion-imputacion-pnp.
-function buscarAntecedentes(nota, todasNotas) {
-  if (!nota?.apellidos || !todasNotas?.length) return [];
-  const objetivo = tokens(`${nota.apellidos} ${nota.nombres || ""}`);
-  if (!objetivo.length) return [];
-  return todasNotas
-    .filter((n) => n.id !== nota.id)
-    .filter((n) => {
-      const t = new Set(tokens(`${n.apellidos || ""} ${n.nombres || ""}`));
-      return objetivo.filter((tok) => t.has(tok)).length >= 2;
-    })
-    .map((n) => ({ codigo_infraccion: n.codigo_infraccion || null, fecha_falta: n.fecha_falta || null }))
-    .sort((a, b) => (b.fecha_falta || "").localeCompare(a.fecha_falta || ""));
-}
-
-// A diferencia de la versión anterior, la IA ya no solo redacta un tercio que
-// el oficial eligió a mano: ahora ELLA misma evalúa el descargo (apoyada en
-// las directivas internas cargadas y los antecedentes del investigado) y
-// elige el tercio, marcando el radio correspondiente. El oficial sigue
-// revisando y puede cambiar la selección o el texto antes de guardar — el
-// botón "Guardar y descargar" sigue siendo el paso final manual.
 async function redactarConIA(nota) {
   const btn = $("btnRedactarIA");
-  const statusEl = $("sancionIAStatus");
-  const errEl = $("sancionError");
-  errEl.classList.add("hidden");
-
-  const opciones = opcionesTercio(nota.codigo_infraccion) || [];
-  const infraccion = getInfraccion(nota.codigo_infraccion);
-
+  const panel = $("sancionRevisionIA");
+  const estado = $("sancionIAStatus");
+  const error = $("sancionError");
+  const resumen = $("sSancionDescargo");
+  const analisis = $("sSancionAnalisis");
+  const manual = $("sUsarResumenManual");
+  const desdeCampo = !nota.archivo_descargo_path || manual?.checked;
+  const resumenInicial = resumen.value;
+  panel.replaceChildren();
   btn.disabled = true;
-  btn.classList.add("is-busy");
-  statusEl.classList.remove("hidden");
+  if (manual) manual.disabled = true;
+  estado.classList.remove("hidden");
+  error.classList.add("hidden");
   try {
-    let descargoNotas = $("sSancionDescargo").value.trim();
-    // Un resumen guardado antes de esta corrección pudo quedar con la frase
-    // genérica de relleno: no debe analizarse como si fuera el descargo, se
-    // vuelve a leer el archivo original para obtener sus argumentos reales.
-    if (esResumenDescargoInsuficiente(descargoNotas)) descargoNotas = "";
-    if (!descargoNotas && nota.archivo_descargo_path) {
-      statusEl.textContent = "Leyendo el archivo del descargo ya subido...";
-      descargoNotas = (await extraerTextoDescargo(nota, (msg) => { statusEl.textContent = msg; })).trim();
+    estado.textContent = "Leyendo la fuente del descargo…";
+    const documento = desdeCampo
+      ? { textos: [resumen.value], etiqueta: "Resumen del formulario", pdf: false }
+      : await leerFuenteDescargo(nota, msg => { estado.textContent = msg; }, panel);
+    if (desdeCampo && esResumenDescargoInsuficiente(resumen.value)) {
+      throw new Error("Escriba primero los argumentos que desea revisar en el campo del resumen.");
     }
-    if (!descargoNotas) {
-      throw new Error("No se encontró texto legible del descargo. Revise que el archivo esté cargado o escriba un resumen manual de los puntos relevantes y argumentos de defensa.");
-    }
-
-    statusEl.textContent = "Consultando directivas internas y antecedentes...";
+    const paginas = documento.textos.map((texto, i) => ({ tipo: "D", texto, pagina: i + 1,
+      etiqueta: documento.pdf ? "Descargo, página " + (i + 1) : documento.etiqueta }));
+    const ilegibles = paginas.filter(p => !p.texto?.trim()).map(p => p.pagina);
+    if (ilegibles.length === paginas.length) throw new Error("El archivo carece de texto legible. Revise el original o elija analizar el resumen manual.");
     const directivas = directivasParaIA(state.directivas.length ? state.directivas : await listarDirectivas(supabase));
-    const antecedentes = buscarAntecedentes(nota, state.notas);
+    const contexto = [{ tipo: "H", etiqueta: "Hecho consignado en el expediente", texto: buildCasoConcreto(nota) },
+      ...directivas.map(d => ({ tipo: "N", etiqueta: [d.titulo, d.numero_documento].filter(Boolean).join(" · "), texto: d.contenido }))];
+    const consultas = prepararConsultas(paginas, contexto);
+    const puntos = [];
+    let omitidos = 0;
+    for (const [i, consulta] of consultas.entries()) {
+      if (!btn.isConnected) return;
+      estado.textContent = "Contrastando el descargo con sus fuentes (" + (i + 1) + " de " + consultas.length + ")…";
+      const { data, error: fallo } = await supabase.functions.invoke("redactar-analisis", {
+        body: { modo: "revision_con_fuentes", fuentes: consulta.fuentes.map(({ id, texto }) => ({ id, texto })) }
+      });
+      if (fallo) throw new Error(await mensajeErrorFuncion(fallo));
+      if (data?.error) throw new Error(data.error);
+      const revision = comprobarPuntos(data, consulta.fuentes);
+      puntos.push(...revision.puntos);
+      omitidos += revision.omitidos;
+    }
+    if (!puntos.length) throw new Error("No se encontró ningún argumento con una cita localizable. Revise el escrito original y complete el análisis manualmente.");
+    const urlOriginal = documento.pdf
+      ? (await supabase.storage.from("notas").createSignedUrl(nota.archivo_descargo_path, 900)).data?.signedUrl : null;
+    if (!btn.isConnected) return;
+    const avisos = [];
+    if (documento.parciales?.length) avisos.push("Falló el OCR en estas páginas. Se usó el texto parcial del PDF: " + documento.parciales.join(", ") + ".");
+    if (ilegibles.length) avisos.push("Páginas sin texto legible: " + ilegibles.join(", ") + ".");
+    if (omitidos) avisos.push("Se omitieron " + omitidos + " elementos cuya cita o fuente no pudo comprobarse.");
+    if (consultas.some(c => c.contextoParcial)) avisos.push("El contraste utilizó una selección de fragmentos del expediente y las directivas.");
+    if (desdeCampo) avisos.push("La fuente es el resumen del formulario. Contrástelo con el documento firmado.");
+    panel.innerHTML = `<h4>Revisión del descargo</h4>
+      ${avisos.map(a => `<p class="small">${escapeHtml(a)}</p>`).join("")}
+      ${puntos.map(p => `<article class="detail-card">
+        <p><b>${escapeHtml(p.fuente.etiqueta)}</b> · «${escapeHtml(p.cita)}»</p>
+        <details><summary>Ver cita en contexto</summary><p>${textoConCita(p.fuente.texto, p.cita)}</p></details>
+        ${urlOriginal ? `<a href="${escapeHtml(urlOriginal)}#page=${p.fuente.pagina}" target="_blank" rel="noopener">Abrir página ${p.fuente.pagina} del PDF</a>` : ""}
+        ${p.contraste ? `<p><b>Fuente para contrastar</b> · ${escapeHtml(p.contraste.etiqueta)} · «${escapeHtml(p.contraste.cita)}»</p>` : ""}
+        ${p.pregunta ? `<p><b>Por verificar</b> · ${escapeHtml(p.pregunta)}</p>` : ""}
+      </article>`).join("")}
+      <button type="button" class="btn-secondary">Usar en mi borrador</button>`;
+    estado.textContent = "Compare las citas con el original y revise si falta algún argumento.";
+    const aplicar = panel.querySelector("button");
+    aplicar.addEventListener("click", () => {
+      if (manual && manual.checked !== desdeCampo) {
+        estado.textContent = "La fuente cambió. Vuelva a analizar el descargo."; return;
+      }
+      if (desdeCampo && resumen.value !== resumenInicial) {
+        estado.textContent = "El resumen usado como fuente cambió. Vuelva a analizarlo."; return;
+      }
+      if ((resumen.value.trim() || analisis.value.trim()) && !confirm("¿Reemplazar el resumen y el análisis del formulario con este borrador revisado?")) return;
+      const borrador = textoDelBorrador(puntos);
+      resumen.value = borrador.resumen;
+      analisis.value = borrador.analisis;
+      analisis.dataset.autofilled = "false";
+      guardarBorrador(nota.id, "descargo", resumen.value);
+      guardarBorrador(nota.id, "analisis", analisis.value);
+      $("sSancionAvisoIA").checked = true;
+      aplicar.disabled = true;
+      const redactar = document.createElement("button");
+      redactar.type = "button";
+      redactar.className = "btn-secondary";
+      redactar.textContent = "Proponer redacción completa";
+      redactar.addEventListener("click", () => proponerRedaccionCompleta(nota, puntos, directivas, panel, redactar));
+      panel.append(redactar);
+      estado.textContent = "Borrador incorporado. Complete su valoración antes de guardar la orden.";
+    });
+  } catch (err) {
+    estado.classList.add("hidden");
+    error.textContent = err.message || "No se pudo completar la revisión.";
+    error.classList.remove("hidden");
+  } finally {
+    btn.disabled = false;
+    if (manual) manual.disabled = false;
+  }
+}
 
-    statusEl.textContent = "Analizando el descargo y redactando con IA...";
+async function proponerRedaccionCompleta(nota, puntos, directivas, panel, boton) {
+  const estado = $("sancionIAStatus");
+  const opciones = opcionesTercio(nota.codigo_infraccion) || [];
+  const analisis = $("sSancionAnalisis");
+  const resumen = $("sSancionDescargo");
+  const inicial = { analisis: analisis.value, resumen: resumen.value };
+  boton.disabled = true;
+  estado.textContent = "Preparando una redacción para su revisión…";
+  try {
+    const evidencia = textoDelBorrador(puntos);
     const { data, error } = await supabase.functions.invoke("redactar-analisis", {
       body: {
         investigadoCompleto: nombreInvestigadoVisible(nota, true),
         codigoInfraccion: normalizarCodigoInfraccion(nota.codigo_infraccion),
-        infraccionTexto: infraccion?.infraccion || "",
-        hechoResumen: buildCasoConcreto(nota),
-        tercios: opciones.map((o) => ({ value: o.value, label: o.label, extremo: o.extremo })),
-        descargoNotas,
-        analisisNotas: $("sSancionAnalisis").value.trim(),
-        antecedentes,
-        directivas,
-      },
+        infraccionTexto: getInfraccion(nota.codigo_infraccion)?.infraccion || "",
+        hechoResumen: buildCasoConcreto(nota), tercios: opciones,
+        descargoNotas: [inicial.resumen, evidencia.resumen].filter(Boolean).join("\n\n"), analisisNotas: [evidencia.analisis, inicial.analisis].filter(Boolean).join("\n\n"),
+        directivas, antecedentes: []
+      }
     });
     if (error) throw new Error(await mensajeErrorFuncion(error));
-    if (data?.error) throw new Error(data.error);
-    if (data?.descargo_texto && !esResumenDescargoInsuficiente(data.descargo_texto)) {
-      $("sSancionDescargo").value = data.descargo_texto;
-    } else {
-      throw new Error("No se pudo obtener un resumen útil del descargo. Revise el archivo o redacte un resumen de los puntos relevantes y argumentos de defensa antes de generar la orden.");
-    }
-    if (data?.analisis_texto) {
-      $("sSancionAnalisis").value = data.analisis_texto;
-      $("sSancionAnalisis").dataset.autofilled = "false";
-    }
-    // La IA SUGIERE el tercio pero no lo marca: la sanción la elige el funcionario
-    // (supervisión humana, art. 24.11 y 31.4 del Reglamento de la Ley 31814).
-    const sugerido = data?.tercio_value
-      ? [...document.querySelectorAll('input[name="sancionTercio"]')].find((r) => r.value === data.tercio_value)
-      : null;
-    if (sugerido) {
-      const sug = $("sancionSugerenciaIA");
-      sug.textContent = `Sugerencia de la IA (no seleccionada): ${sugerido.closest("label").textContent.trim()}. Elija usted la sanción; si elige otra, revise que el análisis la sustente.`;
-      sug.classList.remove("hidden");
-    }
-    // Se propone (sin obligar) dejar constancia del apoyo de IA en el documento.
-    if ($("sSancionAvisoIA")) $("sSancionAvisoIA").checked = true;
-    // Guarda lo que redactó la IA como borrador: si se recarga antes de
-    // "Guardar y descargar", no se pierde.
-    guardarBorrador(nota.id, "descargo", $("sSancionDescargo").value);
-    guardarBorrador(nota.id, "analisis", $("sSancionAnalisis").value);
-    statusEl.textContent = "Listo — la IA evaluó el descargo y redactó el texto; el tercio queda a su elección. Revise todo antes de guardar.";
+    if (!panel.isConnected || !boton.isConnected) return;
+    if (!data?.analisis_texto?.trim()) throw new Error("No se obtuvo una propuesta de redacción completa.");
+    const sugerido = opciones.find(opcion => opcion.value === data.tercio_value);
+    const seccion = document.createElement("section");
+    seccion.innerHTML = `<label>Propuesta de redacción completa
+      <textarea rows="7"></textarea></label>
+      ${sugerido ? `<p>Sugerencia para revisión: ${escapeHtml(sugerido.label)}.</p>` : ""}
+      <button type="button" class="btn-secondary">Usar esta redacción en el análisis</button>`;
+    seccion.querySelector("textarea").value = data.analisis_texto;
+    const usar = seccion.querySelector("button");
+    usar.addEventListener("click", () => {
+      if (resumen.value !== inicial.resumen || analisis.value !== inicial.analisis) {
+        estado.textContent = "El borrador cambió. Genere una nueva redacción para incorporar sus cambios.";
+        seccion.remove(); boton.disabled = false; return;
+      }
+      if (!confirm("¿Ha revisado las conclusiones y las citas normativas y desea usar esta redacción?")) return;
+      analisis.value = seccion.querySelector("textarea").value;
+      guardarBorrador(nota.id, "analisis", analisis.value);
+      usar.disabled = true;
+      estado.textContent = "Redacción incorporada. Revise la orden antes de guardarla.";
+    });
+    panel.append(seccion);
+    estado.textContent = "Revise las interpretaciones y las citas normativas de la propuesta antes de incorporarla.";
   } catch (err) {
-    console.error(err);
-    statusEl.classList.add("hidden");
-    errEl.textContent = "No se pudo redactar con IA: " + (err.message || err);
-    errEl.classList.remove("hidden");
-  } finally {
-    btn.disabled = false;
-    btn.classList.remove("is-busy");
+    estado.textContent = "No se pudo preparar la redacción completa. " + (err.message || "");
+    boton.disabled = false;
   }
+}
+
+function textoConCita(texto, cita) {
+  const inicio = texto.indexOf(cita);
+  return escapeHtml(texto.slice(0, inicio)) + "<mark>" + escapeHtml(cita) + "</mark>" +
+    escapeHtml(texto.slice(inicio + cita.length));
 }
 
 // Documentos que el legajo firmado debe contener para darse por completo. El
@@ -3780,7 +3838,7 @@ async function transcribirLoteSeparado(imagenes) {
  * si la marca no vuelve completa se repite ESE lote de a una. Así se conserva
  * el límite exacto entre páginas sin gastar una llamada por hoja.
  */
-async function extraerTextoPorPagina(file, onEstado) {
+async function extraerTextoPorPagina(file, onEstado, revisarCabecera = false, onLecturaParcial) {
   const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
   const textos = new Array(pdf.numPages).fill("");
   const porLeer = [];
@@ -3789,7 +3847,7 @@ async function extraerTextoPorPagina(file, onEstado) {
     const page = await pdf.getPage(i);
     const contenido = await page.getTextContent();
     const delPdf = contenido.items.map((it) => it.str).join(" ");
-    if (delPdf.replace(/\s+/g, "").length >= MINIMO_TEXTO_POR_PAGINA) textos[i - 1] = delPdf;
+    if (delPdf.replace(/\s+/g, "").length >= MINIMO_TEXTO_POR_PAGINA && !(revisarCabecera && textoPdfPareceIncompleto([delPdf], true))) textos[i - 1] = delPdf;
     else porLeer.push({ numero: i, page, respaldo: delPdf });
   }
 
@@ -3825,6 +3883,7 @@ async function extraerTextoPorPagina(file, onEstado) {
         // hubiera y la revisión avisará de lo que no se pudo leer.
         console.error(`No se pudo leer la página ${p.numero} de ${file.name}:`, err);
         textos[p.numero - 1] = p.respaldo;
+        if (p.respaldo.trim()) onLecturaParcial?.(p.numero);
       }
     }
   }
@@ -3858,24 +3917,19 @@ async function extractImagenTextoConOcr(blob, onEstado) {
   return await transcribirPaginasConIA([{ data: base64, mediaType: blob.type || "image/jpeg" }], onEstado);
 }
 
-// Lee automáticamente el archivo de descargo ya subido (PDF o foto), para
-// que el oficial no tenga que volver a escribir lo que ya alegó el
-// investigado por escrito. Si no se puede leer, devuelve "" y el oficial
-// puede escribir sus notas a mano como respaldo.
-async function extraerTextoDescargo(nota, onEstado) {
-  if (!nota.archivo_descargo_path) return "";
+async function leerFuenteDescargo(nota, onEstado, panel) {
   const { data: blob, error } = await supabase.storage.from("notas").download(nota.archivo_descargo_path);
-  if (error || !blob) return "";
-  const nombre = nota.archivo_descargo_nombre || "";
-  const esPdf = /\.pdf$/i.test(nombre) || blob.type === "application/pdf";
-  const esImagen = /\.(jpe?g|png|webp|bmp)$/i.test(nombre) || blob.type.startsWith("image/");
-  try {
-    if (esPdf) return await extractPdfText(blob, onEstado, { verificarSoloCabecera: true });
-    if (esImagen) return await extractImagenTextoConOcr(blob, onEstado);
-  } catch (err) {
-    console.error("No se pudo leer el archivo de descargo:", err);
-  }
-  return "";
+  if (error || !blob) throw new Error("No se pudo abrir el descargo registrado. Vuelva a intentar la lectura o elija el resumen manual.");
+  const nombre = nota.archivo_descargo_nombre || nota.archivo_descargo_path;
+  const pdf = /\.pdf$/i.test(nombre) || blob.type === "application/pdf";
+  const textos = [];
+  await recorrerDocumento(blob,nombre,{pdfjs:pdfjsLib,invocar:invocarCotejo,
+    vigente:() => panel.isConnected, estado:onEstado, revisarTexto:texto => textoPdfPareceIncompleto([texto],true),
+    recibir:async pagina => { textos.push(await confirmarDescargo(pagina,panel)); }
+  });
+  if (!panel.isConnected) throw new Error("El expediente cambió.");
+  return {textos,pdf,etiqueta: /\.(md|markdown|txt)$/i.test(nombre) || blob.type.startsWith("text/")
+    ? "Archivo de texto del descargo" : "Imagen del descargo"};
 }
 
 // Extrae los efectivos mencionados en la nota. Prioriza la lista con viñetas
@@ -4204,37 +4258,59 @@ function parseReincorporacion(text) {
   return result;
 }
 
-async function autocompletarReincorporacion(file) {
-  const statusEl = $("reincAutoStatus");
-  if (!statusEl) return;
-  if (!file || file.type !== "application/pdf") {
-    statusEl.classList.add("hidden");
-    return;
+async function invocarCotejo(data) {
+  const r = await supabase.functions.invoke("extraer-texto-vision", {
+    body:{comparar:true,paginas:[{data,mediaType:"image/jpeg"}]}
+  });
+  if (r.error) throw new Error(await mensajeErrorFuncion(r.error));
+  if (r.data?.error) throw new Error(r.data.error);
+  return r.data;
+}
+
+async function cotejarAdjunto(input, reincorporacion) {
+  const form = input.form;
+  const panel = form.querySelector(reincorporacion ? "#rCotejo" : "#eCotejo");
+  const estado = form.querySelector(reincorporacion ? "#reincAutoStatus" : "#eOcrEstado");
+  const file = input.files[0];
+  const campos = reincorporacion ? ["rFecha"] : ["eOficio","eHt","eDias"];
+  panel.replaceChildren();
+  for (const id of [...campos, ...(reincorporacion ? ["rNumero","rHora"] : [])]) {
+    const el = form.querySelector("#" + id);
+    if (el.dataset.lecturaArchivo === el.value) el.value = "";
+    delete el.dataset.lecturaArchivo;
   }
-  statusEl.textContent = "Leyendo PDF...";
-  statusEl.classList.remove("hidden");
+  estado.textContent = "";
+  if (!file) return;
+  const vigente = () => input.isConnected && input.files[0] === file;
+  const avisar = msg => { if (vigente()) estado.textContent = msg; };
+  estado.classList.remove("hidden");
+  avisar("Leyendo documento…");
+  let encontrados = 0;
+  const textos = [];
   try {
-    const text = await extractPdfText(file, (msg) => { statusEl.textContent = msg; });
-    let data;
-    try {
-      statusEl.textContent = "Interpretando el contenido con IA...";
-      data = normalizarResultadoReincorporacionIA(await extraerDatosNotaIA(text, "reincorporacion"));
-    } catch (iaErr) {
-      console.error("Extracción por IA falló, se usa el reconocimiento por patrones como respaldo:", iaErr);
-      data = parseReincorporacion(text);
+    await recorrerDocumento(file,file.name,{pdfjs:pdfjsLib,invocar:invocarCotejo,vigente,estado:avisar,
+      revisarTexto: texto => textoPdfPareceIncompleto([texto]),
+      recibir: pagina => {
+        encontrados += mostrarCampos(pagina, campos, panel, form);
+        if (reincorporacion) textos.push(pagina.digital ?? (pagina.glm || pagina.optico));
+      }
+    });
+    if (!vigente()) return;
+    if (reincorporacion && textos.some(Boolean)) {
+      const texto = textos.join("\n\n");
+      let datos;
+      try { datos = normalizarResultadoReincorporacionIA(await extraerDatosNotaIA(texto, "reincorporacion")); }
+      catch { datos = parseReincorporacion(texto); }
+      if (!vigente()) return;
+      for (const [id, valor] of [["rNumero",datos.numero_nota_reincorporacion],["rHora",datos.hora_reincorporacion]]) {
+        const el = form.querySelector("#"+id);
+        if (valor && !el.value) { el.value = valor; el.dataset.lecturaArchivo = el.value; }
+      }
     }
-    if (data.fecha_reincorporacion && !$("rFecha").value) $("rFecha").value = data.fecha_reincorporacion;
-    if (data.numero_nota_reincorporacion && !$("rNumero").value) $("rNumero").value = data.numero_nota_reincorporacion;
-    if (data.hora_reincorporacion && !$("rHora").value) $("rHora").value = data.hora_reincorporacion;
-    if (data.fecha_reincorporacion) {
-      statusEl.textContent = `Datos autocompletados desde el PDF (reincorporación: ${formatDate(data.fecha_reincorporacion)}${data.hora_reincorporacion ? " a las " + data.hora_reincorporacion + " horas" : ""}). Verifique antes de guardar.`;
-    } else {
-      statusEl.textContent = "No se pudo detectar la fecha de reincorporación en el PDF. Complete el formulario manualmente.";
-    }
+    avisar(encontrados ? "Revise los valores de cada página y elija cuáles usar antes de guardar."
+      : "Sin valores identificados para estos campos. Puede completarlos manualmente.");
   } catch (err) {
-    console.error(err);
-    reportarError("aviso", { mensaje: err?.message || String(err) });
-    statusEl.textContent = `No se pudo leer el PDF automáticamente${err?.message ? `: ${err.message}` : "."} Complete el formulario manualmente si hace falta.`;
+    avisar("Lectura incompleta. " + (err.message || "") + " Puede completar el formulario manualmente.");
   }
 }
 
@@ -5537,6 +5613,22 @@ function usaInicioSencillo() {
 }
 
 $("btnInicioSencillo").addEventListener("click", () => showView("view-inicio"));
+async function abrirAsistente(modo) {
+  const vista = document.querySelector(".view:not(.hidden)")?.id || "view-dashboard";
+  const usuario = state.session?.user?.id;
+  try {
+    const { abrirPanelAgente } = await import("./lib/panelAgentes.js");
+    if (!usuario || usuario !== state.session?.user?.id) return;
+    const id = state.currentNotaId;
+    abrirPanelAgente({db:supabase, state, modo, id, showView,
+      volver:() => vista === "view-nota-detail" ? openNotaDetail(id) : showView(vista),
+      abrirNota:async notaId => { await openNotaDetail(notaId); state.origenDetalle = "view-agentes"; }});
+  } catch { toast("No se pudo abrir el asistente. Actualice la página y vuelva a intentar."); }
+}
+$("inicioJornada")?.addEventListener("click", () => abrirAsistente("jornada"));
+$("btnJornada")?.addEventListener("click", () => abrirAsistente("jornada"));
+$("btnParteMensual")?.addEventListener("click", () => abrirAsistente("parte"));
+$("btnRevisarExpediente")?.addEventListener("click", () => abrirAsistente("expediente"));
 $("inicioPendientes").addEventListener("click", () => { showView("view-dashboard"); loadNotas(); });
 $("inicioSubir").addEventListener("click", () => abrirSubirExpediente());
 $("subirBuscar").addEventListener("input", () => renderSubirExpediente());
