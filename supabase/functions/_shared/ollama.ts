@@ -1,15 +1,42 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 type Bloque = { type: string; source?: { data: string }; text?: string };
 type Entrada = {
   system: string; messages: {role: string; content: string | Bloque[]}[];
   max_tokens: number; contexto?: number; tools?: {name:string; input_schema?:object}[];
   output_config?: {format:{schema:object}};
 };
+// PC de la oficina (tarjeta de 4 GB): con 8192 de contexto qwen3:4b cabe entero en la
+// tarjeta (3 veces más rápido), pero Ollama por cautela deja parte en el procesador si
+// no se le pide num_gpu. Un contexto que cambia entre consultas obliga a recargar el modelo.
+const CONTEXTO_LOCAL = Number(Deno.env.get("IA_LOCAL_CONTEXTO") || 8192);
+const CONTEXTO_LOCAL_MAXIMO = 16384;
+const SALIDA_LOCAL_MAXIMA = 4000;
+const limiteLocal = new AsyncLocalStorage<AbortSignal>();
+
+// La pasarela de la PC corta el trabajo de Ollama cuando ia-oficina ya dejó de esperar.
+export function conLimiteLocal<T>(signal: AbortSignal, accion: () => Promise<T>): Promise<T> {
+  return limiteLocal.run(signal, accion);
+}
+
 async function generar(model: string, messages: object[], maxTokens: number, formato?: object, contexto?: number) {
+  const opciones: Record<string, unknown> = {temperature:0, num_predict:maxTokens};
+  let format: object | string | undefined = formato;
+  if (model.startsWith("qwen")) {
+    const salida = Math.min(maxTokens, SALIDA_LOCAL_MAXIMA);
+    const necesario = Math.max(contexto ?? 0, Math.ceil(JSON.stringify(messages).length / 3) + salida + 256);
+    if (necesario > CONTEXTO_LOCAL_MAXIMO) throw new Error("Texto demasiado largo para el modelo local.");
+    const grande = necesario > CONTEXTO_LOCAL;
+    Object.assign(opciones, {num_predict:salida, num_ctx:grande ? CONTEXTO_LOCAL_MAXIMO : CONTEXTO_LOCAL, ...(grande ? {} : {num_gpu:99})});
+    // Todas las funciones esperan JSON; sin pedirlo, qwen llegó a escribir 3 minutos sin cerrar el objeto.
+    format ??= "json";
+  }
+  const corte = limiteLocal.getStore();
   const respuesta = await fetch("http://127.0.0.1:11434/api/chat", {
     method:"POST", redirect:"error", headers:{"Content-Type":"application/json"},
-    signal:AbortSignal.timeout(240000),
-    body:JSON.stringify({model, messages, stream:false, ...(model.startsWith("qwen") ? {think:false} : {}),
-      ...(formato ? {format:formato} : {}), options:{temperature:0,num_predict:maxTokens,...(contexto ? {num_ctx:contexto} : {})}})
+    signal:AbortSignal.any([AbortSignal.timeout(240000), ...(corte ? [corte] : [])]),
+    body:JSON.stringify({model, messages, stream:false, keep_alive:"30m", ...(model.startsWith("qwen") ? {think:false} : {}),
+      ...(format ? {format} : {}), options:opciones})
   });
   if (!respuesta.ok) throw new Error("Ollama no pudo procesar el documento.");
   return await respuesta.json();
@@ -25,7 +52,7 @@ export async function inferirLocal(entrada: Entrada, visionJson: boolean = false
     for (const bloque of contenido.filter(b => b.type === "image")) {
       if (!bloque.source?.data) throw new Error("Imagen sin contenido.");
       const pagina = await generar("glm-ocr", [{role:"user",content:"Text Recognition:",images:[bloque.source.data]}],4096);
-      if (pagina.done_reason === "length") throw new Error("OCR incompleto. Divida la pÃ¡gina.");
+      if (pagina.done_reason === "length") throw new Error("OCR incompleto. Divida la página.");
       paginas.push(pagina.message.content.trim());
     }
     const separador = entrada.system.includes("<<<FIN DE PAGINA>>>") ? "\n<<<FIN DE PAGINA>>>\n" : "\n\n";
@@ -36,7 +63,7 @@ export async function inferirLocal(entrada: Entrada, visionJson: boolean = false
     texto = respuesta.message.content.trim();
     limitado = respuesta.done_reason === "length";
   }
-  if (!texto) throw new Error("El modelo local devolviÃ³ una respuesta vacÃ­a.");
+  if (!texto) throw new Error("El modelo local devolvió una respuesta vacía.");
   if (herramienta && limitado) throw new Error("Respuesta estructurada incompleta.");
   const bloque = herramienta ? {type:"tool_use",name:herramienta.name,input:JSON.parse(texto)} : {type:"text",text:texto};
   return Response.json({content:[bloque],stop_reason:limitado ? "max_tokens" : "end_turn"});

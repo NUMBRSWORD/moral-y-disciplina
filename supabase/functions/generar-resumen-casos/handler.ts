@@ -117,6 +117,8 @@ export const atender = async (req: Request) => {
 
     const resp = await inferir({
         max_tokens: 4000,
+        // Sin la forma exacta, el modelo local devolvía la lista de casos en vez del resumen.
+        output_config: { format: { schema: { type: "object", properties: { resumen: { type: "string" } }, required: ["resumen"], additionalProperties: false } } },
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: buildUserMessage(input) }],
       });

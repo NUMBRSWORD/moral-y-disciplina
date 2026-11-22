@@ -13,11 +13,13 @@ export function esperaPara(nombre: string): number {
 
 // true = la respuesta de la PC no sirve y hay que usar Claude. Se acepta lo que
 // devuelve la pasarela: JSON con éxito, o un rechazo propio (sesión, cuota,
-// datos inválidos). Un error del túnel, una página HTML, un 5xx o un tiempo
-// agotado van al respaldo.
+// datos inválidos). Un error del túnel, una página HTML, un 5xx, un tiempo
+// agotado o un 422 (el modelo local no pudo con el documento) van al respaldo.
 export function decidirRespaldo(status: number, contentType: string | null, texto: string): boolean {
-  if (status >= 500 || status === 408 || status === 404) return true;
+  if (status >= 500 || status === 408 || status === 404 || status === 422) return true;
   if (!(contentType || "").toLowerCase().includes("application/json")) return true;
-  try { JSON.parse(texto); } catch { return true; }
-  return false;
+  let datos;
+  try { datos = JSON.parse(texto); } catch { return true; }
+  // Doble lectura en la que el lector de la PC (glm-ocr) no leyó nada: mejor que lea Claude.
+  return datos?.doble === true && datos.motorGlm === false;
 }

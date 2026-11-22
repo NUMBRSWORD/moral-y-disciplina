@@ -1,8 +1,8 @@
 {
-  "versionCode": 13,
-  "versionName": "1.8.1",
+  "versionCode": 14,
+  "versionName": "1.8.2",
   "url": "https://numbrsword.github.io/moral-y-disciplina/descargar.html",
-  "apk": "faltos-1.8.1.apk",
-  "sha256": "b8dd720b75778a0ff4d7c1c1ecb5ddca1ebf110e6e02cd99f0ad2cef365cd9c2",
-  "notas": "Panel de entregas, revisión de expedientes y parte mensual."
+  "apk": "faltos-1.8.2.apk",
+  "sha256": "06b6dfd56063f184ede018b1058e9a2ef4083351f4fc58816d37503220ffa5e8",
+  "notas": "Vuelve el inicio ordenado: tarjetas de acceso, Subir expediente y Recepcionar para el administrador, y el panel en tarjetas."
 }
