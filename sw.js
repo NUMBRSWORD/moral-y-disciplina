@@ -3,7 +3,7 @@
 //     conexión intermitente (los datos siguen viniendo de Supabase en línea).
 //  2. Muestra las notificaciones push cuando estén configuradas (VAPID +
 //     Edge Function). Sin push configurado, este bloque simplemente no se usa.
-const CACHE = "moral-y-disciplina-v68-asistentes-oficina";
+const CACHE = "moral-y-disciplina-v69-respaldo-oficina";
 const APP_SHELL = [
   "./",
   "./index.html",

@@ -1,56 +1,6 @@
 import { responderAgente } from "./agentes.ts";
 import { inferir } from "../_shared/ollama.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
-
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
-const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
-
-// Acceso: solo personas APROBADAS con sesión iniciada y con un tope diario de uso.
-// `verify_jwt` de Supabase solo comprueba que el token sea un JWT válido, y la anon
-// key (pública: está en config.js) lo es; auth.getUser() rechaza ese token anónimo
-// pero aceptaría a cualquier persona con una cuenta (p. ej. de Google). Por eso
-// autorizar_uso_ia() (base de datos) exige además un usuario aprobado y cuenta las
-// llamadas del día. Este bloque se repite igual en cada función de IA porque cada
-// una se despliega por separado.
-const ORIGENES_PERMITIDOS = ["https://numbrsword.github.io"];
-const LIMITE_DIARIO = 300;
-const MAX_BYTES_ENTRADA = 25 * 1024 * 1024;
-
-// Restringir el origen es solo higiene: la protección real es la sesión.
-function corsHeaders(req: Request) {
-  const origen = req.headers.get("origin") || "";
-  const permitido = ORIGENES_PERMITIDOS.includes(origen) || /^http:\/\/localhost(:\d+)?$/.test(origen);
-  return {
-    "Access-Control-Allow-Origin": permitido ? origen : ORIGENES_PERMITIDOS[0],
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-    "Vary": "Origin",
-  };
-}
-
-// null = puede continuar; si no, la respuesta con la que se rechaza.
-async function autorizar(req: Request, cors: Record<string, string>): Promise<Response | null> {
-  const rechazo = (status: number, error: string) =>
-    new Response(JSON.stringify({ error }), { status, headers: { ...cors, "Content-Type": "application/json" } });
-  if (Number(req.headers.get("content-length") || 0) > MAX_BYTES_ENTRADA) return rechazo(413, "El archivo es demasiado grande.");
-  const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return rechazo(401, "Debe iniciar sesión.");
-  const cliente = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { persistSession: false },
-  });
-  const { data, error } = await cliente.auth.getUser(token);
-  if (error || !data.user) return rechazo(401, "Debe iniciar sesión.");
-  const { data: estado, error: errRpc } = await cliente.rpc("autorizar_uso_ia", { p_limite: LIMITE_DIARIO });
-  if (errRpc) {
-    console.error("autorizar_uso_ia:", errRpc.message);
-    return rechazo(503, "No se pudo verificar su acceso. Intente de nuevo.");
-  }
-  if (estado === "no_aprobado") return rechazo(403, "Su cuenta no está autorizada para usar la IA.");
-  if (estado === "cuota") return rechazo(429, "Alcanzó el límite diario de uso de la IA. Intente mañana.");
-  if (estado !== "ok") return rechazo(403, "Acceso no verificado.");
-  return null;
-}
-
+import { autorizar, corsHeaders, clienteUsuario } from "../_shared/acceso.ts";
 
 const SYSTEM_PROMPT = `Eres un asistente que redacta un resumen ejecutivo breve para un oficial de la Policía Nacional del Perú (PNP) sobre el estado de sus casos disciplinarios (infracciones Leves, Ley N° 30714).
 
@@ -101,15 +51,11 @@ export const atender = async (req: Request) => {
   const rechazo = await autorizar(req, cors);
   if (rechazo) return rechazo;
 
-
   try {
     const input = await req.json();
     if (input?.modo === "asistente_oficina") {
       return await responderAgente(input, cors, async () => {
-        const cliente = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-          global: { headers: { Authorization: req.headers.get("authorization") || "" } },
-          auth: { persistSession: false }
-        });
+        const cliente = clienteUsuario(req);
         const {data, error} = await cliente.rpc("es_admin");
         return !error && data === true;
       });
