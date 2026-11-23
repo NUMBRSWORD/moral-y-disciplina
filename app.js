@@ -16,7 +16,7 @@ import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva
 import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocumento, actualizarContenidoDocumentoInstitucional } from "./lib/cumplimiento.js";
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible, claveNombre } from "./lib/utils.js";
 import { clasificarNotaEntrante, entradasSeguimiento, codigoSugeridoPorSeguimiento } from "./lib/seguimiento.js";
-import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo } from "./lib/nombresNota.js";
+import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo, elegirNotaPendiente } from "./lib/nombresNota.js";
 import { PERIODO_ACUMULADO, agruparPersonas, buscarPersonas, formatearDuracionHoras, resumenDelMes, resumenPersona } from "./lib/personas.js";
 import { restaurarNombres, seudonimizarInvestigados } from "./lib/privacidad.js";
 import { fechaLima, hoyLima, horaLima } from "./lib/fechas.js";
@@ -4536,27 +4536,9 @@ function buscarNotaPorSeguimiento(numeroFaltaRef, candidate) {
   return buscarNotaPendiente(numeroFaltaRef, candidate);
 }
 
+// La regla vive en lib/nombresNota.js (elegirNotaPendiente), con sus pruebas.
 function buscarNotaPendiente(numeroFaltaRef, candidate) {
-  const pendientes = state.notas.filter((n) => !n.fecha_reincorporacion);
-  let pool = pendientes;
-
-  if (numeroFaltaRef) {
-    const porNumero = pendientes.filter((n) => n.numero_nota_falta === numeroFaltaRef);
-    if (porNumero.length === 1) return porNumero[0];
-    pool = porNumero.length > 1 ? porNumero : (candidate ? pendientes : []);
-  }
-
-  if (!candidate) return pool.length === 1 ? pool[0] : null;
-
-  const objetivo = normalizarNombre(candidate.apellidos, candidate.nombres);
-  const exactos = pool.filter((n) => normalizarNombre(n.apellidos, n.nombres) === objetivo);
-  if (exactos.length === 1) return exactos[0];
-
-  const apellidosCand = claveNombre(candidate.apellidos);
-  const porApellidos = pool.filter((n) => claveNombre(n.apellidos) === apellidosCand);
-  if (porApellidos.length === 1) return porApellidos[0];
-
-  return null;
+  return elegirNotaPendiente(state.notas, numeroFaltaRef, candidate);
 }
 
 function renderReincLoteList() {
@@ -4654,7 +4636,9 @@ $("rlArchivo").addEventListener("change", async (e) => {
       };
       if (candidates.length) {
         for (const candidate of candidates) {
-          const nota = buscarNotaPendiente(doc.numero_nota_falta_ref, candidate);
+          let nota = buscarNotaPendiente(doc.numero_nota_falta_ref, candidate);
+          // Dos filas del lote nunca cierran la misma falta (p. ej. el mismo PDF subido dos veces).
+          if (nota && filas.some((f) => f.nota?.id === nota.id)) nota = null;
           // Sin falta pendiente: ¿es que ya se le registró la reincorporación?
           const yaReincorporada = nota ? null : buscarReincorporada(state.notas, candidate, { numeroNota: base.numero_nota_reincorporacion, fecha: base.fecha_reincorporacion });
           filas.push({ ...base, candidate, nota, yaReincorporada, matchPor: nota && doc.numero_nota_falta_ref && nota.numero_nota_falta === doc.numero_nota_falta_ref ? "numero" : "nombre" });
