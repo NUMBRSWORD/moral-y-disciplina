@@ -16,7 +16,7 @@ import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva
 import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocumento, actualizarContenidoDocumentoInstitucional } from "./lib/cumplimiento.js";
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible, claveNombre } from "./lib/utils.js";
 import { clasificarNotaEntrante, entradasSeguimiento, codigoSugeridoPorSeguimiento } from "./lib/seguimiento.js";
-import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo, elegirNotaPendiente } from "./lib/nombresNota.js";
+import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo, elegirNotaPendiente, oficialQuePasoLista } from "./lib/nombresNota.js";
 import { PERIODO_ACUMULADO, agruparPersonas, buscarPersonas, formatearDuracionHoras, resumenDelMes, resumenPersona } from "./lib/personas.js";
 import { restaurarNombres, seudonimizarInvestigados } from "./lib/privacidad.js";
 import { fechaLima, hoyLima, horaLima } from "./lib/fechas.js";
@@ -4187,6 +4187,8 @@ function parseNotaInformativa(text) {
     }
   }
 
+  const oficialLista = oficialQuePasoLista(text);
+  if (oficialLista) result.oficial_constato = oficialLista;
   const oficialCorr = oficialCorregidoDesdeTexto(text);
   if (oficialCorr) result.oficial_constato = oficialCorr;
 
@@ -4334,6 +4336,10 @@ async function autocompletarDesdeArchivo(file) {
       console.error("Extracción por IA falló, se usa el reconocimiento por patrones como respaldo:", iaErr);
       data = parseNotaInformativa(text);
     }
+    // Quien pasó lista ("da cuenta que el ALFZ. PNP ..., al pasar lista") manda
+    // sobre la IA, que a veces toma al Comisario que da cuenta.
+    const oficialLista = oficialQuePasoLista(text);
+    if (oficialLista) data.oficial_constato = oficialLista;
     // Si es una Nota de "Corrección", el oficial que constató del párrafo
     // original está equivocado: la corrección es autoritativa y pisa lo que
     // haya extraído la IA o el parser (y lo que ya estuviera en el campo).
@@ -4812,6 +4818,9 @@ $("cfArchivo")?.addEventListener("change", async (e) => {
           : extractPersonCandidates(norm).map((c) => ({ grado: c.grado, ...splitApellidosNombres(c.nombreCompleto) }));
       }
       const numeroRef = extraerNumeroReferencia(text);
+      // Quien pasó revista manda sobre la IA (que a veces toma al Comisario).
+      const oficialLista = oficialQuePasoLista(text);
+      if (oficialLista) doc.oficial_constato = oficialLista;
       const base = {
         file,
         fecha: doc.fecha_falta || "",
@@ -5052,8 +5061,11 @@ $("flArchivo").addEventListener("change", async (e) => {
           ? doc.candidates
           : extractPersonCandidates(norm).map((c) => ({ grado: c.grado, ...splitApellidosNombres(c.nombreCompleto) }));
       }
-      // Nota de "Corrección": el oficial correcto es el que indica el cuerpo,
-      // no el del párrafo original que copia la nota corregida.
+      // Quien pasó lista manda sobre la IA (que a veces toma al Comisario que
+      // "da cuenta"); y en una Nota de "Corrección", el oficial que indica el
+      // cuerpo manda sobre el del párrafo original que copia.
+      const oficialLista = oficialQuePasoLista(text);
+      if (oficialLista) doc.oficial_constato = oficialLista;
       const oficialCorr = oficialCorregidoDesdeTexto(text);
       if (oficialCorr) doc.oficial_constato = oficialCorr;
       const base = {
