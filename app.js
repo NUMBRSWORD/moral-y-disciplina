@@ -16,7 +16,7 @@ import { listarDirectivas, directivasParaIA, guardarDirectiva, eliminarDirectiva
 import { listarDocumentosInstitucionales, listarFirmasDocumentos, firmarDocumento, actualizarContenidoDocumentoInstitucional } from "./lib/cumplimiento.js";
 import { horasAusente, sugerirCodigoInfraccion, nombreCompletoVisible, limpiarNombreVisible, claveNombre } from "./lib/utils.js";
 import { clasificarNotaEntrante, entradasSeguimiento, codigoSugeridoPorSeguimiento } from "./lib/seguimiento.js";
-import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo, elegirNotaPendiente, oficialQuePasoLista } from "./lib/nombresNota.js";
+import { bloqueReincorporados, personalPNPEnTexto, completarCandidatos, buscarReincorporada, mismoEfectivo, elegirNotaPendiente, oficialQuePasoLista, sinElOficial } from "./lib/nombresNota.js";
 import { PERIODO_ACUMULADO, agruparPersonas, buscarPersonas, formatearDuracionHoras, resumenDelMes, resumenPersona } from "./lib/personas.js";
 import { restaurarNombres, seudonimizarInvestigados } from "./lib/privacidad.js";
 import { fechaLima, hoyLima, horaLima } from "./lib/fechas.js";
@@ -4542,6 +4542,17 @@ function buscarNotaPorSeguimiento(numeroFaltaRef, candidate) {
   return buscarNotaPendiente(numeroFaltaRef, candidate);
 }
 
+// Personas de una nota de falta sin el oficial que pasó lista (ver
+// sinElOficial en lib/nombresNota.js). Si no queda nadie, una fila vacía
+// para que el usuario la complete antes de guardar.
+function listaSinElOficial(candidates, doc, norm) {
+  const lista = (candidates && candidates.length)
+    ? candidates
+    : [{ grado: doc.grado || "", apellidos: doc.apellidos || "", nombres: doc.nombres || "" }];
+  const quedan = sinElOficial(lista, doc.oficial_constato, norm);
+  return quedan.length ? quedan : [{ grado: "", apellidos: "", nombres: "" }];
+}
+
 // La regla vive en lib/nombresNota.js (elegirNotaPendiente), con sus pruebas.
 function buscarNotaPendiente(numeroFaltaRef, candidate) {
   return elegirNotaPendiente(state.notas, numeroFaltaRef, candidate);
@@ -4827,9 +4838,7 @@ $("cfArchivo")?.addEventListener("change", async (e) => {
         numero_nota: doc.numero_nota_falta || "",
         oficial_constato: doc.oficial_constato || "",
       };
-      const lista = (candidates && candidates.length)
-        ? candidates
-        : [{ grado: doc.grado || "", apellidos: doc.apellidos || "", nombres: doc.nombres || "" }];
+      const lista = listaSinElOficial(candidates, doc, norm);
       for (const c of lista) {
         const candidate = { grado: (c.grado || "").trim(), apellidos: (c.apellidos || "").trim(), nombres: (c.nombres || "").trim() };
         const nota = buscarNotaPorSeguimiento(numeroRef, candidate.apellidos ? candidate : null);
@@ -5083,9 +5092,7 @@ $("flArchivo").addEventListener("change", async (e) => {
         // aunque el REF. no se haya podido leer.
         esContinua: /continú[a-z]*\s+falt/i.test(norm),
       };
-      const lista = (candidates && candidates.length)
-        ? candidates
-        : [{ grado: doc.grado || "", apellidos: doc.apellidos || "", nombres: doc.nombres || "" }];
+      const lista = listaSinElOficial(candidates, doc, norm);
       for (const c of lista) {
         filas.push({
           ...base,
